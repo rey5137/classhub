@@ -42,12 +42,17 @@ export const siteDefaults = {
 - **R-UI-05** **Tokens** (`src/lib/themes/tokens.css`): `--color-bg`, `--color-surface`, `--color-surface-2`,
   `--color-text`, `--color-muted`, `--color-accent`, `--color-accent-contrast`, `--color-border`, `--color-danger`,
   `--color-warning`, `--color-success`, `--color-focus`, `--radius-card`, `--radius-control`, `--space-unit`,
-  `--content-max`, `--font-body`, `--font-heading`, `--shadow-card`, `--density`. Components use tokens only: no
+  `--content-max`, `--font-body`, `--font-heading`, `--shadow-card`, `--density`, `--color-divider` (decorative
+  rules, not a control boundary), `--color-mark` (the brand mark and "new" marker only, never body text) and the type
+  scale `--text-display|title|heading|body|small|eyebrow` (`docs/design/01-DIRECTION.md` §3). Components use tokens only: no
   raw colours or font stacks outside theme files (lint-checked).
-- **R-UI-06** **Shipped themes:** `minimal` (clean, neutral), `yearbook` (warm, nostalgic, paper tones),
-  `night` (dark by design). `minimal` and `yearbook` define light and dark; `night` is dark only and ignores display
+- **R-UI-06** **Shipped themes:** `yearbook` (the default: school-uniform pale blue, phượng red mark,
+  Playfair Display titles), `minimal` (neutral, one face), `night` (summer night, dark by design); token values in
+  `docs/design/01-DIRECTION.md` §4. `minimal` and `yearbook` define light and dark; `night` is dark only and ignores display
   mode. Each pair meets WCAG AA for text and UI components.
-- **R-UI-07** Fonts are system stacks or files bundled in the repo; no third-party font requests (R-AUTH-24).
+- **R-UI-07** Fonts are system stacks or files bundled in the repo; no third-party font requests (R-AUTH-24). The
+  shipped faces are Be Vietnam Pro and Playfair Display (SIL OFL, woff2 with the Vietnamese subset); body text is
+  never below 16 px.
 - **R-UI-08** The active theme and mode are applied server-side as `data-theme` and `data-mode` on `<html>`, so the
   first paint is themed with no flash.
 
