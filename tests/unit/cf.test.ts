@@ -626,6 +626,111 @@ describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
     }
   }
 
+  const databaseId = '11111111-1111-4111-8111-111111111111';
+  const d1Config = () =>
+    JSON.stringify({
+      account_id: account,
+      d1_databases: [{ binding: 'DB', database_id: databaseId }],
+    });
+
+  it('AC-MEM-09 sends a single D1 raw statement on stdin through the binding and account guards', async () => {
+    writeValidEnv();
+    const input = JSON.stringify({
+      sql: 'UPDATE storage_usage SET committed_bytes = ?',
+      params: [42],
+    });
+    const result = await runApi(['d1-query', databaseId], { input, config: d1Config() });
+    expect(result.status).toBe(0);
+    expect(api.bodies).toEqual([input]);
+    expect(api.requests).toEqual([
+      `POST /client/v4/accounts/${account}/d1/database/${databaseId}/raw token`,
+    ]);
+    expect(result.stdout + result.stderr).not.toContain(token);
+    const mismatch = await runApi(['d1-query', databaseId], {
+      input,
+      config: JSON.stringify({ account_id: 'b'.repeat(32) }),
+    });
+    expect(mismatch.status).not.toBe(0);
+    expect(api.requests).toHaveLength(1);
+  });
+
+  it.each([
+    'SELECT "upload_reservations"."id" FROM "upload_reservations" WHERE "upload_reservations"."state" = ? ORDER BY "upload_reservations"."id" LIMIT ?',
+    "UPDATE storage_usage SET reserved_bytes = (SELECT coalesce(sum(reserved_bytes), 0) FROM upload_reservations WHERE state = 'open') WHERE singleton_id = ?",
+    'DELETE FROM media WHERE media.id = ?',
+    'INSERT INTO schema_meta (key, value) VALUES (?, ?)',
+  ])('AC-MEM-09 allows parameterized maintenance SQL: %s', async (sql) => {
+    writeValidEnv();
+    expect(
+      (
+        await runApi(['d1-query', databaseId], {
+          config: d1Config(),
+          input: JSON.stringify({ sql, params: [1, 2] }),
+        })
+      ).status,
+    ).toBe(0);
+  });
+
+  it.each([
+    'DROP TABLE media',
+    'ALTER TABLE media ADD value TEXT',
+    'CREATE TABLE media (id TEXT)',
+    'SELECT * FROM users',
+    'UPDATE "users" SET name = ?',
+    'DELETE FROM users',
+    'SELECT * FROM media, users',
+    "SELECT * FROM media JOIN 'users'",
+    'SELECT * FROM media WHERE EXISTS (SELECT 1 FROM"users")',
+    "SELECT * FROM media WHERE EXISTS (SELECT 1 FROM'users')",
+    'SELECT * FROM media NOT INDEXED, users',
+    'SELECT * FROM media m, users u',
+    'SELECT * FROM media; DELETE FROM users',
+    'SELECT * FROM media /* comment */',
+    'SELECT * FROM main.media',
+    'WITH x AS (SELECT * FROM users) SELECT * FROM x',
+  ])('AC-MEM-09 refuses SQL outside the housekeeping subset: %s', async (sql) => {
+    writeValidEnv();
+    const result = await runApi(['d1-query', databaseId], {
+      config: d1Config(),
+      input: JSON.stringify({ sql, params: [] }),
+    });
+    expect(result.status).not.toBe(0);
+    expect(api.requests).toEqual([]);
+  });
+
+  it('AC-MEM-09 refuses another database, generic POST and malformed input', async () => {
+    writeValidEnv();
+    for (const [args, input] of [
+      [
+        ['d1-query', '22222222-2222-4222-8222-222222222222'],
+        '{"sql":"SELECT * FROM media","params":[]}',
+      ],
+      [['api', '--post', `/d1/database/${databaseId}/query`], '{}'],
+      [['d1-query', databaseId], '{'],
+      [['d1-query', databaseId], '[{"sql":"SELECT * FROM media","params":[]}]'],
+      [['d1-query', databaseId], '{"sql":"SELECT * FROM media","params":[],"batch":[]}'],
+    ] as const) {
+      expect((await runApi([...args], { config: d1Config(), input })).status).not.toBe(0);
+    }
+    expect(api.requests).toEqual([]);
+  });
+
+  it('AC-MEM-09 the fake D1 API rejects unsupported body shapes on query and raw', async () => {
+    for (const endpoint of ['query', 'raw']) {
+      for (const body of [[], { batch: [] }, { sql: 'SELECT 1' }, { sql: 42, params: [] }]) {
+        const response = await fetch(
+          `${api.base}/client/v4/accounts/${account}/d1/database/${databaseId}/${endpoint}`,
+          {
+            method: 'POST',
+            headers: { authorization: `Bearer ${token}` },
+            body: JSON.stringify(body),
+          },
+        );
+        expect(response.status).toBe(400);
+      }
+    }
+  });
+
   it('AC-PLAT-07 GETs under the guarded account with the .env.cloudflare token in a header only', async () => {
     writeValidEnv();
     const result = await runApi(['api', '/r2/buckets/b1']);

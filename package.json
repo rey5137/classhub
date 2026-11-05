@@ -31,6 +31,7 @@
     "invite": "node scripts/invite.mjs",
     "smoke": "node scripts/smoke.mjs",
     "db:seed:demo": "tsx scripts/seed-demo.ts",
+    "housekeeping": "node --import tsx scripts/housekeeping.mjs",
     "verify": "npm run lint && npm run check && npm run test && npm run test:migrations && npm run test:security && npm run build && npm run build:worker-check",
     "deploy": "node scripts/cf.mjs --check-deploy && node scripts/deploy-check.mjs && npm run build && npm run build:worker-check && node scripts/cf.mjs deploy"
   },

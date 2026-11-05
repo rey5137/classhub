@@ -4,6 +4,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { Sha256 } from '../../sha256';
 import {
+  assertMaxBytes,
   normalizeValidator,
   ObjectTooLargeError,
   type ObjectStorage,
@@ -36,6 +37,7 @@ export class FsObjectStorage implements ObjectStorage {
     body: ReadableStream<Uint8Array>,
     opts: { contentType: string; maxBytes: number },
   ): Promise<{ size: number; sha256: string }> {
+    assertMaxBytes(opts.maxBytes);
     const objectPath = this.pathFor(key);
     const metaPath = this.metaPathFor(key);
     const tempPath = join(this.root, TMP_DIR, `${crypto.randomUUID()}.part`);

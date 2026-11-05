@@ -10,6 +10,13 @@ export class ObjectTooLargeError extends Error {
   }
 }
 
+/** A cap that isn't a non-negative integer would make the streaming check never fire. */
+export function assertMaxBytes(maxBytes: number): void {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new RangeError(`maxBytes must be a non-negative integer (${maxBytes})`);
+  }
+}
+
 export interface ObjectStorage {
   put(
     key: string,
@@ -20,7 +27,8 @@ export interface ObjectStorage {
   /**
    * `ifNoneMatch` is the content SHA-256 returned by `put`; surrounding quotes
    * and a `W/` prefix are ignored. A match returns `{ body: null, size,
-   * contentType }`, never `null` (which means the key is missing).
+   * contentType }`, never `null` (which means the key is missing). An object
+   * the adapter holds no hash for always returns its body.
    */
   get(
     key: string,

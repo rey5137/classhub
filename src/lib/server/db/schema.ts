@@ -287,6 +287,8 @@ export const uploadReservations = sqliteTable(
     stateRunId: text('state_run_id'),
     createdAt: integer('created_at', { mode: 'number' }).notNull().$defaultFn(now),
     expiresAt: integer('expires_at', { mode: 'number' }).notNull(),
+    width: integer('width', { mode: 'number' }).notNull().default(1),
+    height: integer('height', { mode: 'number' }).notNull().default(1),
   },
   (table) => [
     check(

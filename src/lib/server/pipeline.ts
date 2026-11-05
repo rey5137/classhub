@@ -8,6 +8,7 @@ import { securityHeaders, staticCsp, withStyleNonce } from './headers';
 import { uuidv7 } from './ids';
 import { IdentityError } from './ports/identity';
 import { logLine, redact, resolveLogSalt, saltedHash, type LogFields } from './log';
+import { JobRunner } from './services/job-runner';
 
 /** R-AUTH-22: JSON and form bodies; uploads (R-MEM-08) and chat frames have their own bounds. */
 export const JSON_BODY_LIMIT = 64 * 1024;
@@ -28,6 +29,8 @@ export interface PipelineOptions {
   production: boolean;
   /** The clock for `last_seen_at`; tests inject it. */
   now?: () => number;
+  /** Observe background work without delaying the response (also on Node). */
+  onHousekeeping?: (work: Promise<void>) => void;
 }
 
 function pathOf(event: RequestEvent): string {
@@ -160,8 +163,13 @@ function finalize(event: RequestEvent, original: Response): Response {
   for (const [name, value] of Object.entries(securityHeaders)) headers.set(name, value);
   const csp = headers.get('content-security-policy');
   headers.set('content-security-policy', csp ? withStyleNonce(csp) : staticCsp());
-  // R-AUTH-20: nothing the Worker answers is stored; static assets never reach it.
-  headers.set('cache-control', 'private, no-store');
+  // R-MEM-17: only a successful private image response may use its media cache policy.
+  const mediaResponse =
+    /^\/api\/v1\/media\/[^/]+\/(image|thumb)$/.test(pathOf(event)) &&
+    event.request.method === 'GET' &&
+    (response.status === 200 || response.status === 304) &&
+    ['image/jpeg', 'image/webp'].includes(headers.get('content-type') ?? '');
+  if (!mediaResponse) headers.set('cache-control', 'private, no-store');
   return response;
 }
 
@@ -235,7 +243,7 @@ async function guard(
   event.locals.member = member;
   log.member = await saltedHash(salt, member.id);
   // R-AUTH-26: best effort; a failed write never denies or slows the request's answer. Behind the
-  // Workers runtime it runs under `waitUntil`; with none (tests, the Node launcher) it is awaited.
+  // Workers runtime it runs under `waitUntil`; without it the caught promise runs in the background.
   const touch = touchLastSeen(context.database.db, member.id, (options.now ?? Date.now)()).catch(
     (error: unknown) => {
       // A fixed value: a driver message can carry the raw member id (R-AUTH-23).
@@ -243,6 +251,11 @@ async function guard(
     },
   );
   const waitUntil = waitUntilOf(event);
+  const housekeeping = new JobRunner(context).trigger((options.now ?? Date.now)()).catch(() => {
+    logLine({ requestId: log.requestId, housekeepingError: 'failed' });
+  });
+  if (waitUntil) waitUntil(housekeeping);
+  options.onHousekeeping?.(housekeeping);
   if (waitUntil) {
     // The request's own line is usually written before this settles, so a failure gets a line of its own.
     waitUntil(

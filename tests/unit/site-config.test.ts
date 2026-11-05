@@ -5,6 +5,18 @@ import { siteDefaults } from '../../site.config';
 import { SiteConfigError, siteConfig, validateSiteConfig } from '../../src/lib/config';
 
 describe('AC-UI-04 site configuration', () => {
+  it('R-MEM-20 accepts a 1–90 day deletion grace period and defaults to seven days', () => {
+    expect(siteConfig.deletedMediaGraceDays).toBe(7);
+    for (const value of [1, 90])
+      expect(
+        validateSiteConfig({ ...siteDefaults, deletedMediaGraceDays: value }).deletedMediaGraceDays,
+      ).toBe(value);
+    for (const value of [0, 91, 1.5])
+      expect(() => validateSiteConfig({ ...siteDefaults, deletedMediaGraceDays: value })).toThrow(
+        SiteConfigError,
+      );
+  });
+
   it('accepts the shipped defaults and exposes the default theme', () => {
     expect(siteConfig.theme).toBe('yearbook');
     expect(siteConfig.nav).toEqual(['home', 'memories', 'discussions', 'chat', 'members']);

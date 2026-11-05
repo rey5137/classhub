@@ -33,6 +33,7 @@ export interface SendOptions {
 
 export interface Harness {
   teamKey: TestKey;
+  settleHousekeeping(): Promise<void>;
   /** Paths that reached the route handler (i.e. passed the guard). */
   resolved: string[];
   send(path: string, options?: SendOptions): Promise<Response>;
@@ -79,6 +80,7 @@ export async function createHarness(
     wsProbe?: AppContext['wsProbe'];
     /** The pipeline clock (R-AUTH-26). */
     now?: () => number;
+    storage?: ObjectStorage;
   } = {},
 ): Promise<Harness> {
   const teamKey = await createTestKey('team-key');
@@ -89,14 +91,18 @@ export async function createHarness(
   });
   const context: AppContext = {
     database,
-    storage: {} as ObjectStorage,
+    storage: options.storage ?? ({} as ObjectStorage),
     identity,
     accessConfigured: options.accessConfigured ?? true,
     realtime: options.realtime ?? recordingHub(),
     ...(options.logHashSalt ? { logHashSalt: options.logHashSalt } : {}),
     ...(options.wsProbe ? { wsProbe: options.wsProbe } : {}),
   };
+  const background: Promise<void>[] = [];
   const handle = createSecurityHandle({
+    onHousekeeping: (work) => {
+      background.push(work);
+    },
     getContext: async () => context,
     production: false,
     ...(options.now ? { now: options.now } : {}),
@@ -106,6 +112,9 @@ export async function createHarness(
   return {
     teamKey,
     resolved,
+    async settleHousekeeping() {
+      await Promise.all(background);
+    },
     async as(email, sub = `sub:${email}`) {
       return { 'cf-access-jwt-assertion': await signAccessJwt(teamKey, { email, sub }) };
     },

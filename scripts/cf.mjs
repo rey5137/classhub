@@ -23,6 +23,7 @@ if (args.length === 0) {
 const isDeploy = args[0] === 'deploy';
 const isCheckDeploy = args[0] === '--check-deploy' && args.length === 1;
 const isApi = args[0] === 'api';
+const isD1Query = args[0] === 'd1-query';
 const isDryRun = isDeploy && isLocalDryRun(args);
 
 // R-PLAT-12: a remote command may not choose another config, environment or
@@ -63,7 +64,7 @@ if (!isDryRun) {
 // every remote command (not only deploy) refuses when wrangler.jsonc names an
 // account other than the guarded one. A real deploy and `--check-deploy` also
 // require the file and its account_id; other commands check it when present.
-const mustHaveConfig = (isDeploy && !isDryRun) || isCheckDeploy;
+const mustHaveConfig = (isDeploy && !isDryRun) || isCheckDeploy || isD1Query;
 if (mustHaveConfig || (!isDryRun && existsSync(configPath))) {
   const config = readWranglerConfig(configPath);
   if (!config) {
@@ -90,6 +91,10 @@ if (mustHaveConfig || (!isDryRun && existsSync(configPath))) {
 
 if (isCheckDeploy) {
   process.exit(0);
+}
+
+if (isD1Query) {
+  await d1Query(args, /** @type {string} */ (accountId), /** @type {string} */ (token));
 }
 
 if (isApi) {
@@ -261,7 +266,7 @@ function absoluteOutdir(args) {
 }
 
 /**
- * @typedef {{ account_id?: string, env?: Record<string, { account_id?: string } | undefined> }} WranglerConfig
+ * @typedef {{ account_id?: string, d1_databases?: { binding?: string, database_id?: string }[], env?: Record<string, { account_id?: string } | undefined> }} WranglerConfig
  */
 
 /**
@@ -381,7 +386,9 @@ function renderDryRunConfig() {
  */
 async function apiGet(argv, account, apiToken) {
   const put = argv[1] === '--put';
-  const path = argv[put ? 2 : 1] ?? '';
+  const write = put;
+  const method = put ? 'PUT' : 'GET';
+  const path = argv[write ? 2 : 1] ?? '';
   const policy = /^\/access\/(?:apps\/[A-Za-z0-9_-]{1,64}\/)?policies\/[A-Za-z0-9_-]{1,64}$/;
   // Only the reads the scripts make: the workers.dev subdomain, one bucket by name
   // (R2 names: lower-case letters, digits, hyphens), that bucket's domains, and the
@@ -393,45 +400,129 @@ async function apiGet(argv, account, apiToken) {
     policy,
   ];
   const allowed = put ? policy.test(path) : shapes.some((shape) => shape.test(path));
-  if (argv.length !== (put ? 3 : 2) || !allowed) {
+  if (argv.length !== (write ? 3 : 2) || !allowed) {
     fail(
-      'usage: node scripts/cf.mjs api /workers/subdomain | /r2/buckets/<name>[/domains/managed|custom] | /access/[apps/<id>/]policies/<id> | --put /access/[apps/<id>/]policies/<id> (body on stdin)',
+      'usage: node scripts/cf.mjs api /workers/subdomain | /r2/buckets/<name>[/domains/managed|custom] | /access/[apps/<id>/]policies/<id> | --put /access/[apps/<id>/]policies/<id>',
     );
   }
   let payload;
-  if (put) {
+  if (write) {
     payload = readFileSync(0, 'utf8');
     try {
       JSON.parse(payload);
     } catch {
-      fail('--put needs a JSON body on stdin.');
+      fail(`${argv[1]} needs a JSON body on stdin.`);
     }
   }
   let response;
   try {
     response = await fetch(`${apiBase()}/client/v4/accounts/${account}${path}`, {
-      method: put ? 'PUT' : 'GET',
+      method,
       headers: {
         authorization: `Bearer ${apiToken}`,
-        ...(put ? { 'content-type': 'application/json' } : {}),
+        ...(write ? { 'content-type': 'application/json' } : {}),
       },
-      ...(put ? { body: payload } : {}),
+      ...(write ? { body: payload } : {}),
       signal: AbortSignal.timeout(30_000),
     });
   } catch (error) {
-    fail(
-      `${put ? 'PUT' : 'GET'} ${path} failed: ${error instanceof Error ? error.name : 'network error'}`,
-    );
+    fail(`${method} ${path} failed: ${error instanceof Error ? error.name : 'network error'}`);
   }
   /** @type {{ success?: boolean; result?: unknown; errors?: { code?: number }[] } | null} */
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.success) {
     const codes = (body?.errors ?? []).map((entry) => entry?.code).filter(Boolean);
     fail(
-      `${put ? 'PUT' : 'GET'} ${path} failed: HTTP ${response.status}${codes.length ? ` (${codes.join(', ')})` : ''}`,
+      `${method} ${path} failed: HTTP ${response.status}${codes.length ? ` (${codes.join(', ')})` : ''}`,
     );
   }
   process.stdout.write(`${JSON.stringify(body.result ?? null)}\n`);
+  process.exit(0);
+}
+
+/** R-MEM-11: one guarded statement, only against the DB binding and maintenance tables.
+ * @param {string[]} argv @param {string} account @param {string} apiToken
+ * @returns {Promise<never>}
+ */
+async function d1Query(argv, account, apiToken) {
+  const config = readWranglerConfig(configPath);
+  const id = config?.d1_databases?.find(
+    (/** @type {{binding?: string}} */ entry) => entry.binding === 'DB',
+  )?.database_id;
+  if (
+    argv.length !== 2 ||
+    !id ||
+    !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id) ||
+    argv[1] !== id
+  )
+    fail('d1-query may only target the database_id bound as DB in wrangler.jsonc.');
+  let body;
+  try {
+    body = JSON.parse(readFileSync(0, 'utf8'));
+  } catch {
+    fail('d1-query needs SQL and params as JSON on stdin.');
+  }
+  if (
+    !body ||
+    Array.isArray(body) ||
+    typeof body.sql !== 'string' ||
+    !Array.isArray(body.params) ||
+    Object.keys(body).some((key) => !['sql', 'params'].includes(key)) ||
+    body.params.some(
+      (/** @type {unknown} */ value) =>
+        value !== null &&
+        typeof value !== 'string' &&
+        (typeof value !== 'number' || !Number.isFinite(value)),
+    )
+  )
+    fail('d1-query needs one {sql, params} statement.');
+  // This deliberately accepts a small SQL subset. Strip literal contents before checking
+  // syntax, unquote identifiers, and reject comma joins as well as qualified table names.
+  const sql = body.sql
+    .replace(/'(?:''|[^'])*'/g, " '' ")
+    .replace(/"([a-z_][a-z0-9_]*)"/gi, ' $1 ')
+    .replace(/\s*\.\s*/g, '.')
+    .trim()
+    .replace(/;$/, '');
+  const references = [...sql.matchAll(/\b(from|join|update|into)\b\s*/gi)];
+  const tables = references.map(
+    (match) =>
+      /^[a-z_][a-z0-9_.]*/i.exec(sql.slice(match.index + match[0].length))?.[0].toLowerCase() ?? '',
+  );
+  const commaJoin = references.some(
+    (match) =>
+      /^(?:from|join)$/i.test(match[1]) &&
+      sql
+        .slice(match.index + match[0].length)
+        .split(/\b(?:where|order|limit|join|group|having|union|returning|set|on)\b|\)/i)[0]
+        .includes(','),
+  );
+  if (
+    !/^(?:select|update|delete|insert)\b/i.test(sql) ||
+    /[;`[\]]|--|\/\*|"/.test(sql) ||
+    /\b(?:drop|alter|create|pragma|attach|detach|replace|with|load_extension)\b/i.test(sql) ||
+    commaJoin ||
+    !tables.length ||
+    tables.some(
+      (table) => !['upload_reservations', 'media', 'storage_usage', 'schema_meta'].includes(table),
+    )
+  )
+    fail('d1-query permits SELECT/UPDATE/DELETE/INSERT on housekeeping tables only.');
+  let response;
+  try {
+    response = await fetch(`${apiBase()}/client/v4/accounts/${account}/d1/database/${id}/raw`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    fail('D1 housekeeping query failed.');
+  }
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.success)
+    fail(`D1 housekeeping query failed: HTTP ${response.status}`);
+  process.stdout.write(`${JSON.stringify(result.result)}\n`);
   process.exit(0);
 }
 

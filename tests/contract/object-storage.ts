@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { uuidv7 } from '../../src/lib/server/ids';
 import { ObjectTooLargeError, type ObjectStorage } from '../../src/lib/server/ports/object-storage';
+import { Sha256, sha256Hex } from '../../src/lib/server/sha256';
 
 export interface ObjectStorageHarness {
   storage: ObjectStorage;
@@ -10,6 +11,22 @@ export interface ObjectStorageHarness {
 export type ObjectStorageFactory = () => Promise<ObjectStorageHarness>;
 
 const HELLO_SHA256 = '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
+
+/** Two whole 5 MiB R2 parts plus a short last one. */
+const LARGE_BYTES = 10 * 1024 * 1024 + 4099;
+
+/** Deterministic, non-repeating-per-part bytes in 64 KiB chunks (the last one short). */
+function patternChunks(total: number): Uint8Array[] {
+  const chunks: Uint8Array[] = [];
+  for (let offset = 0; offset < total; offset += 65536) {
+    const chunk = new Uint8Array(Math.min(65536, total - offset));
+    for (let index = 0; index < chunk.length; index += 1) {
+      chunk[index] = ((offset + index) * 31 + (offset >> 16)) & 0xff;
+    }
+    chunks.push(chunk);
+  }
+  return chunks;
+}
 
 function stream(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
   return new ReadableStream({
@@ -91,6 +108,60 @@ export function objectStorageContract(label: string, create: ObjectStorageFactor
         await expect(storage.head(key)).resolves.toBeNull();
         const listed = await storage.list(key.slice(0, key.indexOf('/') + 1));
         expect(listed.objects).toEqual([]);
+      });
+    });
+
+    it('AC-API-05 put streams a body larger than one R2 part and measures it exactly', async () => {
+      await withStorage(create, async (storage) => {
+        const key = `${uuidv7()}/large.bin`;
+        const chunks = patternChunks(LARGE_BYTES);
+        const expected = new Sha256();
+        for (const chunk of chunks) expected.update(chunk);
+        const sha256 = expected.digestHex();
+
+        await expect(
+          storage.put(key, stream(chunks), {
+            contentType: 'application/octet-stream',
+            maxBytes: LARGE_BYTES,
+          }),
+        ).resolves.toEqual({ size: LARGE_BYTES, sha256 });
+
+        await expect(storage.head(key)).resolves.toMatchObject({ size: LARGE_BYTES });
+        const object = await storage.get(key);
+        const stored = new Uint8Array(await new Response(object?.body ?? null).arrayBuffer());
+        expect(stored.byteLength).toBe(LARGE_BYTES);
+        expect(sha256Hex(stored)).toBe(sha256);
+      });
+    });
+
+    it('AC-API-05 put that crosses maxBytes after a whole part leaves no object behind', async () => {
+      await withStorage(create, async (storage) => {
+        const key = `${uuidv7()}/large-too-big.bin`;
+        const maxBytes = LARGE_BYTES - 1;
+
+        await expect(
+          storage.put(key, stream(patternChunks(LARGE_BYTES)), {
+            contentType: 'application/octet-stream',
+            maxBytes,
+          }),
+        ).rejects.toBeInstanceOf(ObjectTooLargeError);
+
+        await expect(storage.head(key)).resolves.toBeNull();
+        const listed = await storage.list(key.slice(0, key.indexOf('/') + 1));
+        expect(listed.objects).toEqual([]);
+      });
+    });
+
+    it('R-API-07 put refuses a maxBytes that is not a non-negative integer', async () => {
+      await withStorage(create, async (storage) => {
+        for (const maxBytes of [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY]) {
+          await expect(
+            storage.put(`${uuidv7()}/bad-cap.txt`, stream([new Uint8Array([1])]), {
+              contentType: 'text/plain',
+              maxBytes,
+            }),
+          ).rejects.toBeInstanceOf(RangeError);
+        }
       });
     });
 

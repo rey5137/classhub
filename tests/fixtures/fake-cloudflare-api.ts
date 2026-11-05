@@ -9,7 +9,7 @@ export interface FakeApi {
   base: string;
   /** `METHOD path authorization` of every request, in order. */
   requests: string[];
-  /** The body of every PUT, in order. */
+  /** The body of every write, in order. */
   bodies: string[];
   close(): Promise<void>;
 }
@@ -33,6 +33,41 @@ export async function startFakeApi(
     if (auth !== `Bearer ${token}`) return send(403, { success: false, errors: [{ code: 10000 }] });
     const prefix = `/client/v4/accounts/${account}`;
     const path = request.url?.startsWith(prefix) ? request.url.slice(prefix.length) : '';
+    if (request.method === 'POST' && /^\/d1\/database\/[0-9a-f-]{36}\/(?:query|raw)$/.test(path)) {
+      let text = '';
+      request.on('data', (chunk) => (text += chunk));
+      request.on('end', () => {
+        bodies.push(text);
+        let body: unknown;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          return send(400, { success: false });
+        }
+        if (
+          !body ||
+          typeof body !== 'object' ||
+          Array.isArray(body) ||
+          Object.keys(body).some((key) => !['sql', 'params'].includes(key)) ||
+          !('sql' in body) ||
+          typeof body.sql !== 'string' ||
+          !('params' in body) ||
+          !Array.isArray(body.params)
+        )
+          return send(400, { success: false });
+        send(200, {
+          success: true,
+          result: [
+            {
+              success: true,
+              results: path.endsWith('/raw') ? { columns: [], rows: [] } : [],
+              meta: { changes: 1 },
+            },
+          ],
+        });
+      });
+      return;
+    }
     if (request.method === 'PUT' && /^\/access\/(?:apps\/[^/]+\/)?policies\/[^/]+$/.test(path)) {
       // The Access policy write: echoed back, as the real API returns the stored policy.
       let text = '';

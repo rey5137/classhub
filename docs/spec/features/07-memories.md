@@ -28,11 +28,12 @@
 - **R-MEM-06** `POST /api/v1/media/reservations { purpose: "photo"|"avatar"|"site", imageBytes, thumbBytes, sha256,
   thumbSha256, mimeType, width, height }` checks membership, rate limits (R-MEM-13), byte limits and the quota, then
   in one batch creates an `open` reservation (new `media_id`, `sha256`, `thumb_sha256`, `mime_type`, `image_bytes`,
-  `thumb_bytes`, staging keys per R-MEM-12) and adds its bytes to `reserved_bytes`, expiring in 15 minutes, using the
+  `thumb_bytes`, `width`, `height` (integers 1–20000, copied to `media` at complete), staging keys per R-MEM-12) and adds its bytes to `reserved_bytes`, expiring in 15 minutes, using the
   batch-safe form of R-MEM-19. Over the stop threshold it returns `507 storage_full` (R-MEM-15). The `site` purpose
   (logo, favicon, banner; R-UI-01) is admin-only: any other caller gets the uniform denial. The database enforces the
   three purposes with a `CHECK` on `upload_reservations.purpose`. The size limit is `uploads.maxImageBytes` in
-  `site.config.ts`, at most 25 MB (the R2 adapter buffers one upload in memory inside the 128 MB Worker isolate).
+  `site.config.ts`, at most 25 MB (the R2 adapter streams a body over 5 MiB as multipart parts, holding at most one
+  part in memory, R-API-07).
 - **R-MEM-07** `PUT /api/v1/media/reservations/:id/image` and `.../thumb` stream the body to R2 through the native
   binding while counting bytes and hashing; the stream is aborted the moment it passes the reserved size. **Before
   writing** the route requires `owner_id = caller`, `state = 'open'` and `expires_at > now` (anything else is refused
@@ -59,8 +60,9 @@
   **reconcile is CLI-only** (`npm run housekeeping -- --reconcile`, weekly by the operator; it does not fit the
   Workers Free CPU and subrequest limits): it lists the bucket, deletes objects under `media/`, `avatars/` and
   `staging/` that have no live row and no open reservation, treating a soft-deleted row **past its grace period or
-  with `purged_at` set** as no row, and resets `committed_bytes` to the listed total of the objects that are kept,
-  recording `last_reconciled_at`.
+  with `purged_at` set** as no row, and resets `committed_bytes` to the listed total of the kept objects outside `staging/`,
+  recording `last_reconciled_at`. The CLI uses bucket-scoped Object Read & Write credentials
+  `R2_HOUSEKEEPING_ACCESS_KEY_ID` / `R2_HOUSEKEEPING_SECRET_ACCESS_KEY`; backup credentials stay read-only.
 
 ## 7.3 Object keys
 

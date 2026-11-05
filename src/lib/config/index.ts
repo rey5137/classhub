@@ -14,7 +14,7 @@ const safeText = (max: number) =>
     .max(max)
     .refine((value) => !/[{}<>]|url\(|expression\(/i.test(value), 'CSS and markup are not allowed');
 
-// The R2 adapter buffers a whole upload inside a 128 MB Worker isolate, so the setting is capped.
+// R-MEM-06: uploads stay within the configured per-image ceiling.
 const MAX_IMAGE_BYTES = 25_000_000;
 
 const siteConfigSchema = z
@@ -57,6 +57,7 @@ const siteConfigSchema = z
         photosPerDay: z.number().int().positive(),
       })
       .strict(),
+    deletedMediaGraceDays: z.number().int().min(1).max(90),
     chat: z
       .object({
         retainDays: z.number().int().positive().max(3650),

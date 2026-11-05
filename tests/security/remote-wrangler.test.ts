@@ -34,6 +34,10 @@ function sources(): Source[] {
       file: relative(repoRoot, path),
       source: readFileSync(path, 'utf8'),
     })),
+    ...collectFiles(join(repoRoot, 'src')).map((path) => ({
+      file: relative(repoRoot, path),
+      source: readFileSync(path, 'utf8'),
+    })),
     ...collectFiles(join(repoRoot, '.github', 'workflows'))
       .filter((path) => /\.ya?ml$/.test(path))
       .map((path) => ({
@@ -55,6 +59,29 @@ describe('remote wrangler calls', () => {
       (source) => source.file !== 'scripts/cf.mjs' && remoteCall.test(source.source),
     );
     expect(offenders.map((source) => source.file)).toEqual([]);
+  });
+
+  it('AC-PLAT-07 keeps direct provider endpoints inside explicit transport allowlists', () => {
+    const endpoint = /r2\.cloudflarestorage\.com|api\.cloudflare\.com/;
+    const allowed = new Set(['scripts/cf.mjs', 'scripts/lib/s3.mjs']);
+    const scanned = sources();
+    expect(scanned.find((source) => source.file === 'scripts/cf.mjs')?.source).toMatch(
+      /api\.cloudflare\.com/,
+    );
+    expect(scanned.find((source) => source.file === 'scripts/lib/s3.mjs')?.source).toMatch(
+      /r2\.cloudflarestorage\.com/,
+    );
+    expect(
+      scanned
+        .filter((source) => endpoint.test(source.source) && !allowed.has(source.file))
+        .map((source) => source.file),
+    ).toEqual([]);
+    // The remote database delegates HTTP to the account guard; it has no endpoint exemption.
+    expect(
+      scanned.find(
+        (source) => source.file === 'src/lib/server/adapters/cloudflare/remote-database.ts',
+      )?.source,
+    ).not.toMatch(endpoint);
   });
 
   it.each([
