@@ -16,8 +16,8 @@
   `feature_disabled`, `conflict`, `payload_too_large`, `unavailable`, `internal`. `message` is a localized,
   non-sensitive sentence; `requestId` is echoed in the `X-Request-Id` header.
 - **R-API-03** Lists return `{ items, nextCursor }`; the cursor is an opaque base64url of the keyset values.
-- **R-API-04** Request and response DTOs are Zod schemas in `src/lib/contracts/`; `npm run openapi` generates
-  `docs/openapi.json` from them for contributors.
+- **R-API-04** Request and response DTOs are Zod schemas in `src/lib/contracts/`. Generating `docs/openapi.json` from
+  them is deferred past v1.0 (§D).
 - **R-API-05** `GET /health` returns `{ ok: true, version }` and nothing that identifies a member, setting or count.
 
 ## 11.2 Routes
@@ -92,5 +92,5 @@ export interface RealtimeHub {
 | AC-API-01 | Every route in §11.2 returns the uniform denial without identity, and the error shape on every failure | R-API-01, 02 | `test:security` route sweep (from the route manifest) |
 | AC-API-02 | Admin routes refuse members | R-API-01 | integration |
 | AC-API-03 | `/health` contains no member, setting or count | R-API-05 | integration |
-| AC-API-04 | `docs/openapi.json` is regenerated and unchanged in CI | R-API-04 | CI diff |
+| AC-API-04 | *Deferred (§D):* OpenAPI generation and its CI diff | R-API-04 | n/a |
 | AC-API-05 | `put` stops at `maxBytes` on both storage adapters | R-API-07 | contract `ObjectStorage` |

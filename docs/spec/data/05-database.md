@@ -19,24 +19,29 @@
 - **R-DB-04** **Deleting a person never erases history silently.** Users are never hard-deleted while content
   references them (R-PROF-11); content foreign keys to `users` are `ON DELETE RESTRICT`. Child rows of content use
   `ON DELETE CASCADE` only where the child has no meaning alone (a thread's comments when an admin purges the thread).
+- **R-DB-13** **Never hard-deleted** (the tables whose live row counts `verify-backup` compares with the dump, R-BAK-04):
+  `media` (soft: `deleted_at`, then `purged_at`), `invites` (revoking sets `status`), `chat_archives`, `backup_runs` and
+  `audit_events`. Tables that are pruned or purged (`chat_messages` by `prune-chat`, `posts`, `comments`,
+  `upload_reservations`, `rate_events`) and `users` (a never-active invited row can be removed, R-AUTH-08) are excluded
+  from that comparison. `users.last_seen_at` is written at most hourly (R-AUTH-26, §14).
 
 ## 5.2 Tables
 
 | Table | Key columns | Purpose |
 |---|---|---|
-| `users` | `id` PK, `auth_email` UNIQUE, `display_name`, `display_name_norm`, `preferred_name`, `role`, `status`, `avatar_media_id`, `deletion_requested_at`, `deletion_keep_content`, `created_at`, `updated_at`, `last_seen_at` | identity and core profile |
+| `users` | `id` PK, `auth_email` UNIQUE, `access_sub` (nullable), `display_name`, `display_name_norm`, `preferred_name`, `preferred_name_norm`, `role`, `status`, `avatar_media_id`, `deletion_requested_at`, `deletion_keep_content`, `created_at`, `updated_at`, `last_seen_at` | identity and core profile; `access_sub` is the Access `sub`, recorded at first login and matched by email thereafter, a mismatch is audited not refused (R-AUTH-08); `*_norm` are the normalized search columns (R-PROF-08) |
 | `profile_contacts` | `user_id` PK/FK, `contact_email`, `phone`, `messaging_url`, `city`, `bio`, `visibility_json`, `updated_at` | optional fields + per-field visibility (§4) |
-| `invites` | `id` PK, `email` UNIQUE, `invited_by`, `role`, `status` (`pending`, `accepted`, `revoked`), `access_synced_at`, `created_at`, `expires_at` | the internal allowlist (R-AUTH-08) |
+| `invites` | `id` PK, `email` UNIQUE, `invited_by`, `role`, `status` (`pending`, `accepted`, `revoked`), `access_synced_at`, `created_at`, `expires_at` (default `created_at` + 30 days from `invite.expiryDays`; `NULL` = never) | the internal allowlist (R-AUTH-08) |
 | `info_pages` | `id` PK, `slug` UNIQUE, `title`, `body_md`, `is_pinned`, `sort_order`, `updated_by`, `updated_at` | admin-edited class info (§8.1) |
 | `posts` | `id` PK, `author_id` FK, `title`, `body_md`, `is_pinned`, `is_locked`, `comment_count`, `created_at`, `updated_at`, `last_activity_at`, `deleted_at` | board threads |
 | `comments` | `id` PK, `post_id` FK, `author_id` FK, `body_md`, `created_at`, `updated_at`, `deleted_at` | replies, one level |
 | `albums` | `id` PK, `name`, `year_tag`, `description`, `created_by`, `created_at` | photo groupings |
-| `media` | `id` PK, `owner_id` FK, `album_id` FK nullable, `media_type` (`photo`, `avatar`), `object_key`, `thumb_key`, `mime_type`, `width`, `height`, `size_bytes`, `thumb_size_bytes`, `sha256`, `thumb_sha256`, `caption`, `taken_year`, `created_at`, `deleted_at` | R2 object references (§7) |
+| `media` | `id` PK, `owner_id` FK, `album_id` FK nullable, `media_type` (`photo`, `avatar`, `site`), `object_key`, `thumb_key`, `mime_type`, `width`, `height`, `size_bytes`, `thumb_size_bytes`, `sha256`, `thumb_sha256`, `caption`, `taken_year`, `effective_year`, `created_at`, `deleted_at`, `purged_at` | R2 object references (§7); `site` = logo, favicon, banner (never in the gallery); `effective_year` = album year tag, else `taken_year`, maintained when the album's year changes (R-MEM-14); `purged_at` is set when a soft-deleted photo's objects are purged after the grace period (R-MEM-20) |
 | `chat_messages` | `id` PK, `room_id`, `sender_id` FK, `client_nonce`, `body`, `created_at`, `edited_at`, `deleted_at` | chat history (§9) |
-| `chat_archives` | `id` PK, `range_start`, `range_end`, `record_count`, `sha256`, `exported_at`, `verified_at`, `purged_at` | proof of verified archive before pruning (R-CHAT-14) |
+| `chat_archives` | `id` PK, `file_name` UNIQUE (`chat/<fromId>_<toId>.ndjson.age`), `from_id`, `to_id`, `range_start`, `range_end`, `record_count`, `sha256`, `exported_at`, `verified_at`, `purged_at` | proof of verified archive before pruning (R-CHAT-14); `file_name`, `from_id` and `to_id` follow the file naming of R-CHAT-14 |
 | `site_settings` | `key` PK, `value_json`, `updated_by`, `updated_at` | title, theme, flags, overrides (§10) |
 | `storage_usage` | `singleton_id` PK (= 1), `committed_bytes`, `reserved_bytes`, `last_reconciled_at`, `updated_at` | app-level media budget (§7.6) |
-| `upload_reservations` | `id` PK, `owner_id`, `media_id`, `purpose`, `reserved_bytes`, `object_key`, `thumb_key`, `state` (`open`, `uploaded`, `completed`, `released`), `created_at`, `expires_at` | quota reservations (§7.2) |
+| `upload_reservations` | `id` PK, `owner_id` FK, `media_id` (**no FK**: the `media` row is created later by `complete`), `purpose`, `reserved_bytes`, `image_bytes`, `thumb_bytes`, `sha256`, `thumb_sha256`, `mime_type`, `object_key`, `thumb_key` (staging keys), `state` (`open`, `completed`, `released`), `state_run_id` (nullable), `created_at`, `expires_at` | quota reservations and their state machine (R-MEM-21); the declared values are what the `PUT` and `complete` compare against (R-MEM-08, 09) |
 | `rate_events` | `bucket` (e.g. `post:<user>`), `at` | server-side rate limits where no DO holds the counter (R-AUTH-21) |
 | `backup_runs` | `id` PK, `kind`, `manifest_sha256`, `object_count`, `total_bytes`, `verified_at`, `reported_at` | admin-visible backup status, written by the CLI (R-BAK-09) |
 | `audit_events` | `id` PK, `actor_id`, `action`, `entity_type`, `entity_id`, `created_at` | admin and moderation changes; never content or contact payloads |
@@ -47,10 +52,10 @@
 - **R-DB-05** Unique: `users.auth_email`, `invites.email`, `info_pages.slug`, `(chat_messages.sender_id, client_nonce)`.
 - **R-DB-06** Indexes: `posts(is_pinned DESC, last_activity_at DESC, id DESC)` · `posts(last_activity_at DESC, id DESC)`
   · `comments(post_id, created_at, id)` · `media(album_id, created_at DESC, id DESC)` ·
-  `media(owner_id, created_at)` · `media(taken_year, created_at DESC, id DESC)` ·
+  `media(owner_id, created_at)` · `media(effective_year, created_at DESC, id DESC)` ·
   `chat_messages(room_id, created_at DESC, id DESC)` ·
   `chat_messages(created_at)` · `users(status, display_name_norm)` · `invites(status, email)` ·
-  `upload_reservations(state, expires_at)` · `rate_events(bucket, at)` · `audit_events(created_at)`.
+  `media(deleted_at, purged_at)` · `users(status, preferred_name_norm)` · `upload_reservations(state, expires_at)` · `upload_reservations(state_run_id)` · `rate_events(bucket, at)` · `audit_events(created_at)`.
 
 ## 5.4 Query rules
 
@@ -70,8 +75,9 @@
 - **R-DB-11** Migrations are additive where possible. A destructive step (drop, narrowing rewrite) is its own
   migration, named `*_destructive.sql`, and `preflight` refuses to apply it until a verified backup newer than the
   last deploy exists (INV-7, R-OPS-12).
-- **R-DB-12** Importers accept backups from the current and the two previous released schema versions; CI restores a
-  fixture backup of each into the current schema (R-BAK-13).
+- **R-DB-12** *(Deferred past v1.0: there is no earlier released schema to import.)* Importers will accept backups
+  from the current and the two previous released schema versions, and CI will restore a fixture backup of each into
+  the current schema (R-BAK-06). In v1.0 a restore requires a backup of the same `schema_version`.
 
 ## Acceptance criteria
 
@@ -82,4 +88,4 @@
 | AC-DB-03 | Every list query in `repositories/` has `LIMIT` and uses an index (`EXPLAIN QUERY PLAN` shows no full scan) over 10,000 seeded rows | R-DB-06, 07 | integration |
 | AC-DB-04 | Board and comment pagination return every row exactly once across pages of 5,000 posts with equal timestamps | R-DB-07 | integration |
 | AC-DB-05 | `preflight` refuses a `*_destructive.sql` migration without a newer verified backup | R-DB-11 | unit |
-| AC-DB-06 | Fixture backups at schema N-1 and N-2 restore into schema N | R-DB-12 | `test:migrations` |
+| AC-DB-06 | *(Deferred with R-DB-12; not a v1.0 gate.)* Fixture backups at schema N-1 and N-2 restore into schema N | R-DB-12 | `test:migrations` |

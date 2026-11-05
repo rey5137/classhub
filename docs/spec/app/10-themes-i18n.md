@@ -10,7 +10,7 @@
 ## 10.1 Customization levels
 
 - **R-UI-01** **Level A, admin settings (no code), stored in D1 `site_settings`:** site name, class years,
-  description, welcome message, banner photo, logo and favicon (uploaded through §7 as `media_type = "photo"`, kept
+  description, welcome message, banner photo, logo and favicon (uploaded through §7 as `media_type = "site"`, kept
   out of the gallery), theme preset, display mode (light, dark, system), accent colour, card density (comfortable,
   compact), default language, and feature toggles for memories, discussions and chat.
 - **R-UI-02** **Level B, project configuration (`site.config.ts`, one validated object):** navigation order,

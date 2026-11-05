@@ -24,10 +24,15 @@ corrects this table (AC-BUD-01).
 - **R-BUD-01** **Expected use** for 50 members is far inside every allowance (order of a few thousand requests and
   under 100 K rows read per day); the guardrails exist for misuse and runaway clients.
 - **R-BUD-02** **No background work for ordinary viewing:** no cron every minute, no presence polling, no per-user
-  jobs. Housekeeping runs piggy-backed at most hourly on traffic or from the CLI (R-MEM-11). A Cron Trigger, if
+  jobs. Housekeeping runs piggy-backed at most hourly on traffic (releasing and purging at most 20 rows per run) or from the CLI (R-MEM-11); `users.last_seen_at` is written at most once an hour per member (R-AUTH-26); the weekly reconcile is CLI-only. A Cron Trigger, if
   added, runs no more than daily.
 - **R-BUD-03** Client-side lightness: chat and gallery routes are lazy-loaded; thumbnails are made in the browser;
   no external analytics, fonts or search.
+- **R-BUD-08** **Large deletes run in chunks.** Anything that deletes or rewrites many rows (purging a thread, pruning chat
+  after archive (`prune-chat`, R-CHAT-18), purging deleted photos, rewriting `effective_year` for a big album) works in batches of at most 500
+  rows and stays under 20,000 rows written per run, resuming on the next run or CLI call, so no single job approaches
+  the D1 Free 100 K rows written/day limit.
+- **R-BUD-09** Backups are local encrypted files on the admin's computer or drive, never stored in R2 (R-BAK-10, §13.3); the backup reads R2 objects (Class B operations) but writes nothing to the bucket.
 - **R-BUD-04** The D1 database size is read through the D1 API by `preflight` and the CLI (the Worker holds no API
   token) and stored in `backup_runs`/`site_settings` for `/admin`.
 
@@ -47,7 +52,7 @@ corrects this table (AC-BUD-01).
 | ID | Criterion | Rules | Proved by |
 |---|---|---|---|
 | AC-BUD-01 | Each §14.1 figure is confirmed on Cloudflare's current pages and corrected if it differs | — | manual 1d |
-| AC-BUD-02 | A page view of each route costs fewer than 30 D1 rows read with the demo seed | R-BUD-01 | integration (row counter on the adapter) |
+| AC-BUD-02 | A page view of each route stays within its row-read budget with the demo seed: 30 rows for single-record routes, and 2 × page size + 10 for list routes such as `/members` (a 50-row page, so ≤ 110); the per-route budgets live beside the test | R-BUD-01 | integration (row counter on the adapter) |
 | AC-BUD-03 | Opening any page performs no repeating request while idle for 5 minutes | R-BUD-02 | e2e network log |
 | AC-BUD-04 | With D1 writes failing, reads still render and writes show `unavailable` | R-BUD-05 | integration |
 | AC-BUD-05 | The README and deploy guide carry the R-BUD-07 statements | R-BUD-07 | review 6a |

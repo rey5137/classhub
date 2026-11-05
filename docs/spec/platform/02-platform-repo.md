@@ -39,7 +39,8 @@ flowchart TD
 
 - **R-PLAT-04** Node.js 24 LTS or newer (`.nvmrc`), npm with a committed `package-lock.json`. SvelteKit 2 + Svelte 5
   (runes) + TypeScript in `strict` mode; `@sveltejs/adapter-cloudflare` for the Worker build and
-  `@sveltejs/adapter-node` for the Node target (§13.5), picked by `CLASSHUB_TARGET`. Drizzle ORM with
+  `@sveltejs/adapter-node` only for the local target behind `dev:offline` and `restore --target local`, picked by
+  `CLASSHUB_TARGET`; a production Node deployment is deferred (§D). Drizzle ORM with
   `drizzle-orm/sqlite-core` for schema and typed queries, migrations as committed plain SQL (§5.5). Zod for every input
   and API DTO. Vitest for unit and integration tests, `@cloudflare/vitest-pool-workers` for tests against D1, R2 and the
   Durable Object, Playwright for end-to-end. ESLint + Prettier + `svelte-check`.
@@ -61,7 +62,7 @@ flowchart TD
 - **R-PLAT-03** Application services (`src/lib/server/services/`) and repositories (`.../repositories/`) depend only on
   ports. Only `src/lib/server/adapters/cloudflare/*` and `src/worker.ts` import Cloudflare types (INV-4). Adapters are
   chosen once, in `src/lib/server/context.ts`, from the platform object SvelteKit passes in (Cloudflare) or from
-  environment (Node/local).
+  environment (local).
 - **R-PLAT-06** **One contract suite per port.** Each port has a shared test suite (`tests/contract/<port>.ts`) run
   against both its Cloudflare and its local adapter; an adapter is done when both pass the same suite (§16 criterion
   "local adapters pass the same tests").
@@ -90,7 +91,7 @@ classhub/
 ├── migrations/                    # numbered portable SQL (§5.5)
 ├── scripts/                       # cf.mjs guard, setup, invite, backup, restore, verify-backup, export-chat, preflight, unlock
 ├── tests/ unit/ contract/ integration/ e2e/ security/ fixtures/
-└── docs/ spec/ plan/ DEPLOY_CLOUDFLARE.md GOOGLE_ACCESS.md THEMES.md BACKUP_RESTORE.md SELF_HOST_NODE.md MIGRATION.md PRIVACY.md
+└── docs/ spec/ plan/ DEPLOY_CLOUDFLARE.md GOOGLE_ACCESS.md THEMES.md BACKUP_RESTORE.md MIGRATION.md PRIVACY.md
 ```
 
 - **R-PLAT-08** One repo, one app: no monorepo, no separate API service, no Docker requirement for the default
@@ -109,7 +110,7 @@ classhub/
 - **R-PLAT-11** **`npm run verify`** runs, in order: `lint` (ESLint + Prettier check), `check` (`svelte-check` +
   `tsc`), `test` (Vitest: unit, contract on local adapters, integration on the Workers pool), `test:migrations`
   (migrations apply from empty and from each released schema, §5.5), `test:security` (§6.7), `build` (Cloudflare
-  target) and `build:node`. CI runs the same script on every pull request, then `test:e2e` (Playwright against
+  target). CI runs the same script on every pull request, then `test:e2e` (Playwright against
   `dev:offline`). CI never uploads `.dev.vars`, `.env.cloudflare`, contact data or backups as artifacts.
 
 ## 2.6 The Cloudflare account guard
@@ -122,12 +123,15 @@ project on the machine, so the app never relies on it.
   (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, later `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`), refuses to run when
   the account id is missing, checks with `wrangler whoami` that the token can see that account, and runs `wrangler`
   with both values in its environment. Every npm script that touches Cloudflare (`deploy`, `db:migrate:remote`,
-  `setup`, `preflight`, `unlock`, `backup`, `restore`, `invite`) calls it; nothing in the repo calls `npx wrangler`
+  `setup`, `preflight`, `unlock`, `backup`, `restore`, `invite`) calls it; the one exception is the S3 helper `scripts/lib/s3.mjs` (R-BAK-17), which reads the same
+  guarded environment; nothing in the repo calls `npx wrangler`
   against a remote resource directly (INV-9).
 - **R-PLAT-13** The generated `wrangler.jsonc` carries `account_id` from `.env.cloudflare`, so a stray direct
   `wrangler deploy` also lands in the configured account. `.env.cloudflare.example` names an **account-scoped API
   token** with Workers Scripts Edit, D1 Edit, Workers R2 Storage Edit, Account Settings Read and, for the optional
-  invite sync (R-AUTH-18), Access: Apps and Policies Edit; it never holds values.
+  invite sync (R-AUTH-18), Access: Apps and Policies Edit; it also names `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` (an R2 API token scoped to the
+  bucket, read-only is enough, used only by `scripts/lib/s3.mjs`, R-BAK-17) and `AGE_RECIPIENT` (the public `age` key for
+  backups and chat archives, R-BAK-05); it never holds values.
 - **R-PLAT-14** `deploy.yml` (optional, §12.7) reads the same two values from a protected GitHub environment's secrets.
 
 ## Acceptance criteria
@@ -140,6 +144,6 @@ project on the machine, so the app never relies on it.
 | AC-PLAT-04 | The Worker build exports `ChatRoom`, has no preview URLs and serves `/health` | R-PLAT-02 | integration test + `wrangler deploy --dry-run` 0a |
 | AC-PLAT-05 | No private route is prerendered and the client bundle contains no fixture or seeded member data | R-PLAT-01, 09 | `test:security` bundle scan |
 | AC-PLAT-06 | `scripts/cf.mjs` refuses to run with no account id, and with a token that can't see that account | R-PLAT-12 | unit test with a fake `wrangler` |
-| AC-PLAT-07 | `grep -rn 'npx wrangler\|wrangler ' package.json scripts/` finds remote calls only inside `cf.mjs` | R-PLAT-12 | `test:security` |
+| AC-PLAT-07 | `grep -rn 'npx wrangler\|wrangler \|rclone\|api.cloudflare.com\|r2.cloudflarestorage.com' package.json scripts/ src/` finds remote calls, those hosts and `rclone` only inside `scripts/cf.mjs` and the S3 helper `scripts/lib/s3.mjs` (R-BAK-17); `rclone` nowhere | R-PLAT-12, R-BAK-17 | `test:security` |
 | AC-PLAT-08 | The generated `wrangler.jsonc` has the configured `account_id`, and is gitignored | R-PLAT-13, 09 | setup test 1d |
 | AC-PLAT-09 | The dev identity is absent from the production bundle | R-PLAT-10 | `test:security` bundle scan |

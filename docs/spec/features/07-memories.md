@@ -25,29 +25,44 @@
 
 - **R-MEM-06** `POST /api/v1/media/reservations { purpose: "photo"|"avatar", imageBytes, thumbBytes, sha256,
   thumbSha256, mimeType, width, height }` checks membership, rate limits (R-MEM-13), byte limits and the quota, then
-  in one batch adds `reserved_bytes` to `storage_usage` and creates an `open` reservation with a new `media_id`,
-  expiring in 15 minutes. Over the stop threshold it returns `507 storage_full` (R-MEM-15).
+  in one batch creates an `open` reservation (new `media_id`, `sha256`, `thumb_sha256`, `mime_type`, `image_bytes`,
+  `thumb_bytes`, staging keys per R-MEM-12) and adds its bytes to `reserved_bytes`, expiring in 15 minutes, using the
+  batch-safe form of R-MEM-19. Over the stop threshold it returns `507 storage_full` (R-MEM-15).
 - **R-MEM-07** `PUT /api/v1/media/reservations/:id/image` and `.../thumb` stream the body to R2 through the native
-  binding at the final key (§7.3) while counting bytes and hashing; the stream is aborted the moment it passes the
-  reserved size. No presigned URL or S3 credential is issued (INV-3).
+  binding while counting bytes and hashing; the stream is aborted the moment it passes the reserved size. **Before
+  writing** the route requires `owner_id = caller`, `state = 'open'` and `expires_at > now` (anything else is refused
+  with a `409` (wrong state or expired) or the uniform denial (not the owner) and writes nothing), and it writes only to the reservation's **staging key**
+  (§7.3), never to the final key of a media row. A stale or repeated `PUT` therefore can only overwrite that
+  reservation's own staging object, which `complete` ignores once the state has left `open`. No presigned URL or S3
+  credential is issued (INV-3).
 - **R-MEM-08** **Validation during upload:** the declared `Content-Type` must be `image/webp` or `image/jpeg`; the
   first bytes must match that type's signature (`RIFF....WEBP`, `FF D8 FF`); the final byte count and SHA-256 must
-  equal the reservation's. Any mismatch deletes the object and fails the variant.
-- **R-MEM-09** `POST /api/v1/media/reservations/:id/complete { caption?, albumId?, takenYear? }` checks both objects
-  exist with the recorded size, then in one batch inserts the `media` row, moves the reservation's bytes from
-  `reserved_bytes` to `committed_bytes`, and marks it `completed`.
+  equal the reservation's. Any mismatch deletes the staging object and fails the variant. `complete` re-checks both (R-MEM-09), so the `PUT`
+  check is an early refusal, not the only one.
+- **R-MEM-09** `POST /api/v1/media/reservations/:id/complete { caption?, albumId?, takenYear? }` checks both staging
+  objects exist with the recorded size, copies each (stream read, write) to its final key (§7.3) while hashing, and
+  refuses on a SHA-256 mismatch; then runs the guarded `complete` transition of R-MEM-21 in one batch (reservation
+  `open → completed`, `media` row insert, bytes moved from `reserved_bytes` to `committed_bytes`). Staging objects are
+  deleted afterwards (best effort; housekeeping sweeps `staging/` keys of non-open reservations).
 - **R-MEM-10** A photo exists only after `complete` committed (INV-8). On any failure the client calls `DELETE
-  /api/v1/media/reservations/:id`, which deletes written objects and releases the bytes.
+  /api/v1/media/reservations/:id`, which runs the guarded `release` transition of R-MEM-21 and deletes the staging objects.
 - **R-MEM-11** **Housekeeping** (`JobRunner`, at most hourly when triggered by traffic, plus `npm run housekeeping`):
-  expired reservations are released and their objects deleted; a weekly reconcile lists the bucket, deletes objects
-  under `media/`/`avatars/` with no row and no open reservation, and resets `committed_bytes` to the listed total,
+  the in-request run takes its slot with a conditional `UPDATE schema_meta SET value = ? WHERE key =
+  'housekeeping_last_run_at' AND CAST(value AS INTEGER) < ?` and proceeds only if it changed a row (two concurrent
+  requests cannot both run). It releases **at most 20** expired reservations (R-MEM-21), deletes their staging
+  objects, and purges at most 20 deleted photos past the grace period (R-MEM-20); the rest wait for the next run. The
+  **reconcile is CLI-only** (`npm run housekeeping -- --reconcile`, weekly by the operator; it does not fit the
+  Workers Free CPU and subrequest limits): it lists the bucket, deletes objects under `media/`, `avatars/` and
+  `staging/` that have no live row and no open reservation, treating a soft-deleted row **past its grace period or
+  with `purged_at` set** as no row, and resets `committed_bytes` to the listed total of the objects that are kept,
   recording `last_reconciled_at`.
 
 ## 7.3 Object keys
 
-- **R-MEM-12** Keys are relative, opaque and immutable:
-  `media/v1/{media-id}/image.webp` · `media/v1/{media-id}/thumb.webp` · `avatars/v1/{user-id}/{media-id}.webp`
-  (`.jpg` when JPEG). The database stores keys, never URLs. Replacing a photo or avatar writes a new key; the old
+- **R-MEM-12** Keys are relative, opaque and immutable. **Staging:**
+  `staging/v1/{reservation-id}/image.webp` and `.../thumb.webp` (`.jpg` when JPEG), the only keys an upload `PUT`
+  writes. **Final:** `media/v1/{media-id}/image.webp` · `media/v1/{media-id}/thumb.webp` · `avatars/v1/{user-id}/{media-id}.webp`
+  (`.jpg` when JPEG), written only by `complete`. The database stores keys, never URLs. Replacing a photo or avatar writes a new key; the old
   objects are deleted after the new row committed.
 
 ## 7.4 Albums, avatars, deletion and limits
@@ -55,10 +70,17 @@
 - **R-MEM-13** Per member: 25 photos per day, 2 concurrent open reservations; avatar uploads count against the quota
   but not the daily photo limit. Avatars are one 512 px square (the browser crops) with no separate thumbnail.
 - **R-MEM-14** Albums have a name (1–80), an optional year tag (four digits) and description (≤ 500). The gallery
-  filters by album and by year (album year, else the photo's `taken_year`), newest first, 30 per page, keyset paged.
+  filters by album and by year, newest first, 30 per page, keyset paged. The year is the stored
+  `media.effective_year` (album year tag, else the photo's `taken_year`), set when the photo is completed or moved to
+  another album and rewritten for the album's photos in one batch when an album's year tag changes (R-DB-06).
   Captions are plain text ≤ 500 characters.
-- **R-MEM-20** Deleting a photo (owner or admin) sets `deleted_at`, removes it from every view at once, deletes its
-  objects and subtracts its bytes from `committed_bytes`. Board posts may reference a photo by id; a deleted photo
+- **R-MEM-20** Deleting a photo (owner or admin) sets `deleted_at`, removes it from every view and from
+  `/api/v1/media/:id/*` at once, and **keeps its objects for a grace period**: `deletedMediaGraceDays` in
+  `site.config.ts` (integer 1–90, default **7**). Housekeeping or the CLI then purges it: delete the objects (idempotent),
+  then in one batch subtract the row's `size_bytes + thumb_size_bytes` from `committed_bytes` (statement first) and set
+  `purged_at` (`WHERE purged_at IS NULL`), so bytes are subtracted once, at purge time. If the D1 write succeeded
+  and an R2 delete failed, the row stays unpurged and the next run retries. A restore UI for deleted photos is
+  deferred past v1.0 (the grace only protects backups, R-BAK-16, and mistakes handled by the CLI). Board posts may reference a photo by id; a deleted photo
   renders as a *photo removed* placeholder.
 
 ## 7.5 Delivery and caching
@@ -80,9 +102,26 @@
 - **R-MEM-18** `/admin` usage shows committed and reserved bytes, photo count, last reconcile, the R2 operation
   estimate (writes and reads counted by the app per month) and a link to the account's R2 dashboard, and states that
   the app's cap is not a billing cap (§14).
-- **R-MEM-19** Concurrent reservations can't overshoot: the reservation's quota check and increment happen in one
-  conditional `UPDATE storage_usage SET reserved_bytes = reserved_bytes + ? WHERE committed_bytes + reserved_bytes + ?
-  <= ?`, and a reservation is created only if that update changed a row.
+- **R-MEM-19** Concurrent reservations can't overshoot, in a form a D1 batch can run (a batch cannot branch on an
+  earlier statement's result): `INSERT INTO upload_reservations (…) SELECT … WHERE (SELECT committed_bytes +
+  reserved_bytes FROM storage_usage WHERE singleton_id = 1) + ? <= ?` (the same `WHERE` also holds the 2-open-
+  reservations limit of R-MEM-13), then `UPDATE storage_usage SET reserved_bytes = reserved_bytes + ? WHERE
+  singleton_id = 1 AND EXISTS (SELECT 1 FROM upload_reservations WHERE id = ?)`. The route returns `507` when the
+  insert changed no row.
+
+## 7.7 Reservation state machine
+
+- **R-MEM-21** A reservation is `open → completed | released`, no other transition (`uploaded` does not exist; the
+  `PUT` verifies and the state stays `open`). Each transition is a guarded `UPDATE` that stamps a fresh
+  `state_run_id` (a UUID per call), and every later statement of the same batch is conditioned on `EXISTS (… WHERE
+  id = ? AND state = <new state> AND state_run_id = ?)` so a repeated or racing call changes nothing:
+  - `complete`: `UPDATE … SET state='completed', state_run_id=? WHERE id=? AND owner_id=? AND state='open' AND
+    expires_at > ?`, then the `media` insert and the `reserved_bytes → committed_bytes` move, each guarded by the
+    `EXISTS` above.
+  - `release` (client `DELETE`, or housekeeping): `UPDATE … SET state='released', state_run_id=? WHERE state='open'
+    AND (id = ? AND owner_id = ?` or `id IN (<≤ 20 expired ids>))`, then `UPDATE storage_usage SET reserved_bytes =
+    reserved_bytes - (SELECT COALESCE(SUM(reserved_bytes), 0) FROM upload_reservations WHERE state_run_id = ?)`.
+    Housekeeping therefore subtracts only the rows **this run** released, never rows `complete` or another run touched.
 
 ## Acceptance criteria
 
@@ -98,3 +137,6 @@
 | AC-MEM-08 | The bucket has no public access and no custom domain | R-MEM-16 | `preflight` (R-OPS-10) |
 | AC-MEM-09 | Expired reservations are released and orphan objects removed; the counter matches the bucket after reconcile | R-MEM-11 | integration |
 | AC-MEM-10 | Media responses carry the R-MEM-17 headers and answer `If-None-Match` with `304` | R-MEM-17 | integration |
+| AC-MEM-11 | A `PUT` by another member, or to a completed, released or expired reservation, is refused, and the stored object (staging and final) is byte-identical afterwards | R-MEM-07, 21 | integration (R2 pool) |
+| AC-MEM-12 | `complete` called twice, `complete` racing the housekeeping release, and `DELETE` after `complete` each leave `reserved_bytes`/`committed_bytes` consistent (never negative, never double counted) and one `media` row at most | R-MEM-09, 19, 21 | integration |
+| AC-MEM-13 | A deleted photo vanishes from every view and from media URLs at once, keeps its objects and counted bytes for `deletedMediaGraceDays`, then is purged with bytes subtracted once; a failed R2 delete is retried next run | R-MEM-20 | integration (clock control) |

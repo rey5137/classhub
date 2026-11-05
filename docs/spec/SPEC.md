@@ -8,8 +8,9 @@ or a recurring hosting bill, as long as usage stays inside Cloudflare's free all
 - **Stack:** SvelteKit + TypeScript (Svelte 5 runes) on one Cloudflare Worker; D1 (SQLite) for every persistent record;
   a private R2 bucket for photos; one SQLite-backed Durable Object for WebSocket transport only; Cloudflare Access with
   Google sign-in in front of the hostname (D1–D6).
-- **Portable:** every Cloudflare integration sits behind a port with a local adapter (SQLite file, filesystem, Node
-  WebSocket hub, dev identity), and a backup is restorable without Cloudflare (§2.4, §13).
+- **Portable:** every Cloudflare integration sits behind a port with a local adapter (SQLite file, filesystem, in-process
+  WebSocket hub, dev identity), and an encrypted backup is restorable without Cloudflare through `--target local`
+  (§2.4, §13); a production Node deployment is deferred (§D).
 - **Not here:** a public social network, several classes per deployment, video, originals archive, push notifications,
   full-text search (§1, §D).
 
@@ -43,10 +44,10 @@ what it covers, when to read it and which ids it owns, so `head -6` decides whet
 | Admin customization, theme tokens and presets, UI primitives, i18n, accessibility | `app/10` |
 | API routes, error shape, service interfaces | `platform/11` |
 | Prerequisites, setup wizard, Access + Google setup, deploy, unlock, update, preflight | `ops/12` |
-| Backup format, backup and restore CLI, schedule, disaster recovery, leaving Cloudflare | `ops/13` |
+| Backup format, mandatory encryption, backup and restore CLI, schedule, disaster recovery, leaving Cloudflare | `ops/13` |
 | Free allowances, guardrails, graceful failure | `platform/14` |
 | Named risks and trade-offs | `reference/15` |
-| Features parked for after v1.0 | `reference/D` |
+| Features parked for after v1.0 (incl. production Node server and OIDC adapter, older-schema importers, OpenAPI) | `reference/D` |
 
 How a phase is built, sliced and verified is `docs/plan/plan.md`; each phase's **Read** list names the sections it
 needs.
@@ -114,7 +115,10 @@ contradict.
 | **D7** | Theming through CSS custom properties and theme packs | themes stay plain CSS |
 | **D8** | Full export in standard formats (SQL, NDJSON/JSON, byte copies of objects) | independent import/export tooling |
 | **D9** | No external UI component platform in v1.0 | added selectively later |
-| **D10** | The local backup CLI is the canonical backup; no promise that a Worker can zip a whole archive | `rclone`, SQL and the restore script work anywhere |
+| **D10** | The local backup CLI is the canonical backup; no promise that a Worker can zip a whole archive | SQL, plain object copies and the restore script work anywhere; backups are always `age`-encrypted (R-BAK-05) |
+
+The exit paths show where the design allows leaving, not what v1.0 ships: the Node server and OIDC adapter are deferred (§D).
+A custom domain, if used, shares the one Access application and AUD (R-OPS-16).
 
 ### 1.2 Invariants
 
