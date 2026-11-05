@@ -1,120 +1,122 @@
 # 01 — Visual direction
 
-**Status:** pinned by the owner, 2026-11-05. **Spec refs:** `app/10` (R-UI-05…12), `app/03` (routes), PRODUCT.md.
+**Status:** chosen by the owner, 2026-11-05. **Spec refs:** `app/10` (R-UI-05…12), `app/03` (routes), PRODUCT.md.
 **Read when:** building or styling any screen, a theme file, or a primitive (slice 0c onward).
+**Reference build:** a static prototype of the shell and the five member areas, kept in the private design workspace (`.impeccable/mocks/proto/`).
 
-The owner pinned the look of their own class's reunion site as Class Hub's direction. Its world (the school uniform,
-the flame tree in bloom, a two-voice serif heading) is carried into an app; its weaknesses (small text, a light blue
-that fails contrast) are fixed here. Shipped content stays synthetic (INV-6); a class's own name, years, logo and
-banner come in through `/admin` (R-UI-01).
+The owner's own class reunion site is the reference, not a template: its school-uniform blue and its warmth carry
+over, its landing-page structure does not. **Nostalgic in look, modern in use.** Shipped content stays synthetic
+(INV-6); a class's own name, years, logo and banner come in through `/admin` (R-UI-01).
 
 ## 1. The world
 
-- **Thesis:** the class's place reads like the school it came from: the pale blue of the uniform shirt, the red of the
-  phượng flowering on the last day, and headings that speak in two voices, a plain statement and its italic answer
-  (*Ảnh thì cũ. Kỷ niệm vẫn nguyên.*).
-- **Refuses:** a social feed (Facebook/Zalo), a SaaS dashboard, school-kid cuteness (stickers, doodles), heavy imagery.
-- **Mode:** Operate. The world lends type, palette, density and the signature moves below; navigation and controls are
-  standard web components (R-UI-09).
+- **Thesis:** the class is a wall of rows you browse one axis at a time (the reunion, new photos, each school
+  year, the classmates), written in ballpoint on white like the tracklist of a mixtape someone made in 2006.
+- **How it was chosen:** after two rounds the owner fused the UX of a streaming title wall (rows, focus-grow,
+  dimming) with the light tone of a cassette j-card (white inlay, ballpoint blue, one red stripe, hand-lettered
+  heads), in light and dark.
+- **Refuses:** a social feed (Facebook/Zalo), a SaaS dashboard, school-kid cuteness (stickers, doodles), heavy or
+  dense screens, eyebrow labels and section numbers.
+- **Mode:** Operate. The world lends type, palette, density and the signature interaction; navigation and controls
+  are standard web components (R-UI-09).
 
 ## 2. Signature moves
 
-1. **The two-voice heading.** A page title is one line in Be Vietnam Pro or Playfair roman, with an optional second line in
-   Playfair Display italic (`PageHeader` has `title` and `echo`). Used on Home, Memories, Discussions, Members and the
-   empty states; never on Admin, forms, or chat.
-2. **Numbered eyebrows.** Each section of a screen carries a tracked small-caps label with its number:
-   `01 / ẢNH MỚI`, `02 / ĐANG BÀN`. Numbers follow the navigation order from `site.config.ts`, so the same area has the
-   same number everywhere: the class's own table of contents.
-3. **The phượng mark.** One authored SVG blossom (five petals, one with a pale streak), drawn in `--color-mark`, sits
-   on the class-year numeral in the brand lock-up and marks the one item that is new since the member's last visit.
-   At most one blossom per viewport; never as a pattern, background or bullet.
+1. **Focus-grow.** Photos and albums sit in horizontal rails (`Row` > `Rail` > `Tile`, 4:3, scroll-snap). The tile
+   under the pointer or keyboard focus grows (156 → 236 px on phones, 220 → 340 px on desktop) and reveals its title
+   and uploader; while one row is focused the other rows dim to `--color-dim`. 150 ms ease-out; instant under
+   `prefers-reduced-motion`. The newest item may start grown (`.grow`).
+2. **The spine stripe.** A 5 px `--color-mark` stripe beside the class name in the top bar, like the spine of a
+   tape. `--color-mark` appears in only two other places: the `mới` pill on the single newest thing per row, and
+   the focus ring. Never a fill, never body text.
+3. **Hand-lettered heads.** Page titles and row heads are set in Patrick Hand in `--color-accent` (ballpoint ink);
+   everything read or operated is Be Vietnam Pro. Dates and times sit right-aligned in tabular figures, like running
+   times on a tracklist.
 
 ## 3. Type
 
-Faces are bundled woff2 files (R-UI-07), both SIL OFL, with the Vietnamese subset:
+Bundled woff2 files (R-UI-07), both SIL OFL, with the Vietnamese subset:
 
-- **Be Vietnam Pro** (400, 500, 600, 700) for everything that is read or operated. Designed for Vietnamese; its
-  diacritics stack cleanly at small sizes.
-- **Playfair Display** (500 roman, 500 italic) for display only: page titles, their echo line, the class-year numeral.
-
-One fixed scale, nothing in between (rem at 16 px root):
+- **Be Vietnam Pro** (400, 500, 600, 700) for everything read or operated.
+- **Patrick Hand** (400) for page titles, row heads and the class name in the brand lock-up only; never for body,
+  controls or chat. `minimal` replaces it with Be Vietnam Pro 700/600.
 
 | Token | Size / line | Face | Use |
 |---|---|---|---|
-| `--text-display` | 2.75 / 1.1 (3.5 at ≥ 1024 px) | Playfair 500 | Home title, class-year numeral |
-| `--text-title` | 1.875 / 1.2 | Playfair 500 | page titles and echo line |
-| `--text-heading` | 1.25 / 1.35 | Be Vietnam Pro 600 | card and section headings |
-| `--text-body` | 1 / 1.6 | Be Vietnam Pro 400 | body, chat, comments (never below 16 px) |
-| `--text-small` | 0.875 / 1.5 | Be Vietnam Pro 500 | meta (author · time), captions |
-| `--text-eyebrow` | 0.75 / 1.4, tracking 0.14em, caps | Be Vietnam Pro 700 | numbered eyebrows, tab labels |
+| `--text-display` | 2.125 / 1.15 (2.875 at ≥ 768 px) | Patrick Hand | page title (`h1`) |
+| `--text-title` | 1.625 / 1.2 | Patrick Hand | row heads (`h2`) |
+| `--text-heading` | 1.25 / 1.3 | Be Vietnam Pro 600 | sheet titles (the reunion) |
+| `--text-body` | 1 / 1.6 | Be Vietnam Pro 400 | body, chat, list titles (600) |
+| `--text-small` | 0.875 / 1.5 | Be Vietnam Pro 400–600 | meta, times, captions, chips, tab labels (0.75, 600) |
 
-The reference site's 10–14 px body and labels are not carried over: body is 16 px, nothing interactive is under 14 px.
+Nothing read is below 16 px except meta, captions and tab labels; nothing interactive is below 14 px.
 
 ## 4. Themes
 
-All three set only the R-UI-05 contract tokens, plus `--color-mark` (the phượng colour) and the two font tokens.
-Ratios are measured against the token's own ground and checked again by the 0c contrast test.
+Every theme sets only the R-UI-05 contract plus `--color-mark`, `--color-mark-contrast`, `--color-dim` and the two
+font tokens. All pairs below were measured (text 4.5:1, controls and focus 3:1); the 0c contrast test repeats it.
 
-### `yearbook`: the uniform (default)
+### `yearbook` (default): uniform pale blue, ballpoint ink
 
-| Token | Light | Dark | Notes |
-|---|---|---|---|
-| `--color-bg` | `#f0f9fd` | `#0e1b2a` | uniform pale blue / school-night navy |
-| `--color-surface` | `#ffffff` | `#15263a` | cards, sheets |
-| `--color-surface-2` | `#e4f2fa` | `#1c3149` | selected rows, chat bubbles of others |
-| `--color-text` | `#344956` | `#e8eef3` | 8.8:1 / 14.9:1 |
-| `--color-muted` | `#526e7e` | `#9fb4c4` | 5.1:1 / 8.1:1 |
-| `--color-accent` | `#176fb0` | `#5fb3e6` | buttons, links, active tab; the reference's `#229bd0` (3.2:1) is not used for text or fills |
-| `--color-accent-contrast` | `#ffffff` | `#0e1b2a` | 5.3:1 / 7.5:1 |
-| `--color-border` | `#5f8aa3` | `#7b9bb3` | control outlines, 3.5:1 / 5.9:1 |
-| `--color-divider` | `#d6e9f3` | `#24405c` | decorative rules only (not a control boundary) |
-| `--color-mark` | `#ed3839` | `#ff6b5e` | phượng mark and "new" only; never body text |
-| `--color-danger` | `#c8262a` | `#ff6b5e` | 5.2:1 / 6.2:1 |
-| `--color-warning` | `#a15c00` | `#e0a43a` | |
-| `--color-success` | `#2f7d4f` | `#3fb37f` | |
-| `--color-focus` | `#ed3839` | `#ff6b5e` | 2 px ring, 2 px offset; 3.8:1 / 6.2:1 |
-| `--radius-card` / `--radius-control` | `10px` / `6px` | same | |
-| `--shadow-card` | `none` | `none` | depth is a 1 px `--color-divider` rule |
+| Token | Light | Dark (school-night navy) |
+|---|---|---|
+| `--color-bg` | `#f0f9fd` | `#0d1a29` |
+| `--color-surface` | `#ffffff` | `#13243a` |
+| `--color-surface-2` | `#e4f0f8` | `#1b3250` |
+| `--color-text` | `#26404f` (10.2:1) | `#eaf1f6` (15.4:1) |
+| `--color-muted` | `#4f6b7b` (5.3:1) | `#a3b8c8` (8.6:1) |
+| `--color-accent` | `#1f4f9c` (7.4:1) | `#8cc4ef` (9.4:1) |
+| `--color-accent-contrast` | `#ffffff` | `#0d1a29` |
+| `--color-border` | `#6b8fa6` (3.2:1) | `#6f8fa8` (4.6:1) |
+| `--color-divider` | `#d3e6f1` | `#22395a` |
+| `--color-mark` / `-contrast` | `#d9302f` / `#ffffff` | `#ff6b5e` / `#1a0d0b` |
+| `--color-focus` | `#d9302f` | `#ff6b5e` |
+| `--color-danger` / `--color-success` | `#c0262a` / `#2f7d4f` | `#ff7b70` / `#4fc08d` |
+| `--color-dim` | `0.5` | `0.45` |
+| `--radius-card` / `--radius-control` | `12px` / `8px` | same |
+| `--shadow-card` | `none` | `none` |
 
 ### `minimal`: plain
 
-Be Vietnam Pro only (`--font-heading` = `--font-body`), no echo line in italics (the echo renders roman, muted).
-Light: bg `#f7f7f8`, surface `#ffffff`, text `#1f2937`, muted `#6b7280`, accent `#1d4ed8`, border `#7b8494`,
-mark `#b91c1c`. Dark: bg `#111318`, surface `#1a1d24`, text `#e5e7eb`, muted `#8a94a6`, accent `#60a5fa`
-(contrast text `#111318`), border `#6b7488`, mark `#ef4444`. Radii `8px` / `6px`.
+Be Vietnam Pro only. Light: bg `#f6f7f8`, surface `#ffffff`, surface-2 `#eef0f3`, text `#1f2937`, muted `#5b6472`,
+accent `#1d4ed8`, border `#7b8494`, divider `#e3e6ea`, mark `#b91c1c`, focus = accent. Dark: bg `#111318`, surface
+`#1a1d24`, surface-2 `#232733`, text `#e5e7eb`, muted `#9aa3b2`, accent `#7fb0ff` (contrast `#111318`), border
+`#6b7488`, divider `#2a2f3a`, mark `#f87171`. Radii `10px` / `6px`.
 
 ### `night`: summer night, dark only
 
-Ignores display mode (R-UI-06). bg `#14121f`, surface `#1d1a2b`, surface-2 `#272338`, text `#f2e9dc` (15.4:1),
-muted `#a89fb8` (7.3:1), accent and mark `#ff7a5c` (contrast text `#14121f`, 7.2:1), border `#8a809f` (5.0:1),
-divider `#2e2942`. Same faces and radii as `yearbook`.
+Ignores display mode (R-UI-06). bg `#14121f`, surface `#1d1a2b`, surface-2 `#272338`, text `#f2e9dc`, muted
+`#a89fb8`, accent `#ff8a6b` (contrast `#14121f`), border `#8a809f`, divider `#2e2942`, mark and focus `#ffc65c` (a
+street-lamp amber). Same faces and radii as `yearbook`.
 
 ## 5. Shell
 
-- **Mobile (< 768 px):** a 56 px top bar holds the brand lock-up (class-year numeral with the phượng mark, site name,
-  years) and the member's avatar; a bottom tab bar with the five areas (Trang chủ, Kỷ niệm, Thảo luận, Trò chuyện,
-  Bạn học) in `--text-eyebrow`, icons above labels, active tab in `--color-accent` with a 2 px top rule. Touch
-  targets ≥ 44 px. Admin is reached from the avatar menu.
-- **Desktop (≥ 768 px):** one top bar with the lock-up left and the five areas plus avatar right; content column
-  `--content-max: 72rem`, photo wall up to the full width.
-- **Ground:** pages sit on `--color-bg`; cards on `--color-surface` separated by `--color-divider` rules, no shadows.
-- **Motion:** 150 ms ease-out on state changes only; nothing moves on scroll; `prefers-reduced-motion` turns it off.
+- **Top bar** (56 px phone, 64 px desktop) on `--color-surface` with a 1 px divider: spine stripe + class name in
+  hand lettering + years, then (desktop only) the five areas as text links with a 2 px accent underline on the current
+  one, then the member's avatar (opens the account menu; Admin lives there).
+- **Bottom tab bar** (< 768 px): five areas, drawn icons above 12 px labels, current in accent with a 2 px top rule,
+  each target ≥ 44 px. Areas: Trang chủ, Kỷ niệm, Thảo luận, Trò chuyện, Bạn học.
+- **Content** column `--content-max: 75rem`; rails bleed to the screen edge on phones.
+- **Sheets** (`--color-surface`, 1 px `--color-divider`, `--radius-card`) hold lists and the reunion; no shadows,
+  no nested sheets.
 
 ## 6. Per area
 
-- **Home (`/`):** the class lock-up at display size with the two-voice welcome (from `/admin`), then numbered sections:
-  next reunion (date, place, one action), new photos (a strip), active threads, pinned info. This is the only screen
-  with a hero, and it is type, not a photo, unless the admin set a banner.
-- **Memories:** whole-cell grid (2 columns at 390 px, 4–6 on desktop), square thumbnails, caption and uploader under
-  each; album and year filters as standard chips.
-- **Discussions:** list rows (title, author, reply count, last activity), pinned first with the eyebrow `GHIM`.
-- **Chat:** standard bubbles: own in `--color-accent` with `--color-accent-contrast`, others in `--color-surface-2`;
-  no two-voice heading, no blossom.
-- **Members:** a list with avatar, display name, city; profile pages show only what the viewer may see (R-PROF-04).
-- **Admin, profile, locked, denied:** plain Operate screens: title, forms, tables; no ornament.
+- **Home:** greeting title ("Chào {name}, lớp mình đây.") with what changed since the last visit; the reunion sheet
+  (date, place, who's coming, "Tôi đến" + "Chưa chắc"), beside the title on desktop; rows: Ảnh mới, Đang bàn (list
+  sheet) beside Bạn học (portrait rail), then one row per recent school year or album.
+- **Memories (Kỷ niệm):** title with counts and "Thêm ảnh"; year chips and a Theo hàng / Lưới switch; rows per
+  album with focus-grow, or a whole-cell grid (2 columns on phones, 5 on desktop, 2 px gutters).
+- **Discussions (Thảo luận):** one list sheet: pinned first (`GHIM` in accent), title, author · replies, last
+  activity right-aligned; "Viết bài" as the primary action.
+- **Chat (Trò chuyện):** 760 px column; day separators; others' bubbles in `--color-surface-2` with name · time,
+  own bubbles in `--color-accent` on the right; the composer is fixed above the tab bar.
+- **Members (Bạn học):** search field; a grid of sheets with portrait, name, city (only what the viewer may see,
+  R-PROF-04); "chưa vào" count shown to admins only.
+- **Admin, profile, locked, denied:** plain Operate screens with a hand-lettered title only; no rails, no mark.
 
-## 7. What is not carried over from the reference
+## 7. Not carried over from the reference
 
-The landing-page structure (hero photo, ten long sections, ribbon timeline), Google Sheets integration, hosted Google
-Fonts, the hover lift on buttons, 10 px labels and the light-blue button fill. The class's photos, crest and names
-are the owner's content and are entered through `/admin`, never committed.
+The landing-page structure (hero photo, long sections, ribbon timeline), Google Sheets integration, hosted Google
+Fonts, Playfair display titles, numbered eyebrows, 10–14 px body text, and the light-blue button fill (3.2:1). The
+class's photos, crest and names are the owner's content, entered through `/admin`.

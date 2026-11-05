@@ -46,7 +46,7 @@ restorable without Cloudflare.
 - Rebranding without code: site name, class years, description, welcome message, banner, logo, favicon, theme
   preset, light/dark/system mode, accent colour (contrast-checked), card density, default language, feature toggles
   (`docs/spec/app/10-themes-i18n.md`).
-- Three shipped theme presets: `minimal` (clean, neutral), `yearbook` (warm, nostalgic, paper tones, the default),
+- Three shipped theme presets: `minimal` (clean, neutral), `yearbook` (nostalgic: uniform pale blue and ballpoint ink, the default),
   `night` (dark by design). New themes set only contract tokens; pages are never forked for styling.
 - Photos are resized and re-encoded in the browser before upload; no video; no full-text search; no push
   notifications.
@@ -56,9 +56,9 @@ restorable without Cloudflare.
 ## Brand Commitments
 
 - The shipped product is neutral: each class supplies its own name, years, logo, banner and accent from `/admin`.
-- The visual direction is pinned by the owner from their own class's reunion site: the school-uniform pale blue, the
-  red phượng (flame tree) flower, Playfair Display titles with an italic second voice over Be Vietnam Pro, numbered
-  section labels (`docs/design/01-DIRECTION.md`). The first real deployment is the owner's class; its identity is
+- The visual direction takes the owner's own class reunion site as its reference, not a copy: nostalgic in look,
+  modern in use. The class is a wall of rows in ballpoint blue on uniform pale blue, with one red mark
+  (`docs/design/01-DIRECTION.md`). The first real deployment is the owner's class; its identity is
   entered through `/admin`, never committed.
 - Placeholder content is always synthetic.
 

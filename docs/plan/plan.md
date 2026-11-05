@@ -134,9 +134,9 @@ successful independent restore. Deploying is not enough.
 
 #### Slice 0c — themes, i18n and the shell
 - **Covers:** AC-UI-04, AC-UI-05, AC-UI-06, AC-UI-07, AC-NAV-01 (shell routes as placeholders).
-- **Design:** follow `docs/design/01-DIRECTION.md` (owner-pinned direction): bundled Be Vietnam Pro and Playfair
-  Display, the fixed type scale, the three themes' token tables, the phượng mark SVG, `PageHeader` with `title` and
-  `echo`, numbered eyebrows, and the shell of §5.
+- **Design:** follow `docs/design/01-DIRECTION.md` (owner-chosen direction): bundled Be Vietnam Pro and Patrick
+  Hand, the fixed type scale, the three themes' token tables, the shell with the red spine stripe, and the `Row`,
+  `Rail` and `Tile` primitives with focus-grow (§5–6). The prototype in `.impeccable/mocks/proto/` is the reference.
 - `tokens.css`, `minimal`, `yearbook`, `night`; `registry.ts`; `site.config.ts` and the validated config object;
   server-side `data-theme`/`data-mode`.
 - The primitives of R-UI-09; `AppShell` with the mobile tab bar and desktop top bar; placeholder pages for every §3.1
