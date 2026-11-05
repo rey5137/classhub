@@ -31,6 +31,9 @@ CREATE TABLE `backup_runs` (
 --> statement-breakpoint
 CREATE TABLE `chat_archives` (
 	`id` text PRIMARY KEY NOT NULL,
+	`file_name` text NOT NULL,
+	`from_id` text NOT NULL,
+	`to_id` text NOT NULL,
 	`range_start` integer NOT NULL,
 	`range_end` integer NOT NULL,
 	`record_count` integer NOT NULL,
@@ -40,6 +43,7 @@ CREATE TABLE `chat_archives` (
 	`purged_at` integer
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `chat_archives_file_name_unique` ON `chat_archives` (`file_name`);--> statement-breakpoint
 CREATE TABLE `chat_messages` (
 	`id` text PRIMARY KEY NOT NULL,
 	`room_id` text NOT NULL,
@@ -111,15 +115,19 @@ CREATE TABLE `media` (
 	`thumb_sha256` text NOT NULL,
 	`caption` text,
 	`taken_year` integer,
+	`effective_year` integer,
 	`created_at` integer NOT NULL,
 	`deleted_at` integer,
+	`purged_at` integer,
 	FOREIGN KEY (`owner_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE restrict,
-	FOREIGN KEY (`album_id`) REFERENCES `albums`(`id`) ON UPDATE no action ON DELETE set null
+	FOREIGN KEY (`album_id`) REFERENCES `albums`(`id`) ON UPDATE no action ON DELETE set null,
+	CONSTRAINT "media_media_type_check" CHECK("media"."media_type" in ('photo', 'avatar', 'site'))
 );
 --> statement-breakpoint
 CREATE INDEX `media_album_idx` ON `media` (`album_id`,"created_at" desc,"id" desc);--> statement-breakpoint
 CREATE INDEX `media_owner_idx` ON `media` (`owner_id`,`created_at`);--> statement-breakpoint
-CREATE INDEX `media_taken_year_idx` ON `media` (`taken_year`,"created_at" desc,"id" desc);--> statement-breakpoint
+CREATE INDEX `media_effective_year_idx` ON `media` (`effective_year`,"created_at" desc,"id" desc);--> statement-breakpoint
+CREATE INDEX `media_deleted_purged_idx` ON `media` (`deleted_at`,`purged_at`);--> statement-breakpoint
 CREATE TABLE `posts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`author_id` text NOT NULL,
@@ -183,22 +191,31 @@ CREATE TABLE `upload_reservations` (
 	`media_id` text,
 	`purpose` text NOT NULL,
 	`reserved_bytes` integer NOT NULL,
+	`image_bytes` integer NOT NULL,
+	`thumb_bytes` integer NOT NULL,
+	`sha256` text NOT NULL,
+	`thumb_sha256` text NOT NULL,
+	`mime_type` text NOT NULL,
 	`object_key` text NOT NULL,
 	`thumb_key` text NOT NULL,
 	`state` text DEFAULT 'open' NOT NULL,
+	`state_run_id` text,
 	`created_at` integer NOT NULL,
 	`expires_at` integer NOT NULL,
 	FOREIGN KEY (`owner_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE restrict,
-	FOREIGN KEY (`media_id`) REFERENCES `media`(`id`) ON UPDATE no action ON DELETE set null
+	CONSTRAINT "upload_reservations_state_check" CHECK("upload_reservations"."state" in ('open', 'completed', 'released'))
 );
 --> statement-breakpoint
 CREATE INDEX `upload_reservations_state_idx` ON `upload_reservations` (`state`,`expires_at`);--> statement-breakpoint
+CREATE INDEX `upload_reservations_state_run_idx` ON `upload_reservations` (`state_run_id`);--> statement-breakpoint
 CREATE TABLE `users` (
 	`id` text PRIMARY KEY NOT NULL,
 	`auth_email` text NOT NULL,
+	`access_sub` text,
 	`display_name` text NOT NULL,
 	`display_name_norm` text NOT NULL,
 	`preferred_name` text,
+	`preferred_name_norm` text,
 	`role` text DEFAULT 'member' NOT NULL,
 	`status` text DEFAULT 'invited' NOT NULL,
 	`avatar_media_id` text,
@@ -211,4 +228,6 @@ CREATE TABLE `users` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `users_auth_email_unique` ON `users` (`auth_email`);--> statement-breakpoint
 CREATE INDEX `users_status_display_name_norm_idx` ON `users` (`status`,`display_name_norm`);--> statement-breakpoint
-INSERT INTO `schema_meta` (`key`, `value`) VALUES ('schema_version', '1');
+CREATE INDEX `users_status_preferred_name_norm_idx` ON `users` (`status`,`preferred_name_norm`);--> statement-breakpoint
+INSERT INTO `schema_meta` (`key`, `value`) VALUES ('schema_version', '1');--> statement-breakpoint
+INSERT INTO `schema_meta` (`key`, `value`) VALUES ('housekeeping_last_run_at', '0');

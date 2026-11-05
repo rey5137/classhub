@@ -12,3 +12,4 @@ backups/
 .env*
 docs/
 *.md
+.claude-out/

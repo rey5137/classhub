@@ -32,6 +32,42 @@ function userRow(email = `${uuidv7()}@example.com`) {
   };
 }
 
+function mediaRow(ownerId: string) {
+  return {
+    id: uuidv7(),
+    ownerId,
+    mediaType: 'photo' as const,
+    objectKey: `media/v1/${uuidv7()}/image.webp`,
+    thumbKey: `media/v1/${uuidv7()}/thumb.webp`,
+    mimeType: 'image/webp',
+    width: 100,
+    height: 100,
+    sizeBytes: 1000,
+    thumbSizeBytes: 200,
+    sha256: uuidv7(),
+    thumbSha256: uuidv7(),
+  };
+}
+
+function reservationRow(ownerId: string) {
+  const id = uuidv7();
+  return {
+    id,
+    ownerId,
+    mediaId: uuidv7(),
+    purpose: 'photo' as const,
+    reservedBytes: 1200,
+    imageBytes: 1000,
+    thumbBytes: 200,
+    sha256: uuidv7(),
+    thumbSha256: uuidv7(),
+    mimeType: 'image/webp',
+    objectKey: `staging/v1/${id}/image.webp`,
+    thumbKey: `staging/v1/${id}/thumb.webp`,
+    expiresAt: Date.now() + 15 * 60 * 1000,
+  };
+}
+
 export function databaseContract(label: string, create: DatabaseFactory): void {
   describe(`AC-PLAT-03 Database contract (${label})`, () => {
     it('AC-DB-02 enforces the users.auth_email unique constraint', async () => {
@@ -97,6 +133,70 @@ export function databaseContract(label: string, create: DatabaseFactory): void {
           async () =>
             await database.db.insert(schema.chatMessages).values({ ...message, id: uuidv7() }),
         ).rejects.toThrow();
+      });
+    });
+
+    it('AC-DB-02 enforces the chat_archives.file_name unique constraint', async () => {
+      await withDatabase(create, async (database) => {
+        const fileName = `chat/${uuidv7()}_${uuidv7()}.ndjson.age`;
+        const archive = {
+          id: uuidv7(),
+          fileName,
+          fromId: uuidv7(),
+          toId: uuidv7(),
+          rangeStart: 1,
+          rangeEnd: 2,
+          recordCount: 2,
+          sha256: uuidv7(),
+          exportedAt: Date.now(),
+        };
+        await database.db.insert(schema.chatArchives).values(archive);
+        await expect(
+          async () =>
+            await database.db.insert(schema.chatArchives).values({ ...archive, id: uuidv7() }),
+        ).rejects.toThrow();
+      });
+    });
+
+    it('AC-DB-02 rejects a media row whose media_type is not photo, avatar or site', async () => {
+      await withDatabase(create, async (database) => {
+        const owner = userRow();
+        await database.db.insert(schema.users).values(owner);
+        for (const mediaType of ['photo', 'site'] as const) {
+          await database.db
+            .insert(schema.media)
+            .values({ ...mediaRow(owner.id), id: uuidv7(), mediaType });
+        }
+        await expect(
+          async () =>
+            await database.db
+              .insert(schema.media)
+              .values({ ...mediaRow(owner.id), id: uuidv7(), mediaType: 'video' as 'photo' }),
+        ).rejects.toThrow();
+      });
+    });
+
+    it('R-MEM-21 rejects an upload reservation state outside open, completed or released', async () => {
+      await withDatabase(create, async (database) => {
+        const owner = userRow();
+        await database.db.insert(schema.users).values(owner);
+        await expect(
+          async () =>
+            await database.db
+              .insert(schema.uploadReservations)
+              .values({ ...reservationRow(owner.id), state: 'uploaded' as 'open' }),
+        ).rejects.toThrow();
+      });
+    });
+
+    it('R-MEM-09 does not require a media row when a reservation is created', async () => {
+      await withDatabase(create, async (database) => {
+        const owner = userRow();
+        await database.db.insert(schema.users).values(owner);
+        const reservation = reservationRow(owner.id);
+        await expect(
+          database.db.insert(schema.uploadReservations).values(reservation),
+        ).resolves.toBeDefined();
       });
     });
 

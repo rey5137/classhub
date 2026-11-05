@@ -12,9 +12,11 @@ export const users = sqliteTable(
   {
     id: text('id').primaryKey(),
     authEmail: text('auth_email').notNull(),
+    accessSub: text('access_sub'),
     displayName: text('display_name').notNull(),
     displayNameNorm: text('display_name_norm').notNull(),
     preferredName: text('preferred_name'),
+    preferredNameNorm: text('preferred_name_norm'),
     role: text('role', { enum: ['member', 'admin'] })
       .notNull()
       .default('member'),
@@ -33,6 +35,7 @@ export const users = sqliteTable(
   (table) => [
     uniqueIndex('users_auth_email_unique').on(table.authEmail),
     index('users_status_display_name_norm_idx').on(table.status, table.displayNameNorm),
+    index('users_status_preferred_name_norm_idx').on(table.status, table.preferredNameNorm),
   ],
 );
 
@@ -154,7 +157,7 @@ export const media = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
     albumId: text('album_id').references(() => albums.id, { onDelete: 'set null' }),
-    mediaType: text('media_type', { enum: ['photo', 'avatar'] }).notNull(),
+    mediaType: text('media_type', { enum: ['photo', 'avatar', 'site'] }).notNull(),
     objectKey: text('object_key').notNull(),
     thumbKey: text('thumb_key').notNull(),
     mimeType: text('mime_type').notNull(),
@@ -166,17 +169,21 @@ export const media = sqliteTable(
     thumbSha256: text('thumb_sha256').notNull(),
     caption: text('caption'),
     takenYear: integer('taken_year', { mode: 'number' }),
+    effectiveYear: integer('effective_year', { mode: 'number' }),
     createdAt: integer('created_at', { mode: 'number' }).notNull().$defaultFn(now),
     deletedAt: integer('deleted_at', { mode: 'number' }),
+    purgedAt: integer('purged_at', { mode: 'number' }),
   },
   (table) => [
+    check('media_media_type_check', sql`${table.mediaType} in ('photo', 'avatar', 'site')`),
     index('media_album_idx').on(table.albumId, sql`${table.createdAt} desc`, sql`${table.id} desc`),
     index('media_owner_idx').on(table.ownerId, table.createdAt),
-    index('media_taken_year_idx').on(
-      table.takenYear,
+    index('media_effective_year_idx').on(
+      table.effectiveYear,
       sql`${table.createdAt} desc`,
       sql`${table.id} desc`,
     ),
+    index('media_deleted_purged_idx').on(table.deletedAt, table.purgedAt),
   ],
 );
 
@@ -205,16 +212,23 @@ export const chatMessages = sqliteTable(
   ],
 );
 
-export const chatArchives = sqliteTable('chat_archives', {
-  id: text('id').primaryKey(),
-  rangeStart: integer('range_start', { mode: 'number' }).notNull(),
-  rangeEnd: integer('range_end', { mode: 'number' }).notNull(),
-  recordCount: integer('record_count', { mode: 'number' }).notNull(),
-  sha256: text('sha256').notNull(),
-  exportedAt: integer('exported_at', { mode: 'number' }).notNull(),
-  verifiedAt: integer('verified_at', { mode: 'number' }),
-  purgedAt: integer('purged_at', { mode: 'number' }),
-});
+export const chatArchives = sqliteTable(
+  'chat_archives',
+  {
+    id: text('id').primaryKey(),
+    fileName: text('file_name').notNull(),
+    fromId: text('from_id').notNull(),
+    toId: text('to_id').notNull(),
+    rangeStart: integer('range_start', { mode: 'number' }).notNull(),
+    rangeEnd: integer('range_end', { mode: 'number' }).notNull(),
+    recordCount: integer('record_count', { mode: 'number' }).notNull(),
+    sha256: text('sha256').notNull(),
+    exportedAt: integer('exported_at', { mode: 'number' }).notNull(),
+    verifiedAt: integer('verified_at', { mode: 'number' }),
+    purgedAt: integer('purged_at', { mode: 'number' }),
+  },
+  (table) => [uniqueIndex('chat_archives_file_name_unique').on(table.fileName)],
+);
 
 export const siteSettings = sqliteTable('site_settings', {
   key: text('key').primaryKey(),
@@ -242,20 +256,34 @@ export const uploadReservations = sqliteTable(
     ownerId: text('owner_id')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
-    mediaId: text('media_id').references(() => media.id, { onDelete: 'set null' }),
+    // R-MEM-09: the media row does not exist when the reservation is created.
+    mediaId: text('media_id'),
     purpose: text('purpose', { enum: ['photo', 'avatar'] }).notNull(),
     reservedBytes: integer('reserved_bytes', { mode: 'number' }).notNull(),
+    imageBytes: integer('image_bytes', { mode: 'number' }).notNull(),
+    thumbBytes: integer('thumb_bytes', { mode: 'number' }).notNull(),
+    sha256: text('sha256').notNull(),
+    thumbSha256: text('thumb_sha256').notNull(),
+    mimeType: text('mime_type').notNull(),
     objectKey: text('object_key').notNull(),
     thumbKey: text('thumb_key').notNull(),
     state: text('state', {
-      enum: ['open', 'uploaded', 'completed', 'released'],
+      enum: ['open', 'completed', 'released'],
     })
       .notNull()
       .default('open'),
+    stateRunId: text('state_run_id'),
     createdAt: integer('created_at', { mode: 'number' }).notNull().$defaultFn(now),
     expiresAt: integer('expires_at', { mode: 'number' }).notNull(),
   },
-  (table) => [index('upload_reservations_state_idx').on(table.state, table.expiresAt)],
+  (table) => [
+    check(
+      'upload_reservations_state_check',
+      sql`${table.state} in ('open', 'completed', 'released')`,
+    ),
+    index('upload_reservations_state_idx').on(table.state, table.expiresAt),
+    index('upload_reservations_state_run_idx').on(table.stateRunId),
+  ],
 );
 
 export const rateEvents = sqliteTable(

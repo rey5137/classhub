@@ -211,7 +211,11 @@ function actualSchema(client: Database.Database): ExpectedTable[] {
       client.prepare(`PRAGMA foreign_key_list('${name}')`).all() as ForeignKeyRow[],
     );
 
-    const checks = [...(tableSql ?? '').matchAll(/CONSTRAINT\s+"?([\w]+)"?\s+CHECK\s*\(([^)]*)\)/g)]
+    const checks = [
+      ...(tableSql ?? '').matchAll(
+        /CONSTRAINT\s+"?([\w]+)"?\s+CHECK\s*\(((?:[^()]|\([^)]*\))*)\)/g,
+      ),
+    ]
       .map((match) => ({
         name: match[1]!,
         expression: normalizeExpression(match[2]!),
@@ -277,6 +281,18 @@ describe('AC-DB-01 schema drift', () => {
     const client = migratedClient();
     try {
       expect(diffSchema(expectedSchema(), actualSchema(client))).toEqual([]);
+    } finally {
+      client.close();
+    }
+  });
+
+  it('AC-DB-01 detects a changed CHECK', () => {
+    const original = readFileSync(join('migrations', '0001_init.sql'), 'utf8');
+    const sql = original.replace("('photo', 'avatar', 'site')", "('photo', 'avatar')");
+    expect(sql).not.toBe(original);
+    const client = migratedClient(sql);
+    try {
+      expect(diffSchema(expectedSchema(), actualSchema(client))).toContain('check on media');
     } finally {
       client.close();
     }

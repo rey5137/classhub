@@ -85,6 +85,7 @@ export async function seedDemo(
     displayName: member.displayName,
     displayNameNorm: member.displayName.toLowerCase(),
     preferredName: member.preferredName,
+    preferredNameNorm: member.preferredName?.toLowerCase() ?? null,
     role: member.role,
     status: 'active' as const,
     createdAt: now,

@@ -63,6 +63,7 @@ const driverImports = {
 export default tseslint.config(
   {
     ignores: [
+      '.claude-out/',
       '.svelte-kit/',
       '.wrangler/',
       'build/',
