@@ -18,10 +18,10 @@
 | `/discussions/[id]` | Thread | post, one-level comments, edit/delete, admin pin/lock |
 | `/chat` | Live chat | one room, recent history, online count, older messages, reconnect state |
 | `/members` | Classmates | searchable directory of active members |
-| `/members/[id]` | Member | name, avatar, short bio, contact fields visible to the viewer |
+| `/members/[id]` | Member | name, avatar, short bio, contact fields visible to the viewer; display name only when the owner isn't `active` (R-PROF-13) |
 | `/profile` | My profile | names, avatar, contact fields, per-field visibility, my data export, deletion request |
 | `/admin` | Administration | invites, suspension, info pages, pinned posts, site settings and theme, usage, backup status |
-| `/locked` | Setup locked | shown to everyone while `SETUP_LOCKED` (R-AUTH-12); no data |
+| `/locked` | Setup locked | shown to everyone while `site_settings.setup_state` is not `unlocked` (R-AUTH-12); no data |
 | `/denied` | No access | uniform screen for a valid Google account with no active membership (R-AUTH-11) |
 
 - **R-NAV-01** Navigation order and visible sections come from `site.config.ts` and admin feature flags (§10.1). The
@@ -37,7 +37,7 @@
 - **R-NAV-04** A `users` row has one `status`: `invited` (on the list, never signed in), `active`, `suspended`. Its
   `role` is `member` or `admin`. Only `active` users reach content; `invited` becomes `active` on the first valid
   signed login with that email (R-AUTH-08); `suspended` is denied immediately, including on an open WebSocket
-  (R-CHAT-09).
+  (R-CHAT-09, R-CHAT-16). Content also stops when the site is locked (R-OPS-11) or the feature is off (R-NAV-02), for open sockets too.
 - **R-NAV-05** **Authorization is enforced on the server** by `src/lib/server/auth/permissions.ts`, one function per
   action (`can(member, 'post.delete', post)`); Svelte only hides controls the server would refuse anyway.
 - **R-NAV-06** At least one active admin must remain: demoting or suspending the last active admin is refused.

@@ -1,0 +1,65 @@
+/* R-UI-06: yearbook, the default. Uniform pale blue, ballpoint ink, one red mark. */
+[data-theme='yearbook'] {
+  --font-heading: 'Patrick Hand', 'Be Vietnam Pro', cursive;
+  --font-body: 'Be Vietnam Pro', system-ui, sans-serif;
+
+  --color-bg: #f0f9fd;
+  --color-surface: #ffffff;
+  --color-surface-2: #e4f0f8;
+  --color-text: #26404f;
+  --color-muted: #4f6b7b;
+  --color-accent: #1f4f9c;
+  --color-accent-contrast: #ffffff;
+  --color-border: #6b8fa6;
+  --color-divider: #d3e6f1;
+  --color-mark: #d9302f;
+  --color-mark-contrast: #ffffff;
+  --color-focus: #d9302f;
+  --color-danger: #c0262a;
+  --color-warning: #8a5a00;
+  --color-success: #2f7d4f;
+  --color-dim: 0.5;
+  --radius-card: 12px;
+  --radius-control: 8px;
+}
+
+[data-theme='yearbook'][data-mode='dark'] {
+  --color-bg: #0d1a29;
+  --color-surface: #13243a;
+  --color-surface-2: #1b3250;
+  --color-text: #eaf1f6;
+  --color-muted: #a3b8c8;
+  --color-accent: #8cc4ef;
+  --color-accent-contrast: #0d1a29;
+  --color-border: #6f8fa8;
+  --color-divider: #22395a;
+  --color-mark: #ff6b5e;
+  --color-mark-contrast: #1a0d0b;
+  --color-focus: #ff6b5e;
+  --color-danger: #ff7b70;
+  --color-warning: #f2b45e;
+  --color-success: #4fc08d;
+  --color-dim: 0.45;
+}
+
+/* R-UI-02: mode 'system' follows the OS before first paint; same values as the dark block. */
+@media (prefers-color-scheme: dark) {
+  [data-theme='yearbook'][data-mode='system'] {
+    --color-bg: #0d1a29;
+    --color-surface: #13243a;
+    --color-surface-2: #1b3250;
+    --color-text: #eaf1f6;
+    --color-muted: #a3b8c8;
+    --color-accent: #8cc4ef;
+    --color-accent-contrast: #0d1a29;
+    --color-border: #6f8fa8;
+    --color-divider: #22395a;
+    --color-mark: #ff6b5e;
+    --color-mark-contrast: #1a0d0b;
+    --color-focus: #ff6b5e;
+    --color-danger: #ff7b70;
+    --color-warning: #f2b45e;
+    --color-success: #4fc08d;
+    --color-dim: 0.45;
+  }
+}

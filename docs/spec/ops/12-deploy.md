@@ -9,10 +9,10 @@
 
 ## 12.1 Prerequisites
 
-- **R-OPS-01** The deploy docs list: Node.js 24+, npm, Git; a Cloudflare account with Workers Free and a Zero Trust
+- **R-OPS-01** The deploy docs list: Node.js 24+, npm, Git, `age` (mandatory for backups, R-BAK-05); a Cloudflare account with Workers Free and a Zero Trust
   Free organization; **R2 activated in the dashboard, which requires a payment method and may bill overage** despite
   the free allowance; a Google account to create the OAuth client (no Workspace); optionally a domain (otherwise
-  `workers.dev` is free).
+  `workers.dev` is free; a custom domain is the fallback if WebSockets don't pass Access on `workers.dev`, R-OPS-16).
 
 ## 12.2 The target account
 
@@ -60,7 +60,8 @@ npm run unlock       # opens the site to approved members
   4. authorized redirect URI `https://<team>.cloudflareaccess.com/cdn-cgi/access/callback`;
   5. in Zero Trust, add **Google** as a login method with the client id and secret (the secret stays in Cloudflare);
   6. create a **self-hosted** Access application for the exact Worker hostname (and the custom hostname, if any)
-     with an **Allow** policy whose include rule lists each approved email;
+     with an **Allow** policy whose include rule lists each approved email. With a custom domain, **one** Access
+     application lists both hostnames, so there is one AUD (R-OPS-16);
   7. copy the application's **AUD tag** and the team domain into `.env.cloudflare` (`ACCESS_AUD`,
      `ACCESS_TEAM_DOMAIN`), then `npm run deploy` again to write them into the Worker vars;
   8. test an allowed and a non-allowed Gmail account, then the chat WebSocket; never add Worker-level Access;
@@ -78,14 +79,21 @@ npm run unlock       # opens the site to approved members
   without a newer verified backup, R-DB-11); `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are set and the team JWKS loads;
   every known hostname without a cookie is redirected to `<team>.cloudflareaccess.com` (R-AUTH-02); preview URLs are
   off; the bucket has no public `r2.dev` access and no custom domain (AC-MEM-08); a bootstrap admin is active;
-  seats are under 50; a backup exists or the admin is warned none does.
+  seats are under 50; a backup exists or the admin is warned none does; the newest GitHub release (R-OPS-13).
 - **R-OPS-11** **`npm run unlock`** runs preflight and sets `setup_state = "unlocked"` only if it passes; `npm run
   lock` sets it back (an emergency switch).
 - **R-OPS-12** **Updates:** the docs' update workflow is `git pull --ff-only` → `npm ci` → `npm run backup` (must
   pass) → `npm run db:migrate:remote` → `npm run deploy` → `npm run smoke:test`. `db:migrate:remote` refuses when the
   newest verified backup is older than the last deploy (INV-7). Destructive migrations are never applied silently.
-- **R-OPS-13** `/admin` shows the running version and, when a newer GitHub release exists (checked from the admin's
-  browser at most daily, against the public releases API only), a banner linking its notes; nothing updates itself.
+- **R-OPS-13** `/admin` shows the running version. The newer-release check lives in `npm run preflight`: it runs on
+  the admin's machine against the public GitHub releases API only and prints a notice linking the release notes
+  (informational, never a failure). The Worker and the browser never call GitHub, so the CSP has no extra
+  `connect-src` and the private hostname is not sent to GitHub. Nothing updates itself.
+- **R-OPS-16** **WebSocket through Access is proved, not assumed.** Cloudflare documents that Worker-level Access
+  (including "Protect all Workers") answers WebSocket upgrades with 403; a self-hosted application on a `workers.dev`
+  hostname through to a WebSocket is unverified (§15). Slice 1d proves a `101` through real Access on `workers.dev`
+  with a stub echo. If it fails, the fallback is a custom domain on the Worker with the one Access application
+  covering that hostname (and `workers.dev`, which must still be protected or disabled, R-AUTH-02); D6 is unchanged.
 
 ## 12.6 Local development
 

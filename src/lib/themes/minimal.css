@@ -1,0 +1,68 @@
+/* R-UI-06: minimal. Neutral, one face, no hand lettering. */
+[data-theme='minimal'] {
+  --font-heading: 'Be Vietnam Pro', system-ui, sans-serif;
+  --color-heading: var(--color-text);
+  --font-body: 'Be Vietnam Pro', system-ui, sans-serif;
+  --text-display-weight: 700;
+  --text-title-weight: 600;
+
+  --color-bg: #f6f7f8;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef0f3;
+  --color-text: #1f2937;
+  --color-muted: #5b6472;
+  --color-accent: #1d4ed8;
+  --color-accent-contrast: #ffffff;
+  --color-border: #7b8494;
+  --color-divider: #e3e6ea;
+  --color-mark: #b91c1c;
+  --color-mark-contrast: #ffffff;
+  --color-focus: #1d4ed8;
+  --color-danger: #b91c1c;
+  --color-warning: #92400e;
+  --color-success: #15803d;
+  --color-dim: 0.5;
+  --radius-card: 10px;
+  --radius-control: 6px;
+}
+
+[data-theme='minimal'][data-mode='dark'] {
+  --color-bg: #111318;
+  --color-surface: #1a1d24;
+  --color-surface-2: #232733;
+  --color-text: #e5e7eb;
+  --color-muted: #9aa3b2;
+  --color-accent: #7fb0ff;
+  --color-accent-contrast: #111318;
+  --color-border: #6b7488;
+  --color-divider: #2a2f3a;
+  --color-mark: #f87171;
+  --color-mark-contrast: #111318;
+  --color-focus: #7fb0ff;
+  --color-danger: #f87171;
+  --color-warning: #fbbf24;
+  --color-success: #4ade80;
+  --color-dim: 0.45;
+}
+
+/* R-UI-02: mode 'system' follows the OS before first paint; same values as the dark block. */
+@media (prefers-color-scheme: dark) {
+  [data-theme='minimal'][data-mode='system'] {
+    --color-bg: #111318;
+    --color-surface: #1a1d24;
+    --color-surface-2: #232733;
+    --color-text: #e5e7eb;
+    --color-muted: #9aa3b2;
+    --color-accent: #7fb0ff;
+    --color-accent-contrast: #111318;
+    --color-border: #6b7488;
+    --color-divider: #2a2f3a;
+    --color-mark: #f87171;
+    --color-mark-contrast: #111318;
+    --color-focus: #7fb0ff;
+    --color-danger: #f87171;
+    --color-warning: #fbbf24;
+    --color-success: #4ade80;
+    --color-dim: 0.45;
+  }
+}

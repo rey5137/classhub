@@ -22,6 +22,7 @@ wrangler.jsonc
 # Local data, media and backups: real members' data never enters Git
 data/
 backups/
+!docs/spec/data/
 *.sqlite
 *.sqlite-journal
 *.age

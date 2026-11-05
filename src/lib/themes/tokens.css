@@ -1,0 +1,54 @@
+/* R-UI-05: the shared token contract and type scale. Themes override values only. */
+:root {
+  --space-unit: 0.25rem;
+  --content-max: 75rem;
+  --density: 1;
+  --shadow-card: none;
+
+  --font-body: 'Be Vietnam Pro', system-ui, sans-serif;
+  --font-heading: 'Patrick Hand', 'Be Vietnam Pro', cursive;
+
+  --color-heading: var(--color-accent);
+
+  --placeholder-1: linear-gradient(135deg, #9cc9e6, #e9f4fb);
+  --placeholder-2: linear-gradient(135deg, #f2c2a0, #fbe7d6);
+  --placeholder-3: linear-gradient(135deg, #b9d8a8, #eef7e6);
+  --placeholder-4: linear-gradient(135deg, #d7b3e0, #f4e8f8);
+  --placeholder-5: linear-gradient(135deg, #f0d38a, #fff3d2);
+  --placeholder-6: linear-gradient(135deg, #e8a37b, #8fb8d8);
+  --placeholder-7: linear-gradient(135deg, #a8e0d4, #e6f7f3);
+  --placeholder-8: linear-gradient(135deg, #f3b8b8, #fde9e9);
+  --placeholder-9: linear-gradient(135deg, #b9c4f0, #eef0fd);
+  --placeholder-10: linear-gradient(135deg, #d8c0a8, #f6ece2);
+  --avatar-1: #f6c9a8;
+  --avatar-2: #a9d3ef;
+  --avatar-3: #c8e3b5;
+  --avatar-4: #f3b8b8;
+  --avatar-5: #e7d3a3;
+  --avatar-6: #b9c4f0;
+  --avatar-7: #f0c4e0;
+  --avatar-8: #a8e0d4;
+  --avatar-9: #d8c0a8;
+  --avatar-10: #c0d8f0;
+  --avatar-ink: #26404f;
+
+  --text-display-weight: 400;
+  --text-title-weight: 400;
+  --text-display-size: 2.125rem;
+
+  --text-display: var(--text-display-weight) var(--text-display-size) / 1.15 var(--font-heading);
+  --text-title: var(--text-title-weight) 1.625rem / 1.2 var(--font-heading);
+  --text-heading: 600 1.25rem / 1.3 var(--font-body);
+  --text-body: 400 1rem / 1.6 var(--font-body);
+  --text-small: 400 0.875rem / 1.5 var(--font-body);
+
+  --color-warning: #8a5a00;
+  --color-danger: #c0262a;
+  --color-success: #2f7d4f;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --text-display-size: 2.875rem;
+  }
+}

@@ -10,9 +10,9 @@ criteria (`AC-*`, spec §0) it proves.
 
 * **Repo:** `classhub` (local at `~/projects/github/classhub`; GitHub remote created only with the owner's go), MIT
 * **Deployment target:** the owner's **second Cloudflare account** (not the account other projects use); every remote command through `scripts/cf.mjs` (spec §2.6, INV-9)
-* **Worker:** `classhub` on `classhub.<account-subdomain>.workers.dev`; no custom domain in v1.0 unless the owner adds one
+* **Worker:** `classhub` on `classhub.<account-subdomain>.workers.dev`; no custom domain in v1.0 unless the owner adds one, or the 1d WebSocket-through-Access probe fails and a custom domain becomes the fallback (spec R-OPS-16)
 * **Resources:** D1 `classhub-db`, R2 `classhub-media`, Durable Object class `ChatRoom` (binding `CHAT_ROOM`)
-* **Identity:** Zero Trust Free organization in the second account, Google login method, one self-hosted Access application for the Worker hostname
+* **Identity:** Zero Trust Free organization in the second account, Google login method, one self-hosted Access application for the Worker hostname (covering the custom hostname too, one AUD, if a custom domain is added)
 * **Stack:** SvelteKit 2 + Svelte 5 + TypeScript strict, Drizzle, Zod, Vitest, `@cloudflare/vitest-pool-workers`, Playwright
 * **Locales:** `vi` (default), `en`
 
@@ -31,7 +31,7 @@ commit is on `main` and tagged `pN-verified`. The gate approval goes in that tag
 | 2 — Memories | 2a · 2b · 2c | upload / view / delete, quota stop, private media |
 | 3 — Home and discussions | 3a · 3b | pinned threads, pagination over thousands, moderation |
 | 4 — Live chat | 4a · 4b · 4c | two live sessions in production, persistence, verified-archive pruning |
-| 5 — Portability | 5a · 5b · 5c | an independent restore of the production site, Node target passing the contract tests |
+| 5 — Portability | 5a · 5b · 5c | an independent restore of the production site, `restore --target local` opening it offline |
 | 6 — Open-source release | 6a · 6b | a second person deploys from a clean clone; v1.0.0 tag |
 
 **Release gate (v1.0):** a fresh install, a non-member denial test, a working WebSocket through Access and a
@@ -49,7 +49,8 @@ successful independent restore. Deploying is not enough.
   behind `npm run verify` (spec R-PLAT-11). A test proving an AC names it in its title (`AC-AUTH-05 …`), so
   `npm run ac:report` can list which ACs have tests.
 * **Contract suites first.** Each port's contract suite is written with its first adapter and run against the second
-  as soon as it exists (spec R-PLAT-06), so the Node target (5b) is a set of adapters, not a port.
+  as soon as it exists (spec R-PLAT-06), so `restore --target local` (5b) needs adapters, not new ports. The production
+  Node server and OIDC adapter are deferred past v1.0 (spec §D).
 * **Worker entry wraps SvelteKit.** `src/worker.ts` imports the `adapter-cloudflare` output and re-exports
   `ChatRoom`; 0a proves the build and a `wrangler deploy --dry-run` before anything depends on it (spec §15 risk).
 * **Uploads proxy through the Worker** with the native R2 binding; presigned URLs are deferred (spec §D).
@@ -71,8 +72,10 @@ successful independent restore. Deploying is not enough.
 * **Rate-limit storage outside the DO:** the `rate_events` table, pruned on write (spec R-AUTH-21); the chat limiter
   lives in the DO's memory.
 * **Hourly housekeeping trigger:** the first authenticated request after the hour, run in `waitUntil`.
-* **Admin release check:** client-side fetch of `api.github.com/repos/<owner>/classhub/releases/latest` from `/admin`
-  only; the CSP gets that one `connect-src` entry on `/admin` responses (spec R-OPS-13).
+* **Release check:** `preflight` fetches `api.github.com/repos/<owner>/classhub/releases/latest` on the admin's machine
+  and prints a notice; the Worker and browser never call GitHub and the CSP has no extra `connect-src` (spec R-OPS-13).
+* **Backups are encrypted, always:** `age` is a prerequisite and `backup` refuses without a recipient (spec R-BAK-05);
+  one S3 client, `scripts/lib/s3.mjs`, no `rclone` (R-BAK-17).
 * **Screenshot sizes:** 390 × 844 and 1280 × 800.
 
 ## 3. Test suites and scripts
@@ -85,11 +88,11 @@ successful independent restore. Deploying is not enough.
   signed test JWTs (never a bypass in app code).
 * **`tests/security/`** — route sweep from the route manifest (AC-API-01), forged identity (AC-AUTH-01, 02), uniform
   denial (AC-AUTH-05), cross-origin (AC-AUTH-07), DO context (AC-CHAT-04), bundle scan (AC-PLAT-05, 09), import rule
-  (AC-PLAT-02), log capture (AC-AUTH-12), remote-wrangler grep (AC-PLAT-07).
+  (AC-PLAT-02), log capture (AC-AUTH-12), remote-wrangler, `rclone` and R2/API-host grep (AC-PLAT-07).
 * **`tests/e2e/`** — Playwright on `dev:offline` and `dev`, Chromium and WebKit, 390 and 1280 px, axe on every route.
 * **Scripts** (`scripts/`): `cf.mjs`, `setup.mjs`, `preflight.mjs`, `unlock.mjs`, `invite.mjs`, `backup.mjs`,
   `verify-backup.mjs`, `restore.mjs`, `export-chat.mjs`, `prune-chat.mjs`, `housekeeping.mjs`, `screenshots.mjs`,
-  `ac-report.mjs`; each with unit tests against a fake `wrangler`/API.
+  `ac-report.mjs`, and `lib/s3.mjs` (the only S3 client, 2c); each with unit tests against a fake `wrangler`/API.
 
 ---
 
@@ -101,7 +104,7 @@ successful independent restore. Deploying is not enough.
 
 #### Slice 0a — skeleton and Worker build
 - **Covers:** AC-PLAT-01 (partly), AC-PLAT-04, AC-PLAT-06, AC-PLAT-07.
-- SvelteKit + TS strict, Svelte 5, `adapter-cloudflare` and `adapter-node` switched by `CLASSHUB_TARGET`; ESLint,
+- SvelteKit + TS strict, Svelte 5, `adapter-cloudflare` as the only build target (offline dev through `CLASSHUB_OFFLINE`, Node deferred past v1.0); ESLint,
   Prettier, `svelte-check`, Vitest, Playwright; `.nvmrc`, `.gitignore` per R-PLAT-09.
 - `src/worker.ts` wrapping the SvelteKit output and exporting a stub `ChatRoom` (SQLite-backed); `wrangler.jsonc.example`;
   `/health`.
@@ -131,6 +134,9 @@ successful independent restore. Deploying is not enough.
 
 #### Slice 0c — themes, i18n and the shell
 - **Covers:** AC-UI-04, AC-UI-05, AC-UI-06, AC-UI-07, AC-NAV-01 (shell routes as placeholders).
+- **Design:** follow `docs/design/01-DIRECTION.md` (owner-chosen direction): bundled Be Vietnam Pro and Patrick
+  Hand, the fixed type scale, the three themes' token tables, the shell with the red spine stripe, and the `Row`,
+  `Rail` and `Tile` primitives with focus-grow (§5–6). The prototype in `.impeccable/mocks/proto/` is the reference.
 - `tokens.css`, `minimal`, `yearbook`, `night`; `registry.ts`; `site.config.ts` and the validated config object;
   server-side `data-theme`/`data-mode`.
 - The primitives of R-UI-09; `AppShell` with the mobile tab bar and desktop top bar; placeholder pages for every §3.1
@@ -172,9 +178,14 @@ successful independent restore. Deploying is not enough.
 - **Covers:** AC-AUTH-10, AC-AUTH-11 (live), AC-OPS-01, 02 (first pass), 03, 04, 05, AC-PLAT-08, AC-BUD-01.
 - `scripts/setup.mjs`, `preflight.mjs`, `unlock.mjs`, `lock`, `smoke:test`; `docs/DEPLOY_CLOUDFLARE.md` and
   `docs/GOOGLE_ACCESS.md` (first version); re-check §14 figures and correct the spec.
+- **WebSocket-through-Access probe (spec R-OPS-16, §15):** deploy the stub `ChatRoom` as a WebSocket echo behind a
+  temporary route, put the self-hosted Access application on the `workers.dev` hostname, and prove a socket (`101`,
+  an echoed message) from a signed-in browser, and a refusal without a session. Record the result. **If it fails
+  (403 or no upgrade):** stop and bring the owner the fallback decision, a custom domain with one Access application
+  covering both hostnames and one AUD (R-OPS-16); nothing in 1a-1c depends on the outcome, but 4a/4b do.
 - **Owner steps (confirm each):** activate R2 billing in the second account; create the account-scoped API token;
   run `setup` and `deploy`; create the Zero Trust organization, the Google OAuth client and the Access application;
-  add your own and one test classmate's Gmail.
+  add your own and one test classmate's Gmail (`age` is not needed until 2c).
 - **Done when:** preflight passes against the live deployment and the site unlocks.
 
 **Manual Verification Checklist (1d, phase gate)**
@@ -186,6 +197,7 @@ successful independent restore. Deploying is not enough.
 6. Remove the second Gmail from the app list only (leave it in Access): it sees `/denied`.
 7. In the Cloudflare dashboard of the **second** account: the Worker, D1, bucket and Access app are there; your other account shows none of them.
 8. Set a phone to *members* on one account and confirm the other sees it, then back to *private* and it's gone.
+9. The echo probe: a WebSocket through Access on `workers.dev` returns `101` and echoes; without a session it is refused. If not, the custom-domain decision is made before Phase 2.
 
 ### Phase 2 — Memories
 
@@ -204,12 +216,21 @@ successful independent restore. Deploying is not enough.
 - **Done when:** e2e uploads a fixture 12 MP JPEG in Chromium and WebKit and the stored bytes carry no EXIF.
 
 #### Slice 2c — gallery, albums, photo detail and admin usage
-- **Covers:** AC-MEM-03, 07, 08, AC-UI-02 (memories routes).
+- **Covers:** AC-MEM-03, 07, 08, AC-UI-02 (memories routes), AC-BAK-02, 03, 09, 11 (minimal), AC-OPS-06, AC-DB-05,
+  AC-PLAT-07 (extended).
+- **First, before any real photo is uploaded:** a minimal `backup` and `verify-backup` (spec R-BAK-02-05, 09, 17):
+  D1 SQL export plus a full object copy through `scripts/lib/s3.mjs`, manifest and checksums, `age` encryption
+  (refuses without `age` and a recipient), `backup_runs`, checksum/SQL-parse/object-hash verification, and the
+  `db:migrate:remote` check for a verified backup newer than the last deploy. **The INV-7 destructive-migration gate
+  exists from this slice**; 5a extends it. AC-PLAT-07's grep is extended in the same slice to `rclone`,
+  `api.cloudflare.com` and `r2.cloudflarestorage.com`. Owner step: install `age`, create a key pair, confirm one
+  verified encrypted backup of the live site.
 - `/memories` grid with album/year filters and paging, `/memories/[id]`, delete, album create/edit, `/admin` usage
   card (R-MEM-18), the 8 GB banner; deploy to the second account (owner confirms).
 - **Done when:** upload → view → delete works on the live site from a phone.
 
 **Manual Verification Checklist (2c, phase gate)**
+0. Before uploading real photos: `npm run backup` ends *verified* and writes an encrypted `.tar.age` only; `npm run verify-backup -- <file>` passes; a destructive migration is refused without it.
 1. On your phone, upload three photos (one HEIC if your phone makes them), with a caption and an album.
 2. They appear on `/memories`; filters by album and year work; detail shows the caption and you as uploader.
 3. Copy a photo's address into a private window (no Access cookie): Access login, not the photo.
@@ -267,16 +288,20 @@ successful independent restore. Deploying is not enough.
 
 **Read:** spec §13, R-DB-10–12, R-PLAT-06.
 
-#### Slice 5a — backup and verify
-- **Covers:** AC-BAK-02, 03, 06, 08.
-- `backup` (SQL, NDJSON, objects via rclone or the S3 client, manifest, checksums, optional `age`), `verify-backup`,
-  `backup_runs`, `/admin` backup status, `db:migrate:remote` backup check (AC-OPS-06, AC-DB-05).
+#### Slice 5a — backup completion and verify
+- **Covers:** AC-BAK-06, 08, 10 (AC-BAK-02, 03, 09, 11 extended from 2c).
+- Extends 2c's `backup`/`verify-backup`: NDJSON `portable/` export, live `COUNT(*)` before export and the dump-holds-
+  at-least check, the lock shared with `prune-chat`, `--prune-old` retention, encrypted `export-chat` archives, the
+  deletion-race fixture (spec R-BAK-16, relying on the purge grace period from 2a/2c), `/admin` backup status, and the
+  full INV-7 gate (chat pruning and restores) (AC-OPS-06, AC-DB-05).
 
-#### Slice 5b — restore and the Node target
-- **Covers:** AC-BAK-01, 04, 05, 07, AC-DB-06.
-- `restore --target new|local`, integrity checks; `adapter-node` server with SQLite, filesystem/S3 storage, `ws` hub and
-  an OIDC identity adapter; `docs/SELF_HOST_NODE.md`, `docs/BACKUP_RESTORE.md`, `docs/MIGRATION.md`.
-- **Owner step:** back up the live site and restore it into a new D1 + bucket in the second account, side by side.
+#### Slice 5b — restore
+- **Covers:** AC-BAK-01, 04, 05.
+- `restore --target new|local` (new: refuses non-empty DB or bucket and live ids, restores `setup_state='locked'`;
+  same schema version only), integrity checks; `docs/BACKUP_RESTORE.md`, `docs/MIGRATION.md`. The Node server, OIDC
+  adapter and `SELF_HOST_NODE.md` are deferred (spec §D).
+- **Owner step:** back up the live site and restore it into a new D1 + bucket in the second account, side by side,
+  then run `preflight` and `unlock` there.
 
 #### Slice 5c — release-readiness of data paths
 - **Covers:** AC-BUD-02, 04, remaining AC-PROF-05/06 production checks.
@@ -294,10 +319,10 @@ successful independent restore. Deploying is not enough.
 **Read:** spec §1, §12, §14, §15; every child file's acceptance table for the AC sweep.
 
 #### Slice 6a — docs, repo hygiene and security review
-- **Covers:** AC-API-04, AC-BUD-05, AC-UI-03, AC-OPS-07 (prepared).
+- **Covers:** AC-BUD-05, AC-UI-03, AC-OPS-07 (prepared).
 - README (what, features, requirements and R2 billing caveat, Quick Start, one screenshot per theme, backup promise),
   CONTRIBUTING completed, CODE_OF_CONDUCT, SECURITY, CHANGELOG, issue templates, `docs/THEMES.md`, `docs/PRIVACY.md`,
-  OpenAPI generation, `deploy.yml` (optional, off), `ac:report` showing every AC covered or listed as manual; a full
+  `deploy.yml` (optional, off), `ac:report` showing every AC covered or listed as manual; a full
   security review of identity, media and chat paths; a git history scan for secrets and real data.
 
 #### Slice 6b — clean-clone deployment and v1.0.0
@@ -328,3 +353,5 @@ successful independent restore. Deploying is not enough.
 7. **Provider limits change.** *Mitigation:* 1d re-checks §14, and the guardrails are config values.
 8. **Outward steps without the owner** (R2 billing, tokens, Zero Trust, Google client, deploys, GitHub remote).
    *Mitigation:* each is a named owner step in 1d, 2c, 4b, 5b and 6b.
+9. **A self-hosted Access application on `workers.dev` may not pass WebSocket upgrades.** *Mitigation:* 1d probes it
+   with the echo stub before identity or chat depend on it; fallback is a custom domain with one Access application.

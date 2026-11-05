@@ -39,10 +39,22 @@
 - **R-AUTH-07** **Two layers.** Access decides who may reach the hostname; the app decides who may see data. A request
   passes only if Access verification succeeded **and** the email maps to an `active` user (INV-1).
 - **R-AUTH-08** **Invite → active.** An admin invites an email (`invites` row `pending` and a `users` row `invited`
-  with the invite's role). The first verified login with that email sets the user `active`, the invite `accepted`,
-  and stores the JWT `sub` for re-linking checks (§13.5). An email with no invite is never auto-created.
+  with the invite's role). The first verified login with that email activates it with a **guarded** statement in one
+  batch: `UPDATE users SET status = 'active' WHERE auth_email = ? AND status = 'invited' AND EXISTS (SELECT 1 FROM
+  invites WHERE email = ? AND status = 'pending' AND (expires_at IS NULL OR expires_at > now))`, followed by marking the
+  invite `accepted` in the same batch; zero rows changed means the uniform denial (R-AUTH-11). An email with no invite
+  is never auto-created. **Revoking an invite** sets it `revoked` and deletes the never-active `users` row (or marks
+  it `suspended` when the row has any history), so a revoked email can never activate. **Invite expiry:** each invite
+  has `expires_at`, default 30 days after creation (`invite.expiryDays`, configurable; `null` means never); an expired
+  invite behaves like a revoked one and an admin can re-invite: because `invites.email` is unique and never hard-deleted (R-DB-13), re-inviting a `revoked` or expired email updates that row to `pending` (new `expires_at`, `role`, `invited_by`) and is audited.
+- **R-AUTH-25** **Subject check.** Matching stays by normalized email (R-AUTH-06), also when re-linking after a restore
+  (R-BAK-14). The Access JWT `sub` is stored in `users.access_sub` on first login; a later login with the same email
+  but a different `sub` is still matched by email and recorded as an audit event (`access_sub_changed`, no email in
+  the log, R-AUTH-23) and `access_sub` is updated. A restore clears `access_sub` so re-linking by email stays valid.
+- **R-AUTH-26** `users.last_seen_at` is written at most once per hour per member (a conditional
+  `UPDATE … WHERE last_seen_at < now - 1 h`), never on every request, to stay inside the D1 write budget (§14).
 - **R-AUTH-09** **Revoke and suspend:** the internal status changes first (immediate denial, R-NAV-04, R-CHAT-09),
-  then the email is removed from the Access policy (R-AUTH-18). Reactivation reverses both.
+  then the email is removed from the Access policy (R-AUTH-18). Reactivation reverses both. Revoking a pending invite follows R-AUTH-08.
 - **R-AUTH-10** The admin invite screen shows, per email, whether it is in the app list, in the Access policy, or both,
   when the token can read the policy; otherwise it shows the manual step.
 - **R-AUTH-11** **Uniform denial.** A valid Google identity without an active membership, an invited-but-revoked
@@ -58,7 +70,8 @@
   data. A deployment visited before Access is attached shows nothing private.
 - **R-AUTH-13** **No identity bypass in production.** No `X-Debug-User`, `?as_user=`, test token or dev identity exists
   in a production build: the dev identity adapter lives in `adapters/local/` and is imported only under
-  `import.meta.env.DEV`, and the build test scans the bundle for it (AC-PLAT-09).
+  `import.meta.env.DEV`, and the build test scans every file of the bundle for it (AC-PLAT-09). Even in a dev build it answers only a loopback
+  peer address with a loopback `Host` (R-PLAT-10).
 - **R-AUTH-14** A second admin is recommended at unlock time and on `/admin` while only one exists (§15 risk
   "admin leaves").
 - **R-AUTH-15** **Email PIN fallback.** `docs/GOOGLE_ACCESS.md` documents Access's one-time PIN as an alternative
@@ -89,7 +102,7 @@
   data:`; `connect-src 'self'` plus the same-origin WebSocket; `script-src 'self'` with SvelteKit's nonce mode;
   `frame-ancestors 'none'`; `form-action 'self'`; `base-uri 'none'`), `Referrer-Policy: no-referrer`,
   `X-Content-Type-Options: nosniff`, `Strict-Transport-Security: max-age=31536000`, `Permissions-Policy` with camera,
-  microphone and geolocation off, and `X-Robots-Tag: noindex, nofollow`. `robots.txt` disallows everything as a
+  microphone and geolocation off, and `X-Robots-Tag: noindex, nofollow`; **every private HTML page and JSON response also carries `Cache-Control: private, no-store`** (static assets excepted). `robots.txt` disallows everything as a
   secondary measure only.
 - **R-AUTH-21** **Server-side rate limits:** posts and comments 10 per minute per member; uploads 25 photos per day and
   2 concurrent per member (R-MEM-13); chat 1 per second, burst 5 (R-CHAT-05); profile writes 20 per hour; invite
@@ -108,7 +121,7 @@
 | AC-AUTH-02 | A forged `Cf-Access-Authenticated-User-Email` header without a valid JWT is denied | R-AUTH-03 | `test:security` |
 | AC-AUTH-03 | An unknown `kid` triggers one JWKS refetch; a failed fetch with no cache denies | R-AUTH-04 | unit with fake fetch |
 | AC-AUTH-04 | An invited email becomes active on first verified login; an uninvited one gets `/denied` and no row | R-AUTH-08, 11 | integration |
-| AC-AUTH-05 | Responses for an unknown email, a revoked invite and a suspended user are byte-identical apart from the request id | R-AUTH-11 | `test:security` |
+| AC-AUTH-05 | Responses for an unknown email, a revoked invite, an expired invite and a suspended user are identical after removing the request id and the CSP nonce (status, headers and body, with the nonce value replaced by a placeholder in the `Content-Security-Policy` header and in markup) | R-AUTH-11 | `test:security` |
 | AC-AUTH-06 | While locked, every page and API reveals no seeded data to anyone but the bootstrap admin's setup page | R-AUTH-12 | integration |
 | AC-AUTH-07 | A cross-origin `POST`, `PATCH`, `DELETE` and WebSocket upgrade are refused | R-AUTH-17 | `test:security` |
 | AC-AUTH-08 | Every response carries the §6.7 headers | R-AUTH-20 | integration |
@@ -116,3 +129,6 @@
 | AC-AUTH-10 | In production, an allowed Gmail account reaches the site and a non-allowed Gmail account is stopped by Access and, with a forged path around it, by the app | R-AUTH-01, 07 | manual 1d |
 | AC-AUTH-11 | `invite add`/`remove` with an Access-scoped token updates the Access policy; without it, prints the dashboard step | R-AUTH-18 | unit with fake API + manual 1d |
 | AC-AUTH-12 | No log line in the test run contains a fixture email, phone or message body | R-AUTH-23 | `test:security` log capture |
+| AC-AUTH-13 | A login with a revoked or expired invite, whose `users` row was removed or suspended, never becomes `active`; the guarded activation changes zero rows | R-AUTH-08 | integration |
+| AC-AUTH-14 | A same-email login with a different `sub` is matched by email and records an audit event; a restore then re-links by email | R-AUTH-25 | integration |
+| AC-AUTH-15 | `last_seen_at` is written at most once per hour per member; private HTML and JSON responses carry `Cache-Control: private, no-store` | R-AUTH-26, 20 | integration |

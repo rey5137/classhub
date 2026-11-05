@@ -1,7 +1,7 @@
 # 09 — Live chat
 
 **Covers:** The chat room, the WebSocket handshake and trusted context, the ChatRoom Durable Object, message persistence, history, presence, suspension, retention, archive and pruning.
-**Read when:** touching `/chat`, `src/workers/chat-room.ts`, the `RealtimeHub` port, chat history or the chat archive scripts.
+**Read when:** touching `/chat`, `src/lib/server/adapters/cloudflare/chat-room.ts`, the `RealtimeHub` port, chat history or the chat archive scripts.
 **Owns:** `R-CHAT-*`, `AC-CHAT-*`.
 **Index:** `docs/spec/SPEC.md` (product boundary §1, locked decisions D1–D10, routing). Section numbers are global: `§9.n` is in this file.
 
@@ -40,7 +40,7 @@ sequenceDiagram
 
 - **R-CHAT-04** **Handshake.** `/api/v1/chat/ws` verifies identity (R-AUTH-03), active membership and `Origin`
   (R-AUTH-17) **before** contacting the Durable Object. It then sends the DO a new Request built from scratch (no
-  client header is forwarded) carrying `X-ClassHub-Context`: `{ memberId, role, displayName, exp }` signed with
+  client header is forwarded) carrying `X-ClassHub-Context`: `{ memberId, role, displayName, authUntil, exp }` (`authUntil` is the verified Access JWT's `exp`) signed with
   HMAC-SHA-256 under the Worker secret `INTERNAL_CONTEXT_KEY`, expiring in 30 s. The DO rejects any request without a
   valid, unexpired context; it has no public route.
 - **R-CHAT-05** **Sending.** The DO validates the frame with Zod (≤ 4 KB), applies a per-member token bucket (1 per
@@ -51,14 +51,27 @@ sequenceDiagram
   row. A D1 error returns `{type:"error", code:"not_saved", clientNonce}` and the client keeps the message as
   *not sent — retry*.
 - **R-CHAT-07** **Hibernation.** The DO uses the WebSocket Hibernation API (`acceptWebSocket`, `webSocketMessage`,
-  `webSocketClose`, `serializeAttachment` for `{ memberId, role, displayName, connectedAt }`). It keeps no timers or
+  `webSocketClose`, `serializeAttachment` for `{ memberId, role, displayName, connectedAt, authUntil }`). It keeps no timers or
   polling loops; presence is derived from `getWebSockets()` and broadcast as an `online` count on connect and
   disconnect.
 - **R-CHAT-08** **No authoritative state in the DO** (INV-2): no message history in DO storage; the SQLite-backed DO
   class exists because Workers Free requires it. Rate-limit buckets and presence are memory-only and may reset.
 - **R-CHAT-09** **Suspension.** Suspending or deleting a member calls `RealtimeHub.disconnectMember(memberId)`,
   which closes that member's sockets with code 4003; the conditional insert (R-CHAT-05) also refuses sends from a
-  member whose status changed in the meantime.
+  member whose status changed in the meantime. This call is best effort; R-CHAT-16 is what guarantees delivery stops.
+- **R-CHAT-16** **Sockets never outlive authorization.** Every broadcast is authorized in the same D1 batch as the
+  insert (R-CHAT-05): `SELECT id FROM users WHERE status = 'active' AND id IN (<connected member ids>)` (at most 50
+  values, under D1's 100-variable limit), plus `site_settings.setup_state` and the chat feature flag (R-NAV-02). The DO
+  broadcasts only to sockets whose member id was returned and closes the others with 4003; if `setup_state` is not
+  `unlocked` (R-OPS-11) or chat is off, it closes every socket with 4003 and broadcasts nothing (the message is still
+  saved when the sender was authorized). If the authorization read fails, the message is saved and acked but not
+  broadcast; clients catch up with `after=` (R-CHAT-11). Each socket's `authUntil` is checked on every inbound message
+  and a socket past it is closed with 4001 (the client then reloads through Access); no timers are used (R-CHAT-07).
+  So suspension, lock, chat-off and an expired Access session each stop delivery without relying on
+  `disconnectMember`.
+- **R-CHAT-17** **No gap at startup.** `hello` carries `lastId`, the newest persisted message id. The client compares it
+  with the newest id from its HTTP history load (R-CHAT-10) and fetches `after=<id>` when they differ, so messages
+  sent between the history load and the socket opening are not lost.
 
 ## 9.3 Client behaviour
 
@@ -78,12 +91,23 @@ sequenceDiagram
   `chat.maxMessages` (default 30,000); older ones are candidates for pruning. Discussions have no automatic retention
   (R-BRD-09).
 - **R-CHAT-14** **Archive before prune, fail closed** (INV-7): `npm run export-chat` (CLI, off-provider) writes
-  `chat/YYYY-MM.ndjson` for each month holding candidates, with a SHA-256, then re-reads the written files, checks
+  one NDJSON file per candidate range, named by its first and last message id and time range
+  (`chat/<fromId>_<toId>.ndjson.age`), never overwritten (a name collision aborts); later candidates from an
+  already partly pruned month go in a new file. Each file has a SHA-256, then the export re-reads the written files, checks
   record counts and hashes against D1, and only then records a `chat_archives` row with `verified_at`.
   `npm run prune-chat` deletes only rows inside a range with a verified, un-purged archive and sets `purged_at`. With no
   verified archive, nothing is deleted and `/admin` shows *chat over retention: run export-chat*. An R2 copy never
-  counts as the independent archive.
-- **R-CHAT-15** Archives are not shown in the UI; an admin restores one with `npm run restore -- --chat <file>`.
+  counts as the independent archive. `export-chat` and `prune-chat` take the same **backup lock** as `backup` (R-BAK-03), so
+  they never run concurrently with it or with each other. **Archives are encrypted with `age`, like backups (R-BAK-05), and encryption is
+  mandatory:** `export-chat` refuses to write unencrypted output when no recipient key is configured. The SHA-256 and
+  record counts are checked on the decrypted content.
+- **R-CHAT-18** **Prune in chunks.** `prune-chat` deletes verified ranges in chunks (for example 1,000 rows per
+  statement batch, paced) so one run stays within the D1 daily write allowance once index writes count (§14); an
+  interrupted run resumes from the remaining rows and `purged_at` is set only when the range is empty. It holds the backup lock of R-BAK-03 for the whole run.
+- **R-CHAT-15** Archives are not shown in the UI; an admin restores one with `npm run restore -- --chat <file>`. **`restore --chat` is insert-only**
+  (`INSERT … ON CONFLICT DO NOTHING`, never update or delete, so it cannot contradict R-BAK-08), skips messages of
+  completed deletion requests (R-PROF-11), and refuses to run unless a verified backup of the current database
+  exists first (R-BAK-03).
   Members can't bulk-export the chat; admins export it through the CLI only. Pruning and archives honour completed
   deletion requests (R-PROF-11): a member's deleted messages are omitted from later archives.
 
@@ -95,10 +119,16 @@ sequenceDiagram
 | AC-CHAT-02 | A resent `clientNonce` yields one row and the original id | R-CHAT-02 | integration (DO pool) |
 | AC-CHAT-03 | With D1 failing, the sender gets `not_saved` and nobody receives a broadcast | R-CHAT-06 | integration with failing adapter |
 | AC-CHAT-04 | A direct request to the DO without a valid signed context, or with an expired one, is refused | R-CHAT-04 | `test:security` |
-| AC-CHAT-05 | A suspended member's socket closes with 4003 and a send racing the suspension is refused | R-CHAT-09, 05 | integration |
+| AC-CHAT-05 | A suspended member's socket closes with 4003 and a send racing the suspension is refused; with `disconnectMember` throwing, no further broadcast reaches the member | R-CHAT-09, 16, 05 | integration |
 | AC-CHAT-06 | The sixth message inside one second is rate-limited | R-CHAT-05 | integration |
 | AC-CHAT-07 | After a dropped connection, the client reconnects and shows missed messages in order with no duplicates | R-CHAT-11 | e2e |
 | AC-CHAT-08 | The WebSocket works through hostname-based Access in production | R-CHAT-04, D6 | manual 4b |
 | AC-CHAT-09 | `prune-chat` deletes nothing without a verified archive, and exactly the archived range with one | R-CHAT-14 | integration |
 | AC-CHAT-10 | `export-chat` detects a truncated NDJSON file and refuses to record `verified_at` | R-CHAT-14 | unit |
 | AC-CHAT-11 | The DO class writes nothing to DO storage | R-CHAT-08 | unit (storage spy) + review |
+| AC-CHAT-12 | After `setup_state` leaves `unlocked`, the next message closes every socket with 4003 and no broadcast is delivered | R-CHAT-16 | integration |
+| AC-CHAT-13 | With chat turned off, the next message closes every socket with 4003 and nothing is broadcast; messages stay stored | R-CHAT-16, R-NAV-02 | integration |
+| AC-CHAT-14 | A socket whose `authUntil` has passed is closed with 4001 on its next message; with the authorization read failing, the message is saved and not broadcast | R-CHAT-16 | integration (fake clock, failing adapter) |
+| AC-CHAT-15 | A message sent between the HTTP history load and the socket open is fetched via `hello.lastId` and `after=` exactly once | R-CHAT-17 | e2e |
+| AC-CHAT-16 | `export-chat` never overwrites an existing archive, refuses to write without an `age` recipient, and `restore --chat` adds only missing rows, skips deleted members' messages and refuses without a verified backup | R-CHAT-14, 15 | unit + integration |
+| AC-CHAT-17 | `prune-chat` deletes in bounded chunks and resumes after an interruption without losing or double-purging rows | R-CHAT-18 | integration |
