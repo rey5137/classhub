@@ -22,8 +22,10 @@ describe('seedDemo', () => {
     const database = createLocalDatabase(':memory:', { migrationsDir: 'migrations' });
     const storage = new FsObjectStorage(join(directory, 'objects'));
     try {
-      await seedDemo(database, storage);
-      await seedDemo(database, storage);
+      const first = await seedDemo(database, storage);
+      const second = await seedDemo(database, storage);
+      expect(first).toEqual({ members: 12, invites: 12 });
+      expect(second).toEqual({ members: 0, invites: 0 });
 
       const members = await database.db.select().from(users);
       const rows = await database.db.select().from(invites);

@@ -6,8 +6,8 @@ import type { ObjectStorage } from './ports/object-storage';
 export interface AppContext {
   database: Database;
   storage: ObjectStorage;
-  /** Present in local/dev; the Access verifier arrives with the identity phase. */
-  identity?: IdentityProvider;
+  /** Required (INV-1): a caller cannot skip the check by testing for its presence. */
+  identity: IdentityProvider;
 }
 
 let localContext: Promise<AppContext> | undefined;
@@ -26,11 +26,14 @@ function getLocalContext(): Promise<AppContext> {
 
 /**
  * R-PLAT-03: adapters are chosen once here. Production and `npm run dev` use the
- * Cloudflare bindings; a dev build without a binding uses the local adapters.
+ * Cloudflare bindings. `dev:offline` (CLASSHUB_OFFLINE=1) wins over a binding in a
+ * dev build, because adapter-cloudflare's dev proxy supplies `env.DB` in every
+ * `vite dev` (R-PLAT-10); a dev build with no binding also uses the local adapters.
  * The context is memoised so one process keeps one SQLite connection.
  */
 export async function createContext(platform: App.Platform | undefined): Promise<AppContext> {
   const env = platform?.env;
+  if (import.meta.env.DEV && process.env.CLASSHUB_OFFLINE === '1') return getLocalContext();
   if (env?.DB) return createCloudflareContext(env);
   if (import.meta.env.DEV) return getLocalContext();
 

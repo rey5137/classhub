@@ -10,7 +10,9 @@
 ## 7.1 Browser preparation
 
 - **R-MEM-01** Accepted inputs: JPEG, PNG, WebP, and HEIC/HEIF **only when the browser can decode it**
-  (`createImageBitmap` succeeds); anything else is refused with a localized reason before upload.
+  (`createImageBitmap` succeeds); anything else is refused with a localized reason before upload. Every accepted
+  input, PNG included, is re-encoded on the client to WebP or JPEG (R-MEM-02) before upload, so the server accepts
+  only `image/webp` and `image/jpeg` (R-MEM-08).
 - **R-MEM-02** The browser decodes with EXIF orientation applied (`imageOrientation: 'from-image'`), scales to a
   longest edge ≤ 2000 px and encodes **WebP** at quality 0.82 (JPEG at 0.82 where WebP encoding is unavailable), plus
   a thumbnail with longest edge ≤ 480 px at quality 0.75. Re-encoding drops EXIF, GPS and other metadata.
@@ -23,11 +25,14 @@
 
 ## 7.2 Upload protocol
 
-- **R-MEM-06** `POST /api/v1/media/reservations { purpose: "photo"|"avatar", imageBytes, thumbBytes, sha256,
+- **R-MEM-06** `POST /api/v1/media/reservations { purpose: "photo"|"avatar"|"site", imageBytes, thumbBytes, sha256,
   thumbSha256, mimeType, width, height }` checks membership, rate limits (R-MEM-13), byte limits and the quota, then
   in one batch creates an `open` reservation (new `media_id`, `sha256`, `thumb_sha256`, `mime_type`, `image_bytes`,
   `thumb_bytes`, staging keys per R-MEM-12) and adds its bytes to `reserved_bytes`, expiring in 15 minutes, using the
-  batch-safe form of R-MEM-19. Over the stop threshold it returns `507 storage_full` (R-MEM-15).
+  batch-safe form of R-MEM-19. Over the stop threshold it returns `507 storage_full` (R-MEM-15). The `site` purpose
+  (logo, favicon, banner; R-UI-01) is admin-only: any other caller gets the uniform denial. The database enforces the
+  three purposes with a `CHECK` on `upload_reservations.purpose`. The size limit is `uploads.maxImageBytes` in
+  `site.config.ts`, at most 25 MB (the R2 adapter buffers one upload in memory inside the 128 MB Worker isolate).
 - **R-MEM-07** `PUT /api/v1/media/reservations/:id/image` and `.../thumb` stream the body to R2 through the native
   binding while counting bytes and hashing; the stream is aborted the moment it passes the reserved size. **Before
   writing** the route requires `owner_id = caller`, `state = 'open'` and `expires_at > now` (anything else is refused
@@ -61,7 +66,7 @@
 
 - **R-MEM-12** Keys are relative, opaque and immutable. **Staging:**
   `staging/v1/{reservation-id}/image.webp` and `.../thumb.webp` (`.jpg` when JPEG), the only keys an upload `PUT`
-  writes. **Final:** `media/v1/{media-id}/image.webp` · `media/v1/{media-id}/thumb.webp` · `avatars/v1/{user-id}/{media-id}.webp`
+  writes. **Final:** `media/v1/{media-id}/image.webp` · `media/v1/{media-id}/thumb.webp` (also for `site` media, which is never listed in the gallery) · `avatars/v1/{user-id}/{media-id}.webp`
   (`.jpg` when JPEG), written only by `complete`. The database stores keys, never URLs. Replacing a photo or avatar writes a new key; the old
   objects are deleted after the new row committed.
 

@@ -48,9 +48,8 @@ if (!isDryRun) {
 const childEnv = isolatedChildEnv();
 stripCloudflareEnv(childEnv);
 
-if (isDryRun) {
-  // Never let an inherited login or token reach a command that should be local.
-} else {
+// A local dry-run keeps the stripped env, so an inherited login or token never reaches it.
+if (!isDryRun) {
   childEnv.CLOUDFLARE_ACCOUNT_ID = accountId;
   childEnv.CLOUDFLARE_API_TOKEN = token;
 }
@@ -59,29 +58,31 @@ if (!isDryRun) {
   verifyAccount(/** @type {string} */ (accountId));
 }
 
-// R-OPS-08 / AC-OPS-03: a real deploy lands in the account the config names,
-// so refuse before building if that is not the guarded account. `--check-deploy`
-// runs the same guard before `npm run build` starts.
-if ((isDeploy && !isDryRun) || isCheckDeploy) {
+// R-PLAT-12 / R-OPS-08 / AC-OPS-03: wrangler prefers the config's account_id, so
+// every remote command (not only deploy) refuses when wrangler.jsonc names an
+// account other than the guarded one. A real deploy and `--check-deploy` also
+// require the file and its account_id; other commands check it when present.
+const mustHaveConfig = (isDeploy && !isDryRun) || isCheckDeploy;
+if (mustHaveConfig || (!isDryRun && existsSync(configPath))) {
   const config = readWranglerConfig(configPath);
   if (!config) {
     fail(`wrangler.jsonc is missing at ${configPath}. Run the setup step first.`);
   }
   const configured = config.account_id;
-  if (!configured) {
+  if (!configured && mustHaveConfig) {
     fail(`wrangler.jsonc at ${configPath} has no account_id. Run the setup step first.`);
   }
   const envAccountIds = Object.values(config.env ?? {})
     .map((section) => section?.account_id)
     .filter((value) => Boolean(value));
-  if (envAccountIds.some((value) => value !== configured)) {
+  if (envAccountIds.some((value) => value !== accountId)) {
     fail(
-      `wrangler.jsonc has an env.*.account_id that differs from its top-level account_id; refusing to deploy.`,
+      `wrangler.jsonc has an env.*.account_id that differs from the .env.cloudflare account ${accountId}; refusing to run.`,
     );
   }
-  if (configured !== accountId) {
+  if (configured && configured !== accountId) {
     fail(
-      `wrangler.jsonc account_id ${configured} does not match .env.cloudflare account ${accountId}; refusing to deploy.`,
+      `wrangler.jsonc account_id ${configured} does not match .env.cloudflare account ${accountId}; refusing to run.`,
     );
   }
 }
@@ -134,12 +135,21 @@ function isLocalDryRun(argv) {
 
 /** @param {string[]} argv */
 function refuseTargetFlags(argv) {
-  const forbidden = new Set(['--config', '-c', '--env', '-e']);
+  // yargs accepts `--envFile`, `--e`, `--c=x` and grouped short flags (`-vc x`),
+  // so compare the normalised name, not the spelling.
+  const forbidden = new Set(['config', 'c', 'env', 'e', 'cwd', 'env-file']);
   for (const arg of argv) {
-    const name = arg.split('=')[0];
-    if (forbidden.has(name)) {
+    if (!arg.startsWith('-') || arg === '-' || arg === '--') continue;
+    const name = arg
+      .replace(/^-+/, '')
+      .split('=')[0]
+      .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+      .toLowerCase();
+    // `-cfoo` / `-estaging` / `-vc`: a single-dash group containing c or e.
+    const shortGroup = !arg.startsWith('--') && /[ce]/.test(arg.slice(1).split('=')[0]);
+    if (forbidden.has(name) || shortGroup) {
       fail(
-        `${name} is not allowed outside a local dry-run; the guard only certifies wrangler.jsonc.`,
+        `${arg.split('=')[0]} is not allowed outside a local dry-run; the guard only certifies wrangler.jsonc.`,
       );
     }
   }
@@ -193,6 +203,10 @@ function verifyAccount(expected) {
     fail('wrangler whoami --json returned invalid JSON; refusing to run.');
   }
   const accounts = Array.isArray(info?.accounts) ? info.accounts : [];
+  // R-PLAT-13: the token is scoped to one account, so a wider one is a mistake.
+  if (accounts.length > 1) {
+    fail('wrangler sees more than one account; use an account-scoped API token. Refusing to run.');
+  }
   if (!accounts.some((entry) => entry?.id === expected)) {
     fail(`wrangler cannot see account ${expected}; refusing to run.`);
   }
@@ -254,7 +268,7 @@ function readWranglerConfig(path) {
   try {
     return JSON.parse(stripTrailingCommas(stripJsonComments(readFileSync(path, 'utf8'))));
   } catch {
-    fail(`wrangler.jsonc at ${path} is not valid JSONC.`);
+    fail(`wrangler.jsonc at ${path} could not be parsed (not valid JSONC); refusing to run.`);
   }
 }
 

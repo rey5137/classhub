@@ -6,6 +6,12 @@ export class IdentityError extends Error {
 }
 
 export interface IdentityProvider {
-  /** Throws IdentityError when no verified identity is present (INV-1). */
-  requireIdentity(request: Request): Promise<{ email: string; subject: string }>;
+  /**
+   * Throws IdentityError when no verified identity is present (INV-1). `peer` is the
+   * connection's address from `event.getClientAddress()`, never a request header.
+   */
+  requireIdentity(
+    request: Request,
+    peer: { clientAddress: string },
+  ): Promise<{ email: string; subject: string }>;
 }

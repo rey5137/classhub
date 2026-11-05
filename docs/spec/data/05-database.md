@@ -45,14 +45,14 @@
 | `rate_events` | `bucket` (e.g. `post:<user>`), `at` | server-side rate limits where no DO holds the counter (R-AUTH-21) |
 | `backup_runs` | `id` PK, `kind`, `manifest_sha256`, `object_count`, `total_bytes`, `verified_at`, `reported_at` | admin-visible backup status, written by the CLI (R-BAK-09) |
 | `audit_events` | `id` PK, `actor_id`, `action`, `entity_type`, `entity_id`, `created_at` | admin and moderation changes; never content or contact payloads |
-| `schema_meta` | `key` PK, `value` | `schema_version`, `app_version` of the last migration |
+| `schema_meta` | `key` PK, `value` | `schema_version`; `housekeeping_last_run_at` (epoch ms, R-MEM-11) |
 
 ## 5.3 Constraints and indexes
 
 - **R-DB-05** Unique: `users.auth_email`, `invites.email`, `info_pages.slug`, `(chat_messages.sender_id, client_nonce)`.
 - **R-DB-06** Indexes: `posts(is_pinned DESC, last_activity_at DESC, id DESC)` · `posts(last_activity_at DESC, id DESC)`
   · `comments(post_id, created_at, id)` · `media(album_id, created_at DESC, id DESC)` ·
-  `media(owner_id, created_at)` · `media(effective_year, created_at DESC, id DESC)` ·
+  `media(owner_id, created_at)` · `media(media_type, deleted_at, created_at DESC, id DESC)` (the default gallery) · `media(effective_year, created_at DESC, id DESC)` ·
   `chat_messages(room_id, created_at DESC, id DESC)` ·
   `chat_messages(created_at)` · `users(status, display_name_norm)` · `invites(status, email)` ·
   `media(deleted_at, purged_at)` · `users(status, preferred_name_norm)` · `upload_reservations(state, expires_at)` · `upload_reservations(state_run_id)` · `rate_events(bucket, at)` · `audit_events(created_at)`.
@@ -84,7 +84,7 @@
 | ID | Criterion | Rules | Proved by |
 |---|---|---|---|
 | AC-DB-01 | All migrations apply from empty on D1 (local) and `better-sqlite3`, giving the same schema | R-DB-03, 10 | `test:migrations` |
-| AC-DB-02 | The unique and foreign-key constraints of §5.3 reject violating rows on both adapters | R-DB-04, 05 | contract `Database` |
+| AC-DB-02 | The unique, foreign-key and `CHECK` constraints (enum values, lower-case emails) of §5.3 reject violating rows on both adapters | R-DB-04, 05 | contract `Database` |
 | AC-DB-03 | Every list query in `repositories/` has `LIMIT` and uses an index (`EXPLAIN QUERY PLAN` shows no full scan) over 10,000 seeded rows | R-DB-06, 07 | integration |
 | AC-DB-04 | Board and comment pagination return every row exactly once across pages of 5,000 posts with equal timestamps | R-DB-07 | integration |
 | AC-DB-05 | `preflight` refuses a `*_destructive.sql` migration without a newer verified backup | R-DB-11 | unit |

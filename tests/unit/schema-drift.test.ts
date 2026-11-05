@@ -153,10 +153,12 @@ function expectedSchema(tables: SQLiteTable[] = Object.values(schema) as SQLiteT
             };
           })
           .sort((left, right) => left.from.join().localeCompare(right.from.join())),
-        checks: config.checks.map((check) => ({
-          name: check.name,
-          expression: normalizeExpression(sqlText(check.value)),
-        })),
+        checks: config.checks
+          .map((check) => ({
+            name: check.name,
+            expression: normalizeExpression(sqlText(check.value)),
+          }))
+          .sort((left, right) => left.name.localeCompare(right.name)),
       };
     })
     .sort((left, right) => left.name.localeCompare(right.name));

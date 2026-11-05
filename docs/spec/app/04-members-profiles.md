@@ -54,7 +54,7 @@
 - **R-PROF-10** **Clear my profile:** the member can empty every optional field and remove the avatar at once.
 - **R-PROF-11** **Deletion request:** the member can ask for account deletion from `/profile`; it is recorded and shown
   to admins, and **from that moment** `projectProfile` hides all of the member's contact fields (R-PROF-13). An admin completes it: the member is suspended, the profile and contacts are cleared, `display_name`
-  becomes the localized *Former member*, `auth_email` is replaced by a tombstone (`deleted+<id>@invalid`, so the person can be invited again, R-AUTH-08), and the member's posts, comments, photos and chat messages are either kept
+  becomes the localized *Former member*, `auth_email` is replaced by a tombstone (`deleted+<id>@invalid`, lower-case so it satisfies the `auth_email` `CHECK`, so the person can be invited again, R-AUTH-08); the matching `invites.email` is rewritten to the same tombstone and the invite set `revoked`, so the real email no longer remains in the live data (R-DB-13), and the member's posts, comments, photos and chat messages are either kept
   under that name or deleted, as the member chose in the request. Authorship rows keep their foreign keys (R-DB-04).
 - **R-PROF-12** `/profile` and `docs/PRIVACY.md` state plainly that admin backups (§13) contain contact data, are kept
   encrypted for the documented retention period (R-BAK-11), and that a deletion removes data from the live site at
@@ -75,4 +75,4 @@
 | AC-PROF-05 | Own export holds only the requester's data; another member's contacts are absent | R-PROF-09 | integration |
 | AC-PROF-06 | A completed deletion leaves no contact data, renders *Former member*, and keeps or deletes content as requested | R-PROF-11 | integration |
 | AC-PROF-07 | Directory paging and search work over 50 synthetic members with accents | R-PROF-08 | integration + e2e |
-| AC-PROF-08 | A suspended owner's `/members/[id]` and author links show only the display name; a pending deletion request hides contacts at once; after completion `auth_email` is the tombstone and the same email can be invited again | R-PROF-13, 11 | integration |
+| AC-PROF-08 | A suspended owner's `/members/[id]` and author links show only the display name; a pending deletion request hides contacts at once; after completion `auth_email` and the matching `invites.email` are the tombstone (invite `revoked`) and the same email can be invited again | R-PROF-13, 11 | integration |

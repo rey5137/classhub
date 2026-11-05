@@ -1,7 +1,7 @@
 # Dependencies and builds
 node_modules/
 .svelte-kit/
-/build/
+build/
 dist/
 .wrangler/
 .screenshots/
@@ -20,8 +20,9 @@ wrangler.jsonc
 !.dev.vars.example
 
 # Local data, media and backups: real members' data never enters Git
-/data/
-/backups/
+data/
+backups/
+!docs/spec/data/
 *.sqlite
 *.sqlite-journal
 *.age

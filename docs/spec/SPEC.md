@@ -149,3 +149,5 @@ A custom domain, if used, shares the one Access application and AUD (R-OPS-16).
   a global `wrangler login` points at (R-PLAT-12).
 
 Breaking an invariant or changing D1–D10 is an owner decision recorded in this file; never patch around one.
+
+*Provenance:* the owner approved the D10 exit-path wording (the exit paths show where the design allows leaving, not what v1.0 ships) and the deferral of the production Node target past v1.0 (§D); both were recorded as owner decisions in commit 3061ad2.

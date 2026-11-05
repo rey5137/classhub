@@ -14,6 +14,9 @@ const safeText = (max: number) =>
     .max(max)
     .refine((value) => !/[{}<>]|url\(|expression\(/i.test(value), 'CSS and markup are not allowed');
 
+// The R2 adapter buffers a whole upload inside a 128 MB Worker isolate, so the setting is capped.
+const MAX_IMAGE_BYTES = 25_000_000;
+
 const siteConfigSchema = z
   .object({
     appName: safeText(60),
@@ -32,7 +35,7 @@ const siteConfigSchema = z
       .max(5)
       .refine((items) => new Set(items).size === items.length, 'nav items must be unique'),
     profileFields: z
-      .array(z.enum(['city', 'schoolYears', 'bio', 'email', 'phone', 'social']))
+      .array(z.enum(['city', 'bio', 'contact_email', 'phone', 'messaging_url']))
       .max(16),
     features: z
       .object({
@@ -43,8 +46,8 @@ const siteConfigSchema = z
       .strict(),
     uploads: z
       .object({
-        maxImageBytes: z.number().int().positive().max(1_000_000_000),
-        imageTypes: z.array(z.enum(['image/jpeg', 'image/png', 'image/webp'])).min(1),
+        maxImageBytes: z.number().int().positive().max(MAX_IMAGE_BYTES),
+        imageTypes: z.array(z.enum(['image/jpeg', 'image/webp'])).min(1),
       })
       .strict(),
     limits: z

@@ -104,7 +104,7 @@ successful independent restore. Deploying is not enough.
 
 #### Slice 0a — skeleton and Worker build
 - **Covers:** AC-PLAT-01 (partly), AC-PLAT-04, AC-PLAT-06, AC-PLAT-07.
-- SvelteKit + TS strict, Svelte 5, `adapter-cloudflare` and `adapter-node` (local target only) switched by `CLASSHUB_TARGET`; ESLint,
+- SvelteKit + TS strict, Svelte 5, `adapter-cloudflare` as the only build target (offline dev through `CLASSHUB_OFFLINE`, Node deferred past v1.0); ESLint,
   Prettier, `svelte-check`, Vitest, Playwright; `.nvmrc`, `.gitignore` per R-PLAT-09.
 - `src/worker.ts` wrapping the SvelteKit output and exporting a stub `ChatRoom` (SQLite-backed); `wrangler.jsonc.example`;
   `/health`.

@@ -106,3 +106,34 @@ describe('R-NAV-01 nav entries', () => {
     );
   });
 });
+
+describe('R-PROF-02 and R-MEM-08 profile fields and uploads', () => {
+  it('refuses profile field names that are not schema columns', () => {
+    for (const field of ['schoolYears', 'email', 'social']) {
+      expect(() =>
+        validateSiteConfig({ ...siteDefaults, profileFields: [field] as never }),
+      ).toThrow(SiteConfigError);
+    }
+  });
+
+  it('refuses image/png and a maxImageBytes above 25 MB', () => {
+    expect(() =>
+      validateSiteConfig({
+        ...siteDefaults,
+        uploads: { ...siteDefaults.uploads, imageTypes: ['image/png'] as never },
+      }),
+    ).toThrow(SiteConfigError);
+    expect(() =>
+      validateSiteConfig({
+        ...siteDefaults,
+        uploads: { ...siteDefaults.uploads, maxImageBytes: 25_000_001 },
+      }),
+    ).toThrow(SiteConfigError);
+    expect(() =>
+      validateSiteConfig({
+        ...siteDefaults,
+        uploads: { ...siteDefaults.uploads, maxImageBytes: 25_000_000 },
+      }),
+    ).not.toThrow();
+  });
+});

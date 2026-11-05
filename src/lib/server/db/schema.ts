@@ -34,6 +34,9 @@ export const users = sqliteTable(
   },
   (table) => [
     uniqueIndex('users_auth_email_unique').on(table.authEmail),
+    check('users_auth_email_lower_check', sql`${table.authEmail} = lower(${table.authEmail})`),
+    check('users_role_check', sql`${table.role} in ('member', 'admin')`),
+    check('users_status_check', sql`${table.status} in ('invited', 'active', 'suspended')`),
     index('users_status_display_name_norm_idx').on(table.status, table.displayNameNorm),
     index('users_status_preferred_name_norm_idx').on(table.status, table.preferredNameNorm),
   ],
@@ -72,6 +75,9 @@ export const invites = sqliteTable(
   },
   (table) => [
     uniqueIndex('invites_email_unique').on(table.email),
+    check('invites_email_lower_check', sql`${table.email} = lower(${table.email})`),
+    check('invites_role_check', sql`${table.role} in ('member', 'admin')`),
+    check('invites_status_check', sql`${table.status} in ('pending', 'accepted', 'revoked')`),
     index('invites_status_email_idx').on(table.status, table.email),
   ],
 );
@@ -178,6 +184,12 @@ export const media = sqliteTable(
     check('media_media_type_check', sql`${table.mediaType} in ('photo', 'avatar', 'site')`),
     index('media_album_idx').on(table.albumId, sql`${table.createdAt} desc`, sql`${table.id} desc`),
     index('media_owner_idx').on(table.ownerId, table.createdAt),
+    index('media_type_deleted_created_idx').on(
+      table.mediaType,
+      table.deletedAt,
+      sql`${table.createdAt} desc`,
+      sql`${table.id} desc`,
+    ),
     index('media_effective_year_idx').on(
       table.effectiveYear,
       sql`${table.createdAt} desc`,
@@ -258,7 +270,7 @@ export const uploadReservations = sqliteTable(
       .references(() => users.id, { onDelete: 'restrict' }),
     // R-MEM-09: the media row does not exist when the reservation is created.
     mediaId: text('media_id'),
-    purpose: text('purpose', { enum: ['photo', 'avatar'] }).notNull(),
+    purpose: text('purpose', { enum: ['photo', 'avatar', 'site'] }).notNull(),
     reservedBytes: integer('reserved_bytes', { mode: 'number' }).notNull(),
     imageBytes: integer('image_bytes', { mode: 'number' }).notNull(),
     thumbBytes: integer('thumb_bytes', { mode: 'number' }).notNull(),
@@ -277,6 +289,10 @@ export const uploadReservations = sqliteTable(
     expiresAt: integer('expires_at', { mode: 'number' }).notNull(),
   },
   (table) => [
+    check(
+      'upload_reservations_purpose_check',
+      sql`${table.purpose} in ('photo', 'avatar', 'site')`,
+    ),
     check(
       'upload_reservations_state_check',
       sql`${table.state} in ('open', 'completed', 'released')`,

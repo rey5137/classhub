@@ -57,14 +57,19 @@ const ADMIN_EMAIL = DEMO_MEMBERS[0]!.email;
 // D1 caps a statement at 100 bound variables (7 user rows x 13 columns = 91).
 const INSERT_CHUNK = 7;
 
-/** @param rows - rows to insert, chunked so the query stays under D1's limit */
+/**
+ * @param rows - rows to insert, chunked so the query stays under D1's limit
+ * @returns how many rows the inserts actually wrote (conflicts are skipped)
+ */
 async function insertChunked<T>(
   rows: T[],
-  insert: (chunk: T[]) => Promise<unknown>,
-): Promise<void> {
+  insert: (chunk: T[]) => Promise<unknown[]>,
+): Promise<number> {
+  let inserted = 0;
   for (let index = 0; index < rows.length; index += INSERT_CHUNK) {
-    await insert(rows.slice(index, index + INSERT_CHUNK));
+    inserted += (await insert(rows.slice(index, index + INSERT_CHUNK))).length;
   }
+  return inserted;
 }
 
 /**
@@ -92,8 +97,8 @@ export async function seedDemo(
     updatedAt: now,
   }));
 
-  await insertChunked(memberRows, (chunk) =>
-    database.db.insert(users).values(chunk).onConflictDoNothing(),
+  const insertedMembers = await insertChunked(memberRows, (chunk) =>
+    database.db.insert(users).values(chunk).onConflictDoNothing().returning({ id: users.id }),
   );
 
   const stored = await database.db.select({ id: users.id, email: users.authEmail }).from(users);
@@ -112,9 +117,9 @@ export async function seedDemo(
     expiresAt: null,
   }));
 
-  await insertChunked(inviteRows, (chunk) =>
-    database.db.insert(invites).values(chunk).onConflictDoNothing(),
+  const insertedInvites = await insertChunked(inviteRows, (chunk) =>
+    database.db.insert(invites).values(chunk).onConflictDoNothing().returning({ id: invites.id }),
   );
 
-  return { members: DEMO_MEMBERS.length, invites: DEMO_MEMBERS.length };
+  return { members: insertedMembers, invites: insertedInvites };
 }

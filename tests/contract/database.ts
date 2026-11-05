@@ -301,6 +301,106 @@ export function databaseContract(label: string, create: DatabaseFactory): void {
       });
     });
 
+    it('R-MEM-19 a freshly migrated database has exactly one storage_usage row, all zero', async () => {
+      await withDatabase(create, async (database) => {
+        const rows = await database.db.select().from(schema.storageUsage);
+        expect(rows).toEqual([
+          {
+            singletonId: 1,
+            committedBytes: 0,
+            reservedBytes: 0,
+            lastReconciledAt: null,
+            updatedAt: 0,
+          },
+        ]);
+      });
+    });
+
+    it('AC-DB-02 rejects enum values and upper-case emails outside the CHECKs', async () => {
+      await withDatabase(create, async (database) => {
+        const admin = userRow();
+        await database.db.insert(schema.users).values(admin);
+        const inviteBase = { email: `${uuidv7()}@example.com`, invitedBy: admin.id };
+        const rejects = async (run: () => Promise<unknown>) => {
+          // Drizzle wraps the driver error ("Failed query: …"); the CHECK text is on the cause chain.
+          const error: unknown = await run().then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+          const messages: string[] = [];
+          for (let e = error; e instanceof Error; e = e.cause) messages.push(e.message);
+          expect(messages.join('\n')).toMatch(/CHECK constraint failed/);
+        };
+
+        await rejects(
+          async () =>
+            await database.db
+              .insert(schema.users)
+              .values({ ...userRow(), role: 'owner' as 'admin' }),
+        );
+        await rejects(
+          async () =>
+            await database.db
+              .insert(schema.users)
+              .values({ ...userRow(), status: 'deleted' as 'active' }),
+        );
+        await rejects(
+          async () => await database.db.insert(schema.users).values(userRow('Mixed@Example.com')),
+        );
+        await rejects(
+          async () =>
+            await database.db.insert(schema.invites).values({
+              ...inviteBase,
+              id: uuidv7(),
+              role: 'owner' as 'admin',
+            }),
+        );
+        await rejects(
+          async () =>
+            await database.db.insert(schema.invites).values({
+              ...inviteBase,
+              id: uuidv7(),
+              status: 'expired' as 'pending',
+            }),
+        );
+        await rejects(
+          async () =>
+            await database.db.insert(schema.invites).values({
+              ...inviteBase,
+              id: uuidv7(),
+              email: 'Mixed@Example.com',
+            }),
+        );
+        await rejects(
+          async () =>
+            await database.db.insert(schema.uploadReservations).values({
+              ...reservationRow(admin.id),
+              purpose: 'banner' as 'photo',
+            }),
+        );
+      });
+    });
+
+    it('AC-DB-02 accepts the site purpose and the deletion tombstone email (R-PROF-11)', async () => {
+      await withDatabase(create, async (database) => {
+        const admin = userRow();
+        await database.db.insert(schema.users).values(admin);
+        await database.db
+          .insert(schema.uploadReservations)
+          .values({ ...reservationRow(admin.id), purpose: 'site' });
+        const tombstone = `deleted+${uuidv7()}@invalid`;
+        await database.db.insert(schema.users).values(userRow(tombstone));
+        await database.db
+          .insert(schema.invites)
+          .values({ id: uuidv7(), email: tombstone, invitedBy: admin.id, status: 'revoked' });
+        const rows = await database.db
+          .select({ id: schema.invites.id })
+          .from(schema.invites)
+          .where(eq(schema.invites.email, tombstone));
+        expect(rows).toHaveLength(1);
+      });
+    });
+
     it('R-DB-08 rolls back only the failing concurrent batch', async () => {
       await withDatabase(create, async (database) => {
         const goodEmail = `${uuidv7()}@example.com`;

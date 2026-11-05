@@ -25,6 +25,35 @@ function run(bundle: string) {
 }
 
 describe('scripts/check-worker-exports.mjs', () => {
+  it('AC-PLAT-09 scans every file in the output folder, not only worker.js', () => {
+    writeFileSync(join(dir, 'worker.js'), 'export { ChatRoom } from "./chunk.js";\n');
+    writeFileSync(join(dir, 'chunk.js'), 'const adapter = FsObjectStorage;\n');
+
+    const result = spawnSync(process.execPath, [script, dir], { encoding: 'utf8' });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('FsObjectStorage');
+  });
+
+  it('AC-PLAT-04 looks for the ChatRoom export only in worker.js, not in a source map', () => {
+    writeFileSync(join(dir, 'worker.js'), 'export default {};\n');
+    writeFileSync(join(dir, 'worker.js.map'), '{"sourcesContent":["export { ChatRoom } from"]}');
+
+    const result = spawnSync(process.execPath, [script, dir], { encoding: 'utf8' });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('does not export ChatRoom');
+  });
+
+  it('AC-PLAT-09 ignores forbidden tokens quoted in a source map', () => {
+    writeFileSync(join(dir, 'worker.js'), 'export { ChatRoom } from "./chat-room.js";\n');
+    writeFileSync(join(dir, 'worker.js.map'), '{"sourcesContent":["import \'node:fs\'"]}');
+
+    const result = spawnSync(process.execPath, [script, dir], { encoding: 'utf8' });
+
+    expect(result.status).toBe(0);
+  });
+
   it('AC-PLAT-04 accepts a bundle that exports ChatRoom', () => {
     const result = run('export { ChatRoom } from "./chat-room.js";\n');
 
@@ -85,7 +114,7 @@ describe('scripts/check-worker-exports.mjs', () => {
     expect(result.stderr).toContain('DevIdentityProvider');
   });
 
-  it('AC-PLAT-02 fails when the bundle contains the filesystem adapter identifier', () => {
+  it('AC-PLAT-09 fails when the bundle contains the filesystem adapter identifier', () => {
     const result = run(
       'export { ChatRoom } from "./chat-room.js";\nconst storage = FsObjectStorage;\n',
     );
@@ -94,7 +123,7 @@ describe('scripts/check-worker-exports.mjs', () => {
     expect(result.stderr).toContain('FsObjectStorage');
   });
 
-  it('AC-PLAT-02 fails when the bundle contains the local database identifier', () => {
+  it('AC-PLAT-09 fails when the bundle contains the local database identifier', () => {
     const result = run(
       'export { ChatRoom } from "./chat-room.js";\nconst open = createLocalDatabase;\n',
     );

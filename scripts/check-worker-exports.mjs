@@ -1,10 +1,32 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { basename, join } from 'node:path';
 
-const bundlePath = process.argv[2] ?? '.wrangler/dry-run/worker.js';
+// The argument is the build output folder (or one file); every file in it is
+// scanned, because the bundle may be split into chunks.
+const bundlePath = process.argv[2] ?? '.wrangler/dry-run';
+
+/** @param {string} path @returns {string[]} */
+function filesUnder(path) {
+  if (!statSync(path).isDirectory()) return [path];
+  return readdirSync(path, { withFileTypes: true }).flatMap((entry) =>
+    filesUnder(join(path, entry.name)),
+  );
+}
 
 let source;
+let entrySource;
 try {
-  source = readFileSync(bundlePath, 'utf8');
+  const files = filesUnder(bundlePath);
+  if (files.length === 0) throw new Error('no files in the build output');
+  // Source maps quote the sources they came from, so only code files count.
+  const code = files.filter((file) => /\.m?js$/.test(file));
+  if (code.length === 0) throw new Error('no .js or .mjs files in the build output');
+  source = code.map((file) => readFileSync(file, 'utf8')).join('\n');
+  // The Worker entry is worker.js; a single-file argument is its own entry.
+  const entry = statSync(bundlePath).isDirectory()
+    ? code.find((file) => basename(file) === 'worker.js')
+    : bundlePath;
+  entrySource = entry ? readFileSync(entry, 'utf8') : '';
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`check-worker-exports: cannot read ${bundlePath}: ${message}`);
@@ -30,7 +52,7 @@ function exportedNames(bundle) {
   return names;
 }
 
-if (!exportedNames(source).has('ChatRoom')) {
+if (!exportedNames(entrySource).has('ChatRoom')) {
   console.error(`check-worker-exports: ${bundlePath} does not export ChatRoom`);
   process.exit(1);
 }

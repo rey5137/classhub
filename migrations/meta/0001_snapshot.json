@@ -633,7 +633,20 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "invites_email_lower_check": {
+          "name": "invites_email_lower_check",
+          "value": "\"invites\".\"email\" = lower(\"invites\".\"email\")"
+        },
+        "invites_role_check": {
+          "name": "invites_role_check",
+          "value": "\"invites\".\"role\" in ('member', 'admin')"
+        },
+        "invites_status_check": {
+          "name": "invites_status_check",
+          "value": "\"invites\".\"status\" in ('pending', 'accepted', 'revoked')"
+        }
+      }
     },
     "media": {
       "name": "media",
@@ -781,6 +794,11 @@
         "media_owner_idx": {
           "name": "media_owner_idx",
           "columns": ["owner_id", "created_at"],
+          "isUnique": false
+        },
+        "media_type_deleted_created_idx": {
+          "name": "media_type_deleted_created_idx",
+          "columns": ["media_type", "deleted_at", "\"created_at\" desc", "\"id\" desc"],
           "isUnique": false
         },
         "media_effective_year_idx": {
@@ -1308,6 +1326,10 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
+        "upload_reservations_purpose_check": {
+          "name": "upload_reservations_purpose_check",
+          "value": "\"upload_reservations\".\"purpose\" in ('photo', 'avatar', 'site')"
+        },
         "upload_reservations_state_check": {
           "name": "upload_reservations_state_check",
           "value": "\"upload_reservations\".\"state\" in ('open', 'completed', 'released')"
@@ -1446,7 +1468,20 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "users_auth_email_lower_check": {
+          "name": "users_auth_email_lower_check",
+          "value": "\"users\".\"auth_email\" = lower(\"users\".\"auth_email\")"
+        },
+        "users_role_check": {
+          "name": "users_role_check",
+          "value": "\"users\".\"role\" in ('member', 'admin')"
+        },
+        "users_status_check": {
+          "name": "users_status_check",
+          "value": "\"users\".\"status\" in ('invited', 'active', 'suspended')"
+        }
+      }
     }
   },
   "views": {},
@@ -1469,6 +1504,16 @@
         }
       },
       "media_album_idx": {
+        "columns": {
+          "\"created_at\" desc": {
+            "isExpression": true
+          },
+          "\"id\" desc": {
+            "isExpression": true
+          }
+        }
+      },
+      "media_type_deleted_created_idx": {
         "columns": {
           "\"created_at\" desc": {
             "isExpression": true

@@ -9,11 +9,11 @@ export const siteDefaults = {
   mode: 'light',
   accent: null,
   nav: ['home', 'memories', 'discussions', 'chat', 'members'],
-  profileFields: ['city', 'schoolYears', 'bio', 'email', 'phone', 'social'],
+  profileFields: ['city', 'bio', 'contact_email', 'phone', 'messaging_url'],
   features: { memories: true, discussions: true, chat: true },
   uploads: {
     maxImageBytes: 25_000_000,
-    imageTypes: ['image/jpeg', 'image/png', 'image/webp'],
+    imageTypes: ['image/jpeg', 'image/webp'],
   },
   limits: { mediaWarnBytes: 8_000_000_000, mediaStopBytes: 9_000_000_000, photosPerDay: 25 },
   chat: { retainDays: 365, maxMessages: 30_000 },

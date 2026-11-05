@@ -290,6 +290,140 @@ describe('scripts/cf.mjs', () => {
     expect(result.stderr).toContain('env.*.account_id');
   });
 
+  it('AC-PLAT-06 d1 migrations apply --remote refuses a mismatched wrangler.jsonc', () => {
+    writeValidEnv();
+    writeWranglerConfig(otherAccount);
+
+    const { result, invocations } = run(['d1', 'migrations', 'apply', 'DB', '--remote'], {
+      whoami: whoami(account),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('does not match');
+    expect(invocations.map((entry) => entry.args[0])).toEqual(['whoami']);
+  });
+
+  it('AC-PLAT-06 legitimate remote commands are not mistaken for target flags', () => {
+    writeValidEnv();
+    writeWranglerConfig(account);
+
+    for (const command of [
+      ['d1', 'migrations', 'apply', 'DB', '--remote'],
+      ['r2', 'bucket', 'create', 'x'],
+    ]) {
+      rmSync(logPath, { force: true });
+      const { result, invocations } = run(command, { whoami: whoami(account) });
+      expect(result.status, command.join(' ')).toBe(0);
+      expect(invocations.map((entry) => entry.args[0])).toEqual(['whoami', command[0]]);
+    }
+  });
+
+  it('AC-PLAT-06 a non-deploy command is refused when only env.x.account_id names another account', () => {
+    writeValidEnv();
+    writeWranglerConfigSource(
+      `{\n  "name": "classhub",\n  "env": { "x": { "account_id": "${otherAccount}" } }\n}\n`,
+    );
+
+    const { result, invocations } = run(['d1', 'list'], { whoami: whoami(account) });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('differs');
+    expect(invocations.map((entry) => entry.args[0])).toEqual(['whoami']);
+  });
+
+  it('AC-PLAT-06 a non-deploy command runs when only env.x.account_id matches the account', () => {
+    writeValidEnv();
+    writeWranglerConfigSource(
+      `{\n  "name": "classhub",\n  "env": { "x": { "account_id": "${account}" } }\n}\n`,
+    );
+
+    const { result } = run(['d1', 'list'], { whoami: whoami(account) });
+
+    expect(result.status).toBe(0);
+  });
+
+  it('AC-PLAT-06 a non-deploy command runs with a matching wrangler.jsonc', () => {
+    writeValidEnv();
+    writeWranglerConfig(account);
+
+    const { result, invocations } = run(['d1', 'list'], { whoami: whoami(account) });
+
+    expect(result.status).toBe(0);
+    expect(invocations.map((entry) => entry.args[0])).toEqual(['whoami', 'd1']);
+  });
+
+  it('AC-PLAT-06 a non-deploy command runs when wrangler.jsonc has no account_id', () => {
+    writeValidEnv();
+    writeWranglerConfigSource('{\n  "name": "classhub"\n}\n');
+
+    const { result } = run(['d1', 'list'], { whoami: whoami(account) });
+
+    expect(result.status).toBe(0);
+  });
+
+  it('AC-PLAT-06 an unparseable wrangler.jsonc says so and stops a non-deploy command', () => {
+    writeValidEnv();
+    writeWranglerConfigSource('{ "account_id": ');
+
+    const { result, invocations } = run(['d1', 'list'], { whoami: whoami(account) });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('could not be parsed');
+    expect(result.stderr).not.toContain('missing');
+    expect(invocations.map((entry) => entry.args[0])).toEqual(['whoami']);
+  });
+
+  it('AC-PLAT-06 refuses a token that sees more than one account', () => {
+    writeValidEnv();
+    writeWranglerConfig(account);
+    const many = JSON.stringify({
+      loggedIn: true,
+      accounts: [{ id: account }, { id: otherAccount }],
+    });
+
+    for (const command of [['d1', 'list'], ['deploy'], ['--check-deploy']]) {
+      const { result, invocations } = run(command, { whoami: many });
+      expect(result.status, command.join(' ')).not.toBe(0);
+      expect(result.stderr).toContain('more than one account');
+      expect(invocations.map((entry) => entry.args[0])).toEqual(['whoami']);
+      rmSync(logPath, { force: true });
+    }
+  });
+
+  it('AC-PLAT-06 refuses --cwd, --env-file and the attached -cX / -eX forms', () => {
+    writeValidEnv();
+    writeWranglerConfig(account);
+    // node itself reads --env-file anywhere in argv, so the file must exist.
+    writeFileSync(join(dir, '.env.other'), '');
+
+    for (const flag of [
+      ['--cwd', 'other'],
+      ['--cwd=other'],
+      ['--env-file', '.env.other'],
+      ['--env-file=.env.other'],
+      ['-cother.jsonc'],
+      ['-estaging'],
+      ['--e', 'staging'],
+      ['--c=x.jsonc'],
+      ['--envFile=.env.other'],
+      ['-vc', 'x.jsonc'],
+    ]) {
+      const { result, invocations } = run(['d1', 'list', ...flag], { whoami: whoami(account) });
+      expect(result.status, flag.join(' ')).not.toBe(0);
+      expect(result.stderr).toContain('is not allowed');
+      expect(invocations, flag.join(' ')).toHaveLength(0);
+    }
+  });
+
+  it('AC-PLAT-06 a local dry-run needs no account check even with a mismatched wrangler.jsonc', () => {
+    writeWranglerConfig(otherAccount);
+
+    const { result, invocations } = run(['deploy', '--dry-run', '--outdir', 'out']);
+
+    expect(result.status).toBe(0);
+    expect(invocations.map((entry) => entry.args[0])).toEqual(['deploy']);
+  });
+
   it('refuses --config, -c, --env and -e outside a local dry-run', () => {
     writeValidEnv();
     writeWranglerConfig(account);
@@ -425,9 +559,14 @@ describe('scripts/cf.mjs', () => {
     };
     const deploy = packageJson.scripts?.deploy ?? '';
 
-    expect(deploy.indexOf('--check-deploy')).toBeGreaterThan(-1);
-    expect(deploy.indexOf('--check-deploy')).toBeLessThan(deploy.indexOf('npm run build'));
-    expect(deploy.indexOf('npm run build')).toBeLessThan(deploy.indexOf('scripts/cf.mjs deploy'));
+    const steps = deploy.split('&&').map((step) => step.trim());
+
+    expect(steps).toEqual([
+      'node scripts/cf.mjs --check-deploy',
+      'npm run build',
+      'npm run build:worker-check',
+      'node scripts/cf.mjs deploy',
+    ]);
   });
 
   it('keeps wrangler.build.jsonc and wrangler.jsonc.example in agreement', () => {

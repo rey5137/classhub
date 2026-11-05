@@ -94,7 +94,10 @@ CREATE TABLE `invites` (
 	`access_synced_at` integer,
 	`created_at` integer NOT NULL,
 	`expires_at` integer,
-	FOREIGN KEY (`invited_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE restrict
+	FOREIGN KEY (`invited_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE restrict,
+	CONSTRAINT "invites_email_lower_check" CHECK("invites"."email" = lower("invites"."email")),
+	CONSTRAINT "invites_role_check" CHECK("invites"."role" in ('member', 'admin')),
+	CONSTRAINT "invites_status_check" CHECK("invites"."status" in ('pending', 'accepted', 'revoked'))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `invites_email_unique` ON `invites` (`email`);--> statement-breakpoint
@@ -126,6 +129,7 @@ CREATE TABLE `media` (
 --> statement-breakpoint
 CREATE INDEX `media_album_idx` ON `media` (`album_id`,"created_at" desc,"id" desc);--> statement-breakpoint
 CREATE INDEX `media_owner_idx` ON `media` (`owner_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `media_type_deleted_created_idx` ON `media` (`media_type`,`deleted_at`,"created_at" desc,"id" desc);--> statement-breakpoint
 CREATE INDEX `media_effective_year_idx` ON `media` (`effective_year`,"created_at" desc,"id" desc);--> statement-breakpoint
 CREATE INDEX `media_deleted_purged_idx` ON `media` (`deleted_at`,`purged_at`);--> statement-breakpoint
 CREATE TABLE `posts` (
@@ -203,6 +207,7 @@ CREATE TABLE `upload_reservations` (
 	`created_at` integer NOT NULL,
 	`expires_at` integer NOT NULL,
 	FOREIGN KEY (`owner_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE restrict,
+	CONSTRAINT "upload_reservations_purpose_check" CHECK("upload_reservations"."purpose" in ('photo', 'avatar', 'site')),
 	CONSTRAINT "upload_reservations_state_check" CHECK("upload_reservations"."state" in ('open', 'completed', 'released'))
 );
 --> statement-breakpoint
@@ -223,11 +228,15 @@ CREATE TABLE `users` (
 	`deletion_keep_content` integer DEFAULT false NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	`last_seen_at` integer
+	`last_seen_at` integer,
+	CONSTRAINT "users_auth_email_lower_check" CHECK("users"."auth_email" = lower("users"."auth_email")),
+	CONSTRAINT "users_role_check" CHECK("users"."role" in ('member', 'admin')),
+	CONSTRAINT "users_status_check" CHECK("users"."status" in ('invited', 'active', 'suspended'))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `users_auth_email_unique` ON `users` (`auth_email`);--> statement-breakpoint
 CREATE INDEX `users_status_display_name_norm_idx` ON `users` (`status`,`display_name_norm`);--> statement-breakpoint
 CREATE INDEX `users_status_preferred_name_norm_idx` ON `users` (`status`,`preferred_name_norm`);--> statement-breakpoint
 INSERT INTO `schema_meta` (`key`, `value`) VALUES ('schema_version', '1');--> statement-breakpoint
-INSERT INTO `schema_meta` (`key`, `value`) VALUES ('housekeeping_last_run_at', '0');
+INSERT INTO `schema_meta` (`key`, `value`) VALUES ('housekeeping_last_run_at', '0');--> statement-breakpoint
+INSERT INTO `storage_usage` (`singleton_id`, `committed_bytes`, `reserved_bytes`, `last_reconciled_at`, `updated_at`) VALUES (1, 0, 0, NULL, 0);

@@ -46,7 +46,7 @@
   is never auto-created. **Revoking an invite** sets it `revoked` and deletes the never-active `users` row (or marks
   it `suspended` when the row has any history), so a revoked email can never activate. **Invite expiry:** each invite
   has `expires_at`, default 30 days after creation (`invite.expiryDays`, configurable; `null` means never); an expired
-  invite behaves like a revoked one and an admin can re-invite.
+  invite behaves like a revoked one and an admin can re-invite: because `invites.email` is unique and never hard-deleted (R-DB-13), re-inviting a `revoked` or expired email updates that row to `pending` (new `expires_at`, `role`, `invited_by`) and is audited.
 - **R-AUTH-25** **Subject check.** Matching stays by normalized email (R-AUTH-06), also when re-linking after a restore
   (R-BAK-14). The Access JWT `sub` is stored in `users.access_sub` on first login; a later login with the same email
   but a different `sub` is still matched by email and recorded as an audit event (`access_sub_changed`, no email in
@@ -70,7 +70,8 @@
   data. A deployment visited before Access is attached shows nothing private.
 - **R-AUTH-13** **No identity bypass in production.** No `X-Debug-User`, `?as_user=`, test token or dev identity exists
   in a production build: the dev identity adapter lives in `adapters/local/` and is imported only under
-  `import.meta.env.DEV`, and the build test scans the bundle for it (AC-PLAT-09).
+  `import.meta.env.DEV`, and the build test scans every file of the bundle for it (AC-PLAT-09). Even in a dev build it answers only a loopback
+  peer address with a loopback `Host` (R-PLAT-10).
 - **R-AUTH-14** A second admin is recommended at unlock time and on `/admin` while only one exists (§15 risk
   "admin leaves").
 - **R-AUTH-15** **Email PIN fallback.** `docs/GOOGLE_ACCESS.md` documents Access's one-time PIN as an alternative
