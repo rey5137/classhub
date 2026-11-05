@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   copyFileSync,
@@ -13,7 +13,9 @@ import {
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { startFakeApi, type FakeApi } from '../fixtures/fake-cloudflare-api';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const account = '11111111111111111111111111111111';
@@ -563,6 +565,8 @@ describe('scripts/cf.mjs', () => {
 
     expect(steps).toEqual([
       'node scripts/cf.mjs --check-deploy',
+      // R-OPS-08 / R-AUTH-05: the schema guard and the Access vars, after the account guard.
+      'node scripts/deploy-check.mjs',
       'npm run build',
       'npm run build:worker-check',
       'node scripts/cf.mjs deploy',
@@ -582,5 +586,103 @@ describe('scripts/cf.mjs', () => {
     ]) {
       expect(build[key], key).toEqual(example[key]);
     }
+  });
+});
+
+describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
+  let api: FakeApi;
+
+  beforeEach(async () => {
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ buckets: ['b1'], subdomain: 'sub' }));
+    api = await startFakeApi(dir, account, token);
+  });
+
+  afterEach(() => api.close());
+
+  // Async: the fake API answers from this process while cf.mjs runs.
+  async function runApi(args: string[], options: { base?: string; config?: string } = {}) {
+    if (options.config) writeWranglerConfigSource(options.config);
+    try {
+      const { stdout } = await promisify(execFile)(process.execPath, [cfScript, ...args], {
+        cwd: dir,
+        env: {
+          PATH: process.env.PATH ?? '',
+          CF_WRANGLER_BIN: fakeWrangler,
+          FAKE_WRANGLER_LOG: logPath,
+          FAKE_WRANGLER_WHOAMI: whoami(account),
+          CF_API_BASE: options.base ?? api.base,
+        },
+        encoding: 'utf8',
+      });
+      return { status: 0, stdout, stderr: '' };
+    } catch (error) {
+      const failed = error as { code: number; stdout: string; stderr: string };
+      return { status: failed.code, stdout: failed.stdout, stderr: failed.stderr };
+    }
+  }
+
+  it('AC-PLAT-07 GETs under the guarded account with the .env.cloudflare token in a header only', async () => {
+    writeValidEnv();
+    const result = await runApi(['api', '/r2/buckets/b1']);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ name: 'b1' });
+    expect(api.requests).toEqual([`GET /client/v4/accounts/${account}/r2/buckets/b1 token`]);
+    expect(result.stdout).not.toContain(token);
+    // whoami ran first; the token was never an argument.
+    const calls = readFileSync(logPath, 'utf8').trim().split('\n');
+    expect(calls.map((line) => (JSON.parse(line) as Invocation).args[0])).toEqual(['whoami']);
+  });
+
+  it('AC-PLAT-06 api refuses a mismatched wrangler.jsonc before any request', async () => {
+    writeValidEnv();
+    const result = await runApi(['api', '/r2/buckets/b1'], {
+      config: `{ "account_id": "${otherAccount}" }`,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('does not match');
+    expect(api.requests).toEqual([]);
+  });
+
+  it.each(['http://example.test:80', 'https://127.0.0.1:1', 'http://localhost:1'])(
+    'refuses CF_API_BASE %s, so the token cannot leave the machine',
+    async (base) => {
+      writeValidEnv();
+      const result = await runApi(['api', '/r2/buckets/b1'], { base });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('CF_API_BASE');
+    },
+  );
+
+  // Only the three read shapes the scripts use; the paginated list is not one of them.
+  it.each([
+    '/r2/buckets',
+    '/r2/buckets?per_page=100',
+    '/r2/buckets/B1',
+    '/r2/buckets/b1/objects',
+    '/r2/buckets/b1/domains/other',
+    '/workers/scripts',
+    '/access/apps',
+    'r2/buckets/b1',
+    '/r2/../users',
+    '/a b',
+  ])('refuses the path %j', async (path) => {
+    writeValidEnv();
+    const result = await runApi(['api', path]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('usage');
+    expect(api.requests).toEqual([]);
+  });
+
+  it('fails with the HTTP status and error codes, not a body', async () => {
+    writeValidEnv();
+    const result = await runApi(['api', '/r2/buckets/missing']);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('HTTP 404 (10006)');
+    expect(result.stdout).toBe('');
   });
 });

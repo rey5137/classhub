@@ -5,6 +5,9 @@ declare global {
     interface Env {
       DB: D1Database;
       MEDIA: R2Bucket;
+      CHAT_ROOM: DurableObjectNamespace<
+        import('../src/lib/server/adapters/cloudflare/chat-room').ChatRoom
+      >;
       TEST_MIGRATIONS: D1Migration[];
       EXPECTED_SCHEMA: string;
     }

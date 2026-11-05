@@ -330,7 +330,14 @@ describe('scripts/invite.mjs (INV-9)', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'classhub-invite-'));
     mkdirSync(join(dir, 'scripts', 'lib'), { recursive: true });
-    for (const file of ['invite.mjs', 'cf.mjs', 'lib/invite.mjs', 'lib/env-file.mjs']) {
+    for (const file of [
+      'invite.mjs',
+      'cf.mjs',
+      'lib/invite.mjs',
+      'lib/env-file.mjs',
+      'lib/cf-child.mjs',
+      'lib/ids.mjs',
+    ]) {
       copyFileSync(join(repoRoot, 'scripts', file), join(dir, 'scripts', file));
     }
     mkdirSync(join(dir, 'src', 'lib', 'shared'), { recursive: true });

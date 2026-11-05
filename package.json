@@ -23,11 +23,16 @@
     "test:security": "vitest run --project security",
     "test:e2e": "playwright test",
     "screenshots": "node scripts/screenshots.mjs",
+    "setup": "node scripts/setup.mjs",
+    "preflight": "node scripts/preflight.mjs",
+    "unlock": "node scripts/unlock.mjs",
+    "lock": "node scripts/unlock.mjs --lock",
+    "smoke:test": "node scripts/smoke-test.mjs",
     "invite": "node scripts/invite.mjs",
     "smoke": "node scripts/smoke.mjs",
     "db:seed:demo": "tsx scripts/seed-demo.ts",
     "verify": "npm run lint && npm run check && npm run test && npm run test:migrations && npm run test:security && npm run build && npm run build:worker-check",
-    "deploy": "node scripts/cf.mjs --check-deploy && npm run build && npm run build:worker-check && node scripts/cf.mjs deploy"
+    "deploy": "node scripts/cf.mjs --check-deploy && node scripts/deploy-check.mjs && npm run build && npm run build:worker-check && node scripts/cf.mjs deploy"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",

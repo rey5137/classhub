@@ -41,8 +41,11 @@ npm run unlock       # opens the site to approved members
   2. asks the project slug (Worker name), site title, default theme, language and bootstrap admin email;
   3. creates or reuses D1 `<slug>-db` and R2 `<slug>-media` (listing first; never a duplicate, never deleting);
   4. generates the gitignored `wrangler.jsonc` from `wrangler.jsonc.example`: `account_id`, `name`, D1 and R2
-     bindings, the `CHAT_ROOM` Durable Object binding with a `new_sqlite_classes` migration, `workers_dev: true`,
-     `preview_urls: false`, vars `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` left empty until known;
+     bindings, the `CHAT_ROOM` Durable Object binding with a `new_sqlite_classes` migration, `workers_dev: true`
+     on first generation (a rerun keeps an owner's `false`, R-OPS-16 fallback), `preview_urls: false`, vars
+     `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` left empty until known. On a rerun, `main`, `compatibility_date`,
+     `compatibility_flags` and `assets` come from the example, its Durable Object bindings and migration tags are
+     appended when missing (never removed or reordered), and owner-only keys (vars, routes, extra entries) are kept;
   5. generates and stores `INTERNAL_CONTEXT_KEY` (R-CHAT-04) and `LOG_HASH_SALT` (R-AUTH-23) as Worker secrets if
      missing;
   6. applies remote migrations and seeds only `site_settings` defaults and the bootstrap admin invite, never demo

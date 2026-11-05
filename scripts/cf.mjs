@@ -22,6 +22,7 @@ if (args.length === 0) {
 
 const isDeploy = args[0] === 'deploy';
 const isCheckDeploy = args[0] === '--check-deploy' && args.length === 1;
+const isApi = args[0] === 'api';
 const isDryRun = isDeploy && isLocalDryRun(args);
 
 // R-PLAT-12: a remote command may not choose another config, environment or
@@ -89,6 +90,10 @@ if (mustHaveConfig || (!isDryRun && existsSync(configPath))) {
 
 if (isCheckDeploy) {
   process.exit(0);
+}
+
+if (isApi) {
+  await apiGet(args, /** @type {string} */ (accountId), /** @type {string} */ (token));
 }
 
 let runArgs = args;
@@ -363,6 +368,58 @@ function renderDryRunConfig() {
   const file = join(dir, 'wrangler.dry-run.jsonc');
   writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
   return file;
+}
+
+/**
+ * `cf.mjs api /<path>`: one read-only GET under the guarded account, for what no
+ * CLI command reports as data (the workers.dev subdomain, a bucket's domains). The
+ * token rides only in this process's request header; stdout gets the `result`.
+ * @param {string[]} argv @param {string} account @param {string} apiToken
+ * @returns {Promise<never>}
+ */
+async function apiGet(argv, account, apiToken) {
+  const path = argv[1] ?? '';
+  // Only the reads the scripts make: the workers.dev subdomain, one bucket by name
+  // (R2 names: lower-case letters, digits, hyphens) and that bucket's domains.
+  const shapes = [
+    /^\/workers\/subdomain$/,
+    /^\/r2\/buckets\/[a-z0-9][a-z0-9-]{1,62}$/,
+    /^\/r2\/buckets\/[a-z0-9][a-z0-9-]{1,62}\/domains\/(?:managed|custom)$/,
+  ];
+  if (argv.length !== 2 || !shapes.some((shape) => shape.test(path))) {
+    fail(
+      'usage: node scripts/cf.mjs api /workers/subdomain | /r2/buckets/<name>[/domains/managed|custom]',
+    );
+  }
+  let response;
+  try {
+    response = await fetch(`${apiBase()}/client/v4/accounts/${account}${path}`, {
+      headers: { authorization: `Bearer ${apiToken}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    fail(`GET ${path} failed: ${error instanceof Error ? error.name : 'network error'}`);
+  }
+  /** @type {{ success?: boolean; result?: unknown; errors?: { code?: number }[] } | null} */
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body?.success) {
+    const codes = (body?.errors ?? []).map((entry) => entry?.code).filter(Boolean);
+    fail(
+      `GET ${path} failed: HTTP ${response.status}${codes.length ? ` (${codes.join(', ')})` : ''}`,
+    );
+  }
+  process.stdout.write(`${JSON.stringify(body.result ?? null)}\n`);
+  process.exit(0);
+}
+
+function apiBase() {
+  const override = process.env.CF_API_BASE;
+  if (override === undefined) return 'https://api.cloudflare.com';
+  // Tests point this at a loopback fake; nothing else may receive the token.
+  if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(override)) {
+    fail('CF_API_BASE may only name http://127.0.0.1:<port>.');
+  }
+  return override;
 }
 
 /** @param {string} message @returns {never} */

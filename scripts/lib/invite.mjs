@@ -22,8 +22,18 @@ export class AccessScopeError extends Error {
 }
 
 /** SQLite string literal; the email is validated first, this is the second wall. */
-function quote(/** @type {string | null} */ value) {
+export function quote(/** @type {string | null} */ value) {
   return value === null ? 'NULL' : `'${value.replaceAll("'", "''")}'`;
+}
+
+/** An address the invite list accepts (also refuses SQL and shell metacharacters). */
+export function validEmail(/** @type {string} */ email) {
+  return EMAIL.test(email) && email.length <= 254;
+}
+
+/** R-AUTH-19: active members plus live invites, as one SQL expression. */
+export function seatsUsedSql(/** @type {number} */ now) {
+  return `((select count(*) from users where status = 'active') + (select count(*) from invites where status = 'pending' and (expires_at is null or expires_at > ${now})))`;
 }
 
 /** R-AUTH-06: trim and lower-case only. */
@@ -61,7 +71,7 @@ export function parseArgs(argv) {
       'usage: npm run invite -- list | add <email> [--name "Display Name"] [--role admin] | remove <email>',
     );
   }
-  if (!EMAIL.test(email) || email.length > 254) throw new Error(`not an email address: ${email}`);
+  if (!validEmail(email)) throw new Error(`not an email address: ${email}`);
   if (command === 'remove') return { command, email };
   const role = flags.role ?? 'member';
   if (role !== 'member' && role !== 'admin') throw new Error('--role is member or admin');
@@ -127,7 +137,7 @@ async function add(deps, email, name, role) {
   } else if (live) {
     deps.out(`${email} already has a pending invite.`);
   } else {
-    const seatsUsed = `((select count(*) from users where status = 'active') + (select count(*) from invites where status = 'pending' and (expires_at is null or expires_at > ${now})))`;
+    const seatsUsed = seatsUsedSql(now);
     const [[seats] = []] = await deps.d1([`select ${seatsUsed} as used`]);
     if (Number(seats?.used ?? 0) >= SEAT_LIMIT) {
       deps.out(`All ${SEAT_LIMIT} seats are taken (R-AUTH-19); nothing changed.`);

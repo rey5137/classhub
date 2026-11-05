@@ -269,6 +269,9 @@ successful independent restore. Deploying is not enough.
 - **Covers:** AC-CHAT-02, 03, 04, 05, 06, 11, AC-PLAT-03 (RealtimeHub on both adapters).
 - The signed context, WS route, ChatRoom with hibernation, conditional idempotent insert, ack/broadcast, presence,
   `disconnectMember`; local `ws` hub adapter; history routes.
+- **Remove the 1d WebSocket probe** (R-OPS-16): `src/routes/__probe/ws/`, `adapters/cloudflare/ws-probe.ts`,
+  `AppContext.wsProbe`, the `ChatRoom` echo (`PROBE_PATH`), `tests/integration/ws-probe.test.ts` and any `WS_PROBE`
+  var left in `wrangler.jsonc`; the 1d result stays recorded in `docs/DEPLOY_CLOUDFLARE.md`.
 
 #### Slice 4b — chat UI and the production WebSocket
 - **Covers:** AC-CHAT-01, 07, 08, AC-BUD-03.

@@ -9,8 +9,9 @@
 
 ## 14.1 Allowances and guardrails
 
-Figures as given in the owner's brief (checked 2026-11-05); slice 1d re-checks each against Cloudflare's pages and
-corrects this table (AC-BUD-01).
+Re-checked against Cloudflare's docs on 2026-11-05 (slice 1d, AC-BUD-01): Workers, D1, R2 and Durable Objects
+figures match the limits and pricing pages. The Zero Trust 50-user figure is not stated on a public page; the owner
+confirms it on the Zero Trust plan screen in the dashboard (1d owner step).
 
 | Product | Free allowance | Guardrail |
 |---|---|---|
@@ -18,8 +19,8 @@ corrects this table (AC-BUD-01).
 | D1 Free | 5 M rows read/day; 100 K rows written/day | indexed, bounded queries; maintained counters; no polling |
 | D1 Free | 500 MB per database; 5 GB per account | `/admin` warns at 250 MB (target < 100 MB) |
 | R2 Standard | 10 GB-month; 1 M Class A, 10 M Class B ops/month | 8 GB warn, 9 GB stop (R-MEM-15); app-counted operation estimate |
-| Durable Objects Free | SQLite-backed classes only; free-tier request and duration caps | hibernation; no timers or loops (R-CHAT-07) |
-| Zero Trust Free | 50 users | seat count on the invite screen (R-AUTH-19) |
+| Durable Objects Free | SQLite-backed classes only; 100,000 requests/day; 13,000 GB-s duration/day; 1 GB storage per object | hibernation; no timers or loops (R-CHAT-07) |
+| Zero Trust Free | 50 users (confirm in the dashboard) | seat count on the invite screen (R-AUTH-19) |
 
 - **R-BUD-01** **Expected use** for 50 members is far inside every allowance (order of a few thousand requests and
   under 100 K rows read per day); the guardrails exist for misuse and runaway clients.

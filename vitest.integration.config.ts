@@ -15,6 +15,7 @@ export default defineConfig({
         compatibilityFlags: ['nodejs_compat'],
         d1Databases: ['DB'],
         r2Buckets: ['MEDIA'],
+        durableObjects: { CHAT_ROOM: 'ChatRoom' },
         bindings: { TEST_MIGRATIONS: migrations },
       },
     }),

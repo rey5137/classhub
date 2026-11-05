@@ -75,6 +75,8 @@ export async function createHarness(
     realtime?: RealtimeHub;
     /** R-AUTH-12: false acts as a deployment whose Access vars are missing. */
     accessConfigured?: boolean;
+    /** R-OPS-16: the probe as `WS_PROBE=1` provides it. */
+    wsProbe?: AppContext['wsProbe'];
   } = {},
 ): Promise<Harness> {
   const teamKey = await createTestKey('team-key');
@@ -90,6 +92,7 @@ export async function createHarness(
     accessConfigured: options.accessConfigured ?? true,
     realtime: options.realtime ?? recordingHub(),
     ...(options.logHashSalt ? { logHashSalt: options.logHashSalt } : {}),
+    ...(options.wsProbe ? { wsProbe: options.wsProbe } : {}),
   };
   const handle = createSecurityHandle({ getContext: async () => context, production: false });
   const resolved: string[] = [];
