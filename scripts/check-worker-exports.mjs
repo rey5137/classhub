@@ -35,4 +35,19 @@ if (!exportedNames(source).has('ChatRoom')) {
   process.exit(1);
 }
 
+// AC-PLAT-02/09: the Worker bundle must not carry the local adapters or the
+// dev identity. `context.ts` imports them only in the dev/offline branch.
+for (const token of [
+  'better-sqlite3',
+  'DevIdentityProvider',
+  'FsObjectStorage',
+  'createLocalDatabase',
+  'node:fs',
+]) {
+  if (source.includes(token)) {
+    console.error(`check-worker-exports: ${bundlePath} contains ${token}`);
+    process.exit(1);
+  }
+}
+
 console.log(`check-worker-exports: ${bundlePath} exports ChatRoom`);

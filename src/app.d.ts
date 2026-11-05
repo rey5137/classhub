@@ -1,3 +1,12 @@
-// SvelteKit reads this file for the optional App namespace. Types are added
-// with the identity and platform work (slices 0b/1a).
+declare global {
+  namespace App {
+    interface Platform {
+      env?: Record<string, unknown>;
+      ctx?: unknown;
+      caches?: unknown;
+      cf?: unknown;
+    }
+  }
+}
+
 export {};

@@ -1,0 +1,119 @@
+import { uuidv7 } from '../ids';
+import type { Database } from '../ports/database';
+import type { ObjectStorage } from '../ports/object-storage';
+import { invites, users } from './schema';
+
+interface DemoMember {
+  email: string;
+  displayName: string;
+  preferredName: string | null;
+  role: 'member' | 'admin';
+}
+
+// Synthetic classmates only (INV-6): reserved example.com addresses, invented
+// names, no real person.
+const DEMO_MEMBERS: DemoMember[] = [
+  { email: 'admin@example.com', displayName: 'An Bui', preferredName: 'An', role: 'admin' },
+  {
+    email: 'mai.nguyen@example.com',
+    displayName: 'Mai Nguyen',
+    preferredName: 'Mai',
+    role: 'member',
+  },
+  {
+    email: 'linh.tran@example.com',
+    displayName: 'Linh Tran',
+    preferredName: 'Linh',
+    role: 'member',
+  },
+  { email: 'bao.pham@example.com', displayName: 'Bao Pham', preferredName: 'Bao', role: 'member' },
+  { email: 'chi.le@example.com', displayName: 'Chi Le', preferredName: 'Chi', role: 'member' },
+  { email: 'duc.vo@example.com', displayName: 'Duc Vo', preferredName: 'Duc', role: 'member' },
+  {
+    email: 'hanh.dang@example.com',
+    displayName: 'Hanh Dang',
+    preferredName: 'Hanh',
+    role: 'member',
+  },
+  {
+    email: 'khoa.hoang@example.com',
+    displayName: 'Khoa Hoang',
+    preferredName: 'Khoa',
+    role: 'member',
+  },
+  { email: 'lan.do@example.com', displayName: 'Lan Do', preferredName: 'Lan', role: 'member' },
+  { email: 'minh.vu@example.com', displayName: 'Minh Vu', preferredName: 'Minh', role: 'member' },
+  { email: 'nga.phan@example.com', displayName: 'Nga Phan', preferredName: 'Nga', role: 'member' },
+  {
+    email: 'phuc.dinh@example.com',
+    displayName: 'Phuc Dinh',
+    preferredName: 'Phuc',
+    role: 'member',
+  },
+];
+
+const ADMIN_EMAIL = DEMO_MEMBERS[0]!.email;
+
+// D1 caps a statement at 100 bound variables (7 user rows x 13 columns = 91).
+const INSERT_CHUNK = 7;
+
+/** @param rows - rows to insert, chunked so the query stays under D1's limit */
+async function insertChunked<T>(
+  rows: T[],
+  insert: (chunk: T[]) => Promise<unknown>,
+): Promise<void> {
+  for (let index = 0; index < rows.length; index += INSERT_CHUNK) {
+    await insert(rows.slice(index, index + INSERT_CHUNK));
+  }
+}
+
+/**
+ * R-PLAT-10: synthetic classmates and their invites. Idempotent: emails are
+ * unique, so a second run inserts nothing. Posts, albums and images arrive with
+ * their features (§7/§8); accepting storage now keeps this signature stable.
+ */
+export async function seedDemo(
+  database: Database,
+  storage: ObjectStorage,
+): Promise<{ members: number; invites: number }> {
+  void storage;
+
+  const now = Date.now();
+  const memberRows = DEMO_MEMBERS.map((member) => ({
+    id: uuidv7(),
+    authEmail: member.email,
+    displayName: member.displayName,
+    displayNameNorm: member.displayName.toLowerCase(),
+    preferredName: member.preferredName,
+    role: member.role,
+    status: 'active' as const,
+    createdAt: now,
+    updatedAt: now,
+  }));
+
+  await insertChunked(memberRows, (chunk) =>
+    database.db.insert(users).values(chunk).onConflictDoNothing(),
+  );
+
+  const stored = await database.db.select({ id: users.id, email: users.authEmail }).from(users);
+  const idByEmail = new Map(stored.map((row) => [row.email, row.id]));
+  const adminId = idByEmail.get(ADMIN_EMAIL);
+  if (!adminId) throw new Error('seedDemo: demo admin is missing');
+
+  const inviteRows = DEMO_MEMBERS.map((member) => ({
+    id: uuidv7(),
+    email: member.email,
+    invitedBy: adminId,
+    role: member.role,
+    status: 'accepted' as const,
+    accessSyncedAt: now,
+    createdAt: now,
+    expiresAt: null,
+  }));
+
+  await insertChunked(inviteRows, (chunk) =>
+    database.db.insert(invites).values(chunk).onConflictDoNothing(),
+  );
+
+  return { members: DEMO_MEMBERS.length, invites: DEMO_MEMBERS.length };
+}

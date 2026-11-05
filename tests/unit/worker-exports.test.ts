@@ -68,4 +68,38 @@ describe('scripts/check-worker-exports.mjs', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('cannot read');
   });
+
+  it('AC-PLAT-09 fails when the bundle contains the local database adapter', () => {
+    const result = run('export { ChatRoom } from "./chat-room.js";\nimport "better-sqlite3";\n');
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('better-sqlite3');
+  });
+
+  it('AC-PLAT-09 fails when the bundle contains the dev identity identifier', () => {
+    const result = run(
+      'export { ChatRoom } from "./chat-room.js";\nconst provider = DevIdentityProvider;\n',
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('DevIdentityProvider');
+  });
+
+  it('AC-PLAT-02 fails when the bundle contains the filesystem adapter identifier', () => {
+    const result = run(
+      'export { ChatRoom } from "./chat-room.js";\nconst storage = FsObjectStorage;\n',
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('FsObjectStorage');
+  });
+
+  it('AC-PLAT-02 fails when the bundle contains the local database identifier', () => {
+    const result = run(
+      'export { ChatRoom } from "./chat-room.js";\nconst open = createLocalDatabase;\n',
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('createLocalDatabase');
+  });
 });

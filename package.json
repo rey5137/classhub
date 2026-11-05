@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "vite dev",
+    "dev:offline": "CLASSHUB_OFFLINE=1 vite dev --host 127.0.0.1",
     "build": "vite build",
     "build:node": "CLASSHUB_TARGET=node vite build",
     "build:worker-check": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('.wrangler/dry-run', { recursive: true, force: true })\" && node scripts/cf.mjs deploy --dry-run --outdir .wrangler/dry-run && node scripts/check-worker-exports.mjs .wrangler/dry-run/worker.js",
@@ -21,6 +22,7 @@
     "test:migrations": "node scripts/test-migrations.mjs",
     "test:security": "vitest run --project security",
     "test:e2e": "playwright test",
+    "db:seed:demo": "tsx scripts/seed-demo.ts",
     "verify": "npm run lint && npm run check && npm run test && npm run test:migrations && npm run test:security && npm run build && npm run build:worker-check && npm run build:node",
     "deploy": "node scripts/cf.mjs --check-deploy && npm run build && node scripts/cf.mjs deploy"
   },
@@ -33,7 +35,9 @@
     "@sveltejs/adapter-node": "^5.5.7",
     "@sveltejs/kit": "^2.70.3",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.19.2",
+    "drizzle-kit": "^0.31.11",
     "eslint": "^10.14.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-svelte": "^3.24.0",
@@ -42,10 +46,15 @@
     "prettier-plugin-svelte": "^4.1.1",
     "svelte": "^5.57.3",
     "svelte-check": "^4.7.8",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1",
     "vite": "^8.3.6",
     "vitest": "^4.1.12",
     "wrangler": "^4.157.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.4"
   }
 }

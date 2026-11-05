@@ -8,6 +8,15 @@
   "workers_dev": true,
   "preview_urls": false,
   "assets": { "binding": "ASSETS", "directory": ".svelte-kit/cloudflare" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "classhub",
+      "database_id": "REPLACE_WITH_D1_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "classhub-media" }],
   "durable_objects": { "bindings": [{ "name": "CHAT_ROOM", "class_name": "ChatRoom" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ChatRoom"] }]
 }

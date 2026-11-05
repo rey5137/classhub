@@ -6,7 +6,7 @@ export default defineConfig({
       {
         test: {
           name: 'unit',
-          include: ['tests/unit/**/*.test.ts'],
+          include: ['tests/unit/**/*.test.ts', 'tests/contract/run-local.test.ts'],
           environment: 'node',
         },
       },
@@ -18,6 +18,7 @@ export default defineConfig({
         },
       },
       './vitest.integration.config.ts',
+      './vitest.migrations.config.ts',
     ],
   },
 });
