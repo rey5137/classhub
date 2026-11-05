@@ -9,6 +9,8 @@ export interface FakeApi {
   base: string;
   /** `METHOD path authorization` of every request, in order. */
   requests: string[];
+  /** The body of every PUT, in order. */
+  bodies: string[];
   close(): Promise<void>;
 }
 
@@ -18,6 +20,7 @@ export async function startFakeApi(
   token: string,
 ): Promise<FakeApi> {
   const requests: string[] = [];
+  const bodies: string[] = [];
   const server: Server = createServer((request, response) => {
     const auth = request.headers.authorization ?? '';
     requests.push(
@@ -28,9 +31,19 @@ export async function startFakeApi(
       response.end(JSON.stringify(body));
     };
     if (auth !== `Bearer ${token}`) return send(403, { success: false, errors: [{ code: 10000 }] });
-    if (request.method !== 'GET') return send(405, { success: false, errors: [{ code: 1 }] });
     const prefix = `/client/v4/accounts/${account}`;
     const path = request.url?.startsWith(prefix) ? request.url.slice(prefix.length) : '';
+    if (request.method === 'PUT' && /^\/access\/(?:apps\/[^/]+\/)?policies\/[^/]+$/.test(path)) {
+      // The Access policy write: echoed back, as the real API returns the stored policy.
+      let text = '';
+      request.on('data', (chunk) => (text += chunk));
+      request.on('end', () => {
+        bodies.push(text);
+        send(200, { success: true, result: JSON.parse(text) });
+      });
+      return;
+    }
+    if (request.method !== 'GET') return send(405, { success: false, errors: [{ code: 1 }] });
     const { status, body } = fakeApi(path, stateDir);
     return send(status, body);
   });
@@ -39,6 +52,7 @@ export async function startFakeApi(
   return {
     base: `http://127.0.0.1:${port}`,
     requests,
+    bodies,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

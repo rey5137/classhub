@@ -2,7 +2,7 @@ import { error } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { t } from '$lib/i18n';
 import { can } from '$lib/server/auth/permissions';
-import { formFailure, guarded } from '$lib/server/http';
+import { formFailure, formText, guarded } from '$lib/server/http';
 import {
   adminCreateInvite,
   adminListInvites,
@@ -28,19 +28,14 @@ export const load: PageServerLoad = async ({ locals }) => {
   };
 };
 
-function text(form: FormData, name: string): string | undefined {
-  const value = form.get(name);
-  return typeof value === 'string' ? value : undefined;
-}
-
 export const actions: Actions = {
   invite: async ({ locals, request }) => {
     const { member, context } = guarded(locals);
     const form = await request.formData();
     const result = await adminCreateInvite(context, member, {
-      email: text(form, 'email'),
-      displayName: text(form, 'displayName'),
-      role: text(form, 'role') ?? 'member',
+      email: formText(form, 'email'),
+      displayName: formText(form, 'displayName'),
+      role: formText(form, 'role') ?? 'member',
     });
     if (!result.ok) return formFailure('invite', locals, result);
     return { action: 'invite', done: result.body.created ? 'created' : 'unchanged' };
@@ -48,17 +43,17 @@ export const actions: Actions = {
   revoke: async ({ locals, request }) => {
     const { member, context } = guarded(locals);
     const form = await request.formData();
-    const result = await adminRevokeInvite(context, member, { id: text(form, 'id') });
+    const result = await adminRevokeInvite(context, member, { id: formText(form, 'id') });
     if (!result.ok) return formFailure('revoke', locals, result);
     return { action: 'revoke', done: 'revoked' };
   },
   member: async ({ locals, request }) => {
     const { member, context } = guarded(locals);
     const form = await request.formData();
-    const role = text(form, 'role');
-    const status = text(form, 'status');
-    const deletion = text(form, 'deletion');
-    const userId = text(form, 'userId') ?? '';
+    const role = formText(form, 'role');
+    const status = formText(form, 'status');
+    const deletion = formText(form, 'deletion');
+    const userId = formText(form, 'userId') ?? '';
     // R-PROF-11: the tombstone replaces the login email, so read it first; the admin
     // still has to drop it from the Access policy, and sees it only on success.
     const email = deletion ? await findAuthEmail(context.database.db, userId) : null;

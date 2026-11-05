@@ -29,7 +29,8 @@
   admins), `members` (every active member). It is stored in `profile_contacts.visibility_json` as a map of field to
   value, validated by Zod; an unknown or missing key means `private`.
 - **R-PROF-04** **One projection function** (`projectProfile(viewer, owner)`) builds every member payload that leaves
-  the server: directory rows, profile pages, `/api/v1/members*`, chat sender info, post author info. It drops each
+  the server, except the admin invite list (name, login email, status) and the owner's own `/me` and export:
+  directory rows, profile pages, `/api/v1/members*`, chat sender info, post author info. It drops each
   field the viewer may not see, before serialization. No route builds member JSON by itself (INV-5).
 - **R-PROF-05** `auth_email` is returned only to its owner (`/api/v1/me`) and to admins on the invite screen; it is
   never in the directory, another member's profile, chat, posts or a member export, even when it equals

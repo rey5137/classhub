@@ -371,41 +371,64 @@ function renderDryRunConfig() {
 }
 
 /**
- * `cf.mjs api /<path>`: one read-only GET under the guarded account, for what no
- * CLI command reports as data (the workers.dev subdomain, a bucket's domains). The
- * token rides only in this process's request header; stdout gets the `result`.
+ * `cf.mjs api [--put] /<path>`: one call under the guarded account, for what no CLI
+ * command reports as data (the workers.dev subdomain, a bucket's domains, the Access
+ * policy). GET by default; `--put` sends stdin as the JSON body and is allowed for the
+ * Access policy path only (R-AUTH-18). The token rides only in this process's request
+ * header; stdout gets the `result`.
  * @param {string[]} argv @param {string} account @param {string} apiToken
  * @returns {Promise<never>}
  */
 async function apiGet(argv, account, apiToken) {
-  const path = argv[1] ?? '';
+  const put = argv[1] === '--put';
+  const path = argv[put ? 2 : 1] ?? '';
+  const policy = /^\/access\/(?:apps\/[A-Za-z0-9_-]{1,64}\/)?policies\/[A-Za-z0-9_-]{1,64}$/;
   // Only the reads the scripts make: the workers.dev subdomain, one bucket by name
-  // (R2 names: lower-case letters, digits, hyphens) and that bucket's domains.
+  // (R2 names: lower-case letters, digits, hyphens), that bucket's domains, and the
+  // Access policy (read, and written with --put).
   const shapes = [
     /^\/workers\/subdomain$/,
     /^\/r2\/buckets\/[a-z0-9][a-z0-9-]{1,62}$/,
     /^\/r2\/buckets\/[a-z0-9][a-z0-9-]{1,62}\/domains\/(?:managed|custom)$/,
+    policy,
   ];
-  if (argv.length !== 2 || !shapes.some((shape) => shape.test(path))) {
+  const allowed = put ? policy.test(path) : shapes.some((shape) => shape.test(path));
+  if (argv.length !== (put ? 3 : 2) || !allowed) {
     fail(
-      'usage: node scripts/cf.mjs api /workers/subdomain | /r2/buckets/<name>[/domains/managed|custom]',
+      'usage: node scripts/cf.mjs api /workers/subdomain | /r2/buckets/<name>[/domains/managed|custom] | /access/[apps/<id>/]policies/<id> | --put /access/[apps/<id>/]policies/<id> (body on stdin)',
     );
+  }
+  let payload;
+  if (put) {
+    payload = readFileSync(0, 'utf8');
+    try {
+      JSON.parse(payload);
+    } catch {
+      fail('--put needs a JSON body on stdin.');
+    }
   }
   let response;
   try {
     response = await fetch(`${apiBase()}/client/v4/accounts/${account}${path}`, {
-      headers: { authorization: `Bearer ${apiToken}` },
+      method: put ? 'PUT' : 'GET',
+      headers: {
+        authorization: `Bearer ${apiToken}`,
+        ...(put ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(put ? { body: payload } : {}),
       signal: AbortSignal.timeout(30_000),
     });
   } catch (error) {
-    fail(`GET ${path} failed: ${error instanceof Error ? error.name : 'network error'}`);
+    fail(
+      `${put ? 'PUT' : 'GET'} ${path} failed: ${error instanceof Error ? error.name : 'network error'}`,
+    );
   }
   /** @type {{ success?: boolean; result?: unknown; errors?: { code?: number }[] } | null} */
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.success) {
     const codes = (body?.errors ?? []).map((entry) => entry?.code).filter(Boolean);
     fail(
-      `GET ${path} failed: HTTP ${response.status}${codes.length ? ` (${codes.join(', ')})` : ''}`,
+      `${put ? 'PUT' : 'GET'} ${path} failed: HTTP ${response.status}${codes.length ? ` (${codes.join(', ')})` : ''}`,
     );
   }
   process.stdout.write(`${JSON.stringify(body.result ?? null)}\n`);

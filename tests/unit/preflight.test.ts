@@ -335,7 +335,7 @@ describe('preflight (R-OPS-10)', () => {
       reason: 'the seat count could not be read',
       breakIt: () =>
         tamperD1('backup_runs', (sets) =>
-          sets.map((set, at) => (at === 2 ? { results: [] } : set)),
+          sets.map((set, at) => (at === 3 ? { results: [] } : set)),
         ),
     },
     {
@@ -344,7 +344,7 @@ describe('preflight (R-OPS-10)', () => {
       reason: 'the seat count could not be read',
       breakIt: () =>
         tamperD1('backup_runs', (sets) =>
-          sets.map((set, at) => (at === 2 ? { results: [{ used: 'many' }] } : set)),
+          sets.map((set, at) => (at === 3 ? { results: [{ used: 'many' }] } : set)),
         ),
     },
     {
@@ -353,7 +353,7 @@ describe('preflight (R-OPS-10)', () => {
       reason: 'the backup count could not be read',
       breakIt: () =>
         tamperD1('backup_runs', (sets) =>
-          sets.map((set, at) => (at === 3 ? { results: [] } : set)),
+          sets.map((set, at) => (at === 4 ? { results: [] } : set)),
         ),
     },
     {
@@ -406,6 +406,69 @@ describe('preflight (R-OPS-10)', () => {
   });
 });
 
+describe('preflight admin rule and probe (R-OPS-10, R-AUTH-12)', () => {
+  const secondAdmin = () =>
+    sql(
+      `insert into users (id, auth_email, display_name, display_name_norm, role, status, created_at, updated_at) values ('a2', 'a2@example.test', 'A', 'a', 'admin', 'active', 1, 1)`,
+    );
+  const markUnlocked = () =>
+    sql(
+      `insert into audit_events (id, actor_id, action, entity_type, entity_id, created_at) values ('u1', null, 'site.unlocked', 'site_settings', 'setup_state', 1)`,
+    );
+  const admin = async () => (await preflight()).find((check) => check.id === 'admin');
+
+  it('R-OPS-10 before the first unlock only the bootstrap admin counts, however many others are active', async () => {
+    secondAdmin();
+    sql(`update users set status = 'suspended' where auth_email = '${ADMIN}'`);
+    expect(await admin()).toMatchObject({ status: 'fail' });
+    sql(`update users set status = 'invited' where auth_email = '${ADMIN}'`);
+    expect(await admin()).toMatchObject({ status: 'fail' });
+  });
+
+  it('R-OPS-10 after an unlock any active admin passes, even when the bootstrap admin is gone', async () => {
+    markUnlocked();
+    secondAdmin();
+    sql(`update users set status = 'suspended' where auth_email = '${ADMIN}'`);
+    expect(await admin()).toMatchObject({ status: 'pass', detail: '1 active admin(s).' });
+    sql(`update users set role = 'member' where auth_email = '${ADMIN}'`);
+    expect(await admin()).toMatchObject({ status: 'pass' });
+  });
+
+  it('R-OPS-10 after an unlock with no active admin it fails closed', async () => {
+    markUnlocked();
+    sql(`update users set status = 'suspended'`);
+    const check = await admin();
+    expect(check).toMatchObject({ status: 'fail', detail: 'no admin is active.' });
+    expect(check?.fix).toBeTruthy();
+  });
+
+  it('R-OPS-10 an unreadable admin or unlock count never passes', async () => {
+    markUnlocked();
+    secondAdmin();
+    sql(`update users set status = 'suspended' where auth_email = '${ADMIN}'`);
+    tamperD1('backup_runs', (sets) =>
+      sets.map((set, at) => (at === 2 ? { results: [{ active: 'x', unlocked: 1 }] } : set)),
+    );
+    expect(await admin()).toMatchObject({ status: 'fail' });
+    // An unreadable unlock count falls back to the stricter bootstrap rule.
+    tamperD1('backup_runs', (sets) =>
+      sets.map((set, at) => (at === 2 ? { results: [{ active: 1, unlocked: 'x' }] } : set)),
+    );
+    expect(await admin()).toMatchObject({
+      status: 'fail',
+      detail: 'the bootstrap admin is suspended.',
+    });
+  });
+
+  it('N2 warns, without failing, while vars.WS_PROBE is set', async () => {
+    expect((await preflight()).some((check) => check.id === 'ws-probe')).toBe(false);
+    writeConfig({ ...config(), vars: { ...(config().vars as object), WS_PROBE: '1' } });
+    const checks = await preflight();
+    expect(checks.find((check) => check.id === 'ws-probe')).toMatchObject({ status: 'warn' });
+    expect(failing(checks)).toEqual([]);
+  });
+});
+
 describe('unlock and lock (R-OPS-11)', () => {
   const state = () => {
     const db = box.d1();
@@ -455,6 +518,17 @@ describe('unlock and lock (R-OPS-11)', () => {
     const again: string[] = [];
     expect(await unlock(again)).toBe(0);
     expect(again.join('\n')).not.toContain('second admin');
+  });
+
+  it('R-OPS-10 lock then unlock works after the bootstrap admin was demoted, with another admin active', async () => {
+    expect(await unlock([])).toBe(0);
+    await runLock({ run: box.runner, out: () => {}, uuid: () => crypto.randomUUID() });
+    sql(
+      `insert into users (id, auth_email, display_name, display_name_norm, role, status, created_at, updated_at) values ('a2', 'a2@example.test', 'A', 'a', 'admin', 'active', 1, 1)`,
+    );
+    sql(`update users set role = 'member' where auth_email = '${ADMIN}'`);
+    expect(await unlock([])).toBe(0);
+    expect(state().value).toBe('"unlocked"');
   });
 
   it('AC-OPS-05 a runner that throws (on whoami) rejects unlock and leaves the site locked, unaudited', async () => {

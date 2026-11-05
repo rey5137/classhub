@@ -54,7 +54,7 @@
 - **R-AUTH-26** `users.last_seen_at` is written at most once per hour per member (a conditional
   `UPDATE … WHERE last_seen_at < now - 1 h`), never on every request, to stay inside the D1 write budget (§14).
 - **R-AUTH-09** **Revoke and suspend:** the internal status changes first (immediate denial, R-NAV-04, R-CHAT-09),
-  then the email is removed from the Access policy (R-AUTH-18). Reactivation reverses both. Revoking a pending invite follows R-AUTH-08.
+  then the email is removed from the Access policy (R-AUTH-18). Reactivation reverses both (`invite add` on a suspended member with an accepted invite reactivates them, then syncs the policy). Revoking a pending invite follows R-AUTH-08.
 - **R-AUTH-10** The admin invite screen shows, per email, whether it is in the app list, in the Access policy, or both,
   when the token can read the policy; otherwise it shows the manual step.
 - **R-AUTH-11** **Uniform denial.** A valid Google identity without an active membership, an invited-but-revoked
@@ -97,7 +97,10 @@
   `.env.cloudflare` has a token with Access: Apps and Policies Edit, `invite` also updates the Access application's
   email include rule through the Cloudflare API, and records `access_synced_at`. Without that scope it prints the
   exact dashboard step. The Worker never holds a Cloudflare API token: Access changes run from the CLI only, and the
-  admin screen shows the command to run.
+  admin screen shows the command to run. The policy is read and written through `cf.mjs api`, so the account guard
+  runs first (INV-9). `remove` refuses to suspend the last active admin inside the same statement (R-NAV-06), and
+  `remove` and a renewed invite clear `access_synced_at`, so the screen's "in the Access policy" label never outlives
+  the policy entry. The policy is not touched when the D1 change did not apply.
 - **R-AUTH-19** **Seats:** the invite screen counts active + pending invites against the 50-seat Zero Trust Free
   limit, warns at 45 and refuses at 50 (R-BUD-06).
 

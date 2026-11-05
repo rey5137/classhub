@@ -151,3 +151,5 @@ A custom domain, if used, shares the one Access application and AUD (R-OPS-16).
 Breaking an invariant or changing D1–D10 is an owner decision recorded in this file; never patch around one.
 
 *Provenance:* the owner approved the D10 exit-path wording (the exit paths show where the design allows leaving, not what v1.0 ships) and the deferral of the production Node target past v1.0 (§D); both were recorded as owner decisions in commit 3061ad2.
+
+*Provenance:* on 2026-11-05 the owner decided that Access's one-time PIN is a second login method beside Google (commit 617249a, R-AUTH-15). D6 names Google as the identity provider; "invited Google accounts only" reads as invited email addresses only, whichever of the two methods proves the address.

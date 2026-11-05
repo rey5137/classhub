@@ -1,5 +1,6 @@
 import type { Handle, HandleServerError, RequestEvent } from '@sveltejs/kit';
 import { normalizeEmail, resolveMember } from './auth/membership';
+import { touchLastSeen } from './repositories/users';
 import { isBootstrapAdmin, readSetupUnlocked } from './repositories/settings';
 import type { AppContext } from './context';
 import { apiError } from './errors';
@@ -25,10 +26,17 @@ export interface PipelineOptions {
   getContext(event: RequestEvent): Promise<AppContext>;
   /** A production build warns once when `LOG_HASH_SALT` is unset. */
   production: boolean;
+  /** The clock for `last_seen_at`; tests inject it. */
+  now?: () => number;
 }
 
 function pathOf(event: RequestEvent): string {
   return event.url.pathname.replace(/\/+$/, '') || '/';
+}
+
+/** What `apiError` needs from the request: its id and the visitor's locale. */
+function errorContext(event: RequestEvent) {
+  return { requestId: event.locals.requestId, locale: event.locals.locale };
 }
 
 function isUpgrade(request: Request): boolean {
@@ -69,16 +77,12 @@ function redirectOr(event: RequestEvent, location: string, otherwise: () => Resp
  * and everything else (API, upgrade, form post) gets `403 forbidden`.
  */
 function deny(event: RequestEvent): Response {
-  return redirectOr(event, DENIED_PATH, () =>
-    apiError('forbidden', { requestId: event.locals.requestId, locale: event.locals.locale }),
-  );
+  return redirectOr(event, DENIED_PATH, () => apiError('forbidden', errorContext(event)));
 }
 
 /** R-AUTH-12: while locked every page shows /locked and every API answers `423 locked`. */
 function locked(event: RequestEvent): Response {
-  return redirectOr(event, LOCKED_PATH, () =>
-    apiError('locked', { requestId: event.locals.requestId, locale: event.locals.locale }),
-  );
+  return redirectOr(event, LOCKED_PATH, () => apiError('locked', errorContext(event)));
 }
 
 function isJson(contentType: string | null): boolean {
@@ -115,7 +119,7 @@ async function boundBody(event: RequestEvent): Promise<Response | null> {
   const path = pathOf(event);
   if (!MUTATING.has(request.method)) return null;
   if (request.method === 'PUT' && UPLOAD_ROUTE.test(path)) return null;
-  const options = { requestId: event.locals.requestId, locale: event.locals.locale };
+  const options = errorContext(event);
 
   const declared = request.headers.get('content-length');
   const length = declared === null ? null : Number(declared);
@@ -174,10 +178,7 @@ async function guard(
   if (MUTATING.has(request.method) || isUpgrade(request)) {
     if (request.headers.get('origin') !== event.url.origin) {
       log.denied = 'cross_origin';
-      return apiError('forbidden', {
-        requestId: event.locals.requestId,
-        locale: event.locals.locale,
-      });
+      return apiError('forbidden', errorContext(event));
     }
   }
 
@@ -233,6 +234,24 @@ async function guard(
   }
   event.locals.member = member;
   log.member = await saltedHash(salt, member.id);
+  // R-AUTH-26: best effort; a failed write never denies or slows the request's answer. Behind the
+  // Workers runtime it runs under `waitUntil`; with none (tests, the Node launcher) it is awaited.
+  const touch = touchLastSeen(context.database.db, member.id, (options.now ?? Date.now)()).catch(
+    (error: unknown) => {
+      // A fixed value: a driver message can carry the raw member id (R-AUTH-23).
+      log.lastSeenError = error instanceof Error ? error.name : 'error';
+    },
+  );
+  const waitUntil = waitUntilOf(event);
+  if (waitUntil) {
+    // The request's own line is usually written before this settles, so a failure gets a line of its own.
+    waitUntil(
+      touch.then(() => {
+        if (log.lastSeenError)
+          logLine({ requestId: log.requestId, lastSeenError: log.lastSeenError });
+      }),
+    );
+  } else await touch;
 
   return (await boundBody(event)) ?? (await resolve(event));
 }
@@ -255,10 +274,7 @@ export function createSecurityHandle(options: PipelineOptions): Handle {
     } catch (error) {
       // Fail closed: a missing binding or a database error shows nothing private.
       log.error = describeError(error);
-      response = apiError('unavailable', {
-        requestId: event.locals.requestId,
-        locale: event.locals.locale,
-      });
+      response = apiError('unavailable', errorContext(event));
     }
 
     response = finalize(event, response);
@@ -266,6 +282,13 @@ export function createSecurityHandle(options: PipelineOptions): Handle {
     logLine(log);
     return response;
   };
+}
+
+/** The platform's `ctx.waitUntil`, bound, when the runtime offers one. */
+function waitUntilOf(event: RequestEvent): ((work: Promise<unknown>) => void) | null {
+  const ctx = event.platform?.ctx as { waitUntil?: unknown } | undefined;
+  if (typeof ctx?.waitUntil !== 'function') return null;
+  return (work) => (ctx.waitUntil as (work: Promise<unknown>) => void).call(ctx, work);
 }
 
 function describeError(error: unknown): string {

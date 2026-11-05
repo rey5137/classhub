@@ -155,14 +155,14 @@ successful independent restore. Deploying is not enough.
 **Read:** spec §3, §4, §6, §11, §12.1–12.5.
 
 #### Slice 1a — Access identity and the request pipeline
-- **Covers:** AC-AUTH-01, 02, 03, 05, 07, 08, 12, AC-API-01 (pipeline), AC-API-03, AC-PLAT-09.
+- **Covers:** AC-AUTH-01, 02, 03, 05, 07, 08, 12, 15, AC-API-01 (pipeline), AC-API-03, AC-PLAT-09.
 - `IdentityProvider` port, Access JWT adapter (`jose`, JWKS cache), dev identity adapter; `hooks.server.ts`:
   identity → membership → `locals.member`, request id, headers (R-AUTH-20), uniform denial, Origin check, body limits,
   log redaction; the error helper (R-API-02); the security test harness with a local JWKS.
 - **Done when:** every forged-identity case is denied by the security suite.
 
 #### Slice 1b — invites, membership, setup lock and admin bootstrap
-- **Covers:** AC-AUTH-04, 06, 09 (profile, invite limits), 11 (fake API), AC-NAV-02, 03, 05.
+- **Covers:** AC-AUTH-04, 06, 09 (profile, invite limits), 11 (fake API), 14 (match by email and the audited sub change; the "restore re-links" half is 5b's), AC-NAV-02, 03, 05.
 - Invite and membership services, `permissions.ts`, the setup lock and `/locked`, `/admin/setup`, `/denied`; admin
   invite UI with seat count; `scripts/invite.mjs` (app list + optional Access policy sync); suspend/reactivate with
   `RealtimeHub.disconnectMember` stubbed until 4a.

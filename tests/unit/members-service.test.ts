@@ -71,6 +71,19 @@ describe('last active admin (R-NAV-06)', () => {
     });
   });
 
+  it('AC-NAV-05 refuses a role change for a suspended or invited member', async () => {
+    for (const person of [PEOPLE.suspended, PEOPLE.revoked]) {
+      for (const role of ['admin', 'member'] as const) {
+        expect(await changeRole(services, admin, person.id, role), `${person.id} ${role}`).toEqual({
+          ok: false,
+          refusal: 'wrong_status',
+        });
+      }
+    }
+    expect((await userRow(PEOPLE.suspended.id))?.role).toBe('member');
+    expect(await audit('member.role_admin')).toHaveLength(0);
+  });
+
   it('AC-NAV-05 does not count a suspended admin as the remaining one', async () => {
     await database.db.update(users).set({ role: 'admin' }).where(eq(users.id, PEOPLE.suspended.id));
     expect(await suspendMember(services, admin, admin.id)).toEqual({

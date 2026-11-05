@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { invites, users } from '../db/schema';
 import type { Database, DatabaseHandle } from '../ports/database';
 import { auditInsertWhere } from './audit';
@@ -134,4 +134,23 @@ export async function findAuthEmail(db: DatabaseHandle, userId: string): Promise
     .where(eq(users.id, userId))
     .limit(1);
   return rows[0]?.authEmail ?? null;
+}
+
+/** R-AUTH-26: `last_seen_at` moves at most once an hour per member, in one conditional UPDATE. */
+export const LAST_SEEN_INTERVAL_MS = 60 * 60 * 1000;
+
+export async function touchLastSeen(
+  db: DatabaseHandle,
+  userId: string,
+  now: number,
+): Promise<void> {
+  await db
+    .update(users)
+    .set({ lastSeenAt: now })
+    .where(
+      and(
+        eq(users.id, userId),
+        or(isNull(users.lastSeenAt), lt(users.lastSeenAt, now - LAST_SEEN_INTERVAL_MS)),
+      ),
+    );
 }

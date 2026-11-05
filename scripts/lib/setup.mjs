@@ -107,7 +107,7 @@ async function workersHostname(deps, slug) {
     : `${slug}.<your-subdomain>.workers.dev (register a workers.dev subdomain: Workers & Pages → Overview)`;
 }
 
-const BOOTSTRAP = `select u.auth_email as email from users u join invites i on i.email = u.auth_email and i.invited_by = u.id where u.role = 'admin' order by u.created_at limit 1`;
+const BOOTSTRAP = `select u.auth_email as email, u.status, u.access_sub is null as unclaimed from users u join invites i on i.email = u.auth_email and i.invited_by = u.id where u.role = 'admin' order by u.created_at limit 1`;
 /** The keys are the site.config.ts fields they override (R-UI-01, R-UI-02). */
 const SETTING_KEYS = ['name', 'theme', 'locale'];
 
@@ -158,7 +158,8 @@ async function seed(deps, { themes, locales }) {
     }
     settings.push(['locale', locale]);
   }
-  /** @type {string[]} */
+  /** @type {{ old: string, next: string } | null} */
+  let correction = null;
   const statements = [
     // R-AUTH-12: an explicit lock when no state exists; only `npm run unlock` changes it.
     `insert into site_settings (key, value_json, updated_at) values ${settings
@@ -187,8 +188,49 @@ async function seed(deps, { themes, locales }) {
       `insert into audit_events (id, actor_id, action, entity_type, entity_id, created_at) select ${quote(deps.uuid())}, ${userId}, 'invite.created', 'invite', ${inviteId}, ${now} where ${ours}`,
     );
   }
+  // R-OPS-04 step 6: a mistyped bootstrap email can be corrected until that admin has
+  // signed in (still `invited`, no Access subject). Both rows change in one batch, each
+  // guarded on those two conditions, so a claimed or active admin is never touched.
+  if (memberCount > 0 && bootstrap?.status === 'invited' && Number(bootstrap.unclaimed) === 1) {
+    const current = String(bootstrap.email);
+    const replacement = normalizeEmail(
+      await deps.ask({
+        key: 'admin',
+        question: `Bootstrap admin email (has not signed in yet; keep or replace)`,
+        fallback: current,
+      }),
+    );
+    if (!validEmail(replacement)) throw new SetupError(`not an email address: ${replacement}`);
+    if (replacement !== current) {
+      // Refuse before any write; never let the unique index answer.
+      const [taken = []] = await d1Remote(deps.run, [
+        `select 1 as taken from users where auth_email = ${quote(replacement)} union all select 1 from invites where email = ${quote(replacement)}`,
+      ]);
+      if (taken.length > 0) {
+        throw new SetupError(
+          `${replacement} already belongs to another member or invite; choose another bootstrap admin email.`,
+        );
+      }
+      const old = quote(current);
+      const next = quote(replacement);
+      const oldName = current.split('@')[0] ?? 'admin';
+      const newName = replacement.split('@')[0] ?? 'admin';
+      const unclaimed = `u.auth_email = ${old} and u.role = 'admin' and u.status = 'invited' and u.access_sub is null`;
+      statements.push(
+        `update users as u set auth_email = ${next}, display_name = case when display_name = ${quote(oldName)} then ${quote(newName)} else display_name end, display_name_norm = case when display_name = ${quote(oldName)} then ${quote(normalizeName(newName))} else display_name_norm end, updated_at = ${now} where ${unclaimed} and exists (select 1 from invites i where i.email = ${old} and i.invited_by = u.id and i.status = 'pending')`,
+        `update invites set email = ${next}, access_synced_at = NULL where email = ${old} and status = 'pending' and invited_by in (select id from users where auth_email = ${next} and role = 'admin' and status = 'invited' and access_sub is null)`,
+      );
+      correction = { old: current, next: replacement };
+    }
+  }
   statements.push(BOOTSTRAP);
   const results = await d1Remote(deps.run, statements);
+  if (correction) {
+    // The old address may still be in the Access policy; the invite is no longer marked synced.
+    deps.out(
+      `The Access policy still lists ${correction.old}: run npm run invite -- remove ${correction.old}, then npm run invite -- add ${correction.next}.`,
+    );
+  }
   const email = results.at(-1)?.[0]?.email ?? bootstrap?.email;
   return typeof email === 'string' ? email : null;
 }

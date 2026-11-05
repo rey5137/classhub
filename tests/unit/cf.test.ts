@@ -600,10 +600,13 @@ describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
   afterEach(() => api.close());
 
   // Async: the fake API answers from this process while cf.mjs runs.
-  async function runApi(args: string[], options: { base?: string; config?: string } = {}) {
+  async function runApi(
+    args: string[],
+    options: { base?: string; config?: string; input?: string } = {},
+  ) {
     if (options.config) writeWranglerConfigSource(options.config);
     try {
-      const { stdout } = await promisify(execFile)(process.execPath, [cfScript, ...args], {
+      const pending = promisify(execFile)(process.execPath, [cfScript, ...args], {
         cwd: dir,
         env: {
           PATH: process.env.PATH ?? '',
@@ -614,6 +617,8 @@ describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
         },
         encoding: 'utf8',
       });
+      pending.child.stdin?.end(options.input ?? '');
+      const { stdout } = await pending;
       return { status: 0, stdout, stderr: '' };
     } catch (error) {
       const failed = error as { code: number; stdout: string; stderr: string };
@@ -684,5 +689,74 @@ describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('HTTP 404 (10006)');
     expect(result.stdout).toBe('');
+  });
+
+  // INV-9 / R-AUTH-18: the Access policy is read and written through the guarded `api`.
+  const policyPath = '/access/apps/app-1/policies/pol-1';
+  const policyBody = JSON.stringify({
+    name: 'Class list',
+    include: [{ email: { email: 'a@x.test' } }],
+  });
+
+  it('AC-AUTH-11 api --put writes the Access policy after the account guard, body from stdin', async () => {
+    writeValidEnv();
+    const result = await runApi(['api', '--put', policyPath], { input: policyBody });
+
+    expect(result.status).toBe(0);
+    expect(api.requests).toEqual([`PUT /client/v4/accounts/${account}${policyPath} token`]);
+    expect(api.bodies).toEqual([policyBody]);
+    const calls = readFileSync(logPath, 'utf8').trim().split('\n');
+    expect(calls.map((line) => (JSON.parse(line) as Invocation).args[0])).toEqual(['whoami']);
+  });
+
+  it('AC-AUTH-11 api reads the policy under both path shapes', async () => {
+    writeValidEnv();
+    for (const path of [policyPath, '/access/policies/pol-1']) {
+      expect((await runApi(['api', path])).stderr).not.toContain('usage');
+    }
+  });
+
+  it('AC-PLAT-06 api --put refuses a mismatched wrangler.jsonc before any request', async () => {
+    writeValidEnv();
+    const result = await runApi(['api', '--put', policyPath], {
+      config: `{ "account_id": "${otherAccount}" }`,
+      input: policyBody,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('does not match');
+    expect(api.requests).toEqual([]);
+  });
+
+  // PUT is for the policy path only; every other shape, including readable ones, is refused.
+  it.each([
+    '/r2/buckets/b1',
+    '/r2/buckets/b1/domains/managed',
+    '/workers/subdomain',
+    '/access/apps',
+    '/access/apps/app-1',
+    '/access/apps/app-1/policies',
+    '/access/policies/pol-1/extra',
+    '/access/apps/a/b/policies/pol-1',
+    '/access/policies/pol 1',
+    'access/policies/pol-1',
+  ])('AC-AUTH-11 api --put refuses the path %j', async (path) => {
+    writeValidEnv();
+    const result = await runApi(['api', '--put', path], { input: policyBody });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('usage');
+    expect(api.requests).toEqual([]);
+  });
+
+  it('AC-AUTH-11 api --put refuses a body that is not JSON and an extra argument', async () => {
+    writeValidEnv();
+    const bad = await runApi(['api', '--put', policyPath], { input: 'not json' });
+    expect(bad.status).not.toBe(0);
+    expect(bad.stderr).toContain('JSON');
+    const extra = await runApi(['api', '--put', policyPath, 'x'], { input: policyBody });
+    expect(extra.status).not.toBe(0);
+    expect(extra.stderr).toContain('usage');
+    expect(api.requests).toEqual([]);
   });
 });

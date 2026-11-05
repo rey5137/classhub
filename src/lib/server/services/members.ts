@@ -2,6 +2,7 @@ import { and, asc, count, eq, isNotNull, isNull, sql, type SQL } from 'drizzle-o
 import { siteConfig } from '../../config';
 import { t } from '../../i18n';
 import { normalizeName } from '../../shared/normalize';
+import { SEAT_LIMIT, SEAT_WARNING } from '../../shared/seats';
 import type { Member } from '../auth/membership';
 import { normalizeEmail } from '../auth/membership';
 import {
@@ -21,9 +22,7 @@ import { deleteAvatarMedia } from '../repositories/profiles';
 
 const DAY = 86_400_000;
 
-/** R-AUTH-19 / R-BUD-06: the Zero Trust Free seat limit, and where the screen starts warning. */
-export const SEAT_LIMIT = 50;
-export const SEAT_WARNING = 45;
+export { SEAT_LIMIT, SEAT_WARNING };
 
 export type Role = 'member' | 'admin';
 
@@ -171,7 +170,14 @@ export async function inviteMember(
   const inviteWrite = existing
     ? db
         .update(invites)
-        .set({ status: 'pending', role: input.role, invitedBy: actor.id, expiresAt })
+        .set({
+          status: 'pending',
+          role: input.role,
+          invitedBy: actor.id,
+          expiresAt,
+          // Access dropped this address when it was removed; the screen must not say otherwise.
+          accessSyncedAt: null,
+        })
         .where(and(eq(invites.id, existing.id), seatFree))
     : db
         .insert(invites)
@@ -509,6 +515,7 @@ export async function changeRole(
   const { database } = services;
   const guard = and(
     eq(users.id, userId),
+    eq(users.status, 'active'),
     sql`${users.role} <> ${role}`,
     role === 'member' ? keepsAnAdmin() : sql`1`,
   );
@@ -524,7 +531,7 @@ export async function changeRole(
     database.db.update(users).set({ role, updatedAt: now }).where(guard),
   ]);
   if ((audited?.changes ?? 0) === 0)
-    return explain(database.db, userId, (row) => row.role === role);
+    return explain(database.db, userId, (row) => row.status === 'active' && row.role === role);
   return { ok: true, changed: true };
 }
 

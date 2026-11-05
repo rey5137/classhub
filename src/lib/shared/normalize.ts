@@ -15,3 +15,8 @@ export function normalizeName(value: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+/** R-AUTH-06: trim and lower-case only; no Gmail dot or plus folding. */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}

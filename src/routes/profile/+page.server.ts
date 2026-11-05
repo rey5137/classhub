@@ -3,7 +3,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { siteConfig } from '$lib/config';
 import { PROFILE_FIELDS } from '$lib/contracts/profile';
 import { t } from '$lib/i18n';
-import { formFailure, guarded } from '$lib/server/http';
+import { formFailure, formText, guarded } from '$lib/server/http';
 import {
   clearOwnProfile,
   getOwnProfile,
@@ -42,10 +42,7 @@ export const actions: Actions = {
   save: async ({ locals, request }) => {
     const { member, context } = guarded(locals);
     const form = await request.formData();
-    const text = (name: string) => {
-      const value = form.get(name);
-      return typeof value === 'string' ? value : undefined;
-    };
+    const text = (name: string) => formText(form, name);
     const input: Record<string, unknown> = { displayName: text('displayName') };
     const visibility: Record<string, unknown> = {};
     for (const field of editable) {

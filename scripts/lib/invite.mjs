@@ -3,10 +3,13 @@
 // this is the only place the policy changes. Pure over its two injected sides so
 // tests run it against SQLite and a fake Access API (AC-AUTH-11).
 
-import { normalizeName } from '../../src/lib/shared/normalize.ts';
+import { normalizeEmail, normalizeName } from '../../src/lib/shared/normalize.ts';
+import { SEAT_LIMIT } from '../../src/lib/shared/seats.ts';
+import { reason } from './cf-child.mjs';
+
+export { normalizeEmail, SEAT_LIMIT };
 
 const DAY = 86_400_000;
-export const SEAT_LIMIT = 50;
 const EMAIL = /^[^\s@'"\\;]+@[^\s@'"\\;]+\.[^\s@'"\\;]+$/;
 
 /**
@@ -34,11 +37,6 @@ export function validEmail(/** @type {string} */ email) {
 /** R-AUTH-19: active members plus live invites, as one SQL expression. */
 export function seatsUsedSql(/** @type {number} */ now) {
   return `((select count(*) from users where status = 'active') + (select count(*) from invites where status = 'pending' and (expires_at is null or expires_at > ${now})))`;
-}
-
-/** R-AUTH-06: trim and lower-case only. */
-export function normalizeEmail(/** @type {string} */ email) {
-  return email.trim().toLowerCase();
 }
 
 /** @param {string} email */
@@ -121,7 +119,11 @@ async function syncPolicy(deps, email, action) {
     return 1;
   }
   const now = deps.now ?? Date.now();
-  await deps.d1([`update invites set access_synced_at = ${now} where email = ${quote(email)}`]);
+  // R-AUTH-10: the screen's "in the Access policy" label follows this column, so a
+  // removal clears it rather than stamping it.
+  await deps.d1([
+    `update invites set access_synced_at = ${action === 'add' ? String(now) : 'NULL'} where email = ${quote(email)}`,
+  ]);
   deps.out(`Access policy ${action === 'add' ? 'now includes' : 'no longer includes'} ${email}.`);
   return 0;
 }
@@ -132,7 +134,21 @@ async function add(deps, email, name, role) {
   const row = await readRow(deps, email);
   const live =
     row.invite_status === 'pending' && (row.expires_at === null || Number(row.expires_at) > now);
-  if (row.invite_status === 'accepted' || row.user_status === 'active') {
+  if (row.user_status === 'suspended' && row.invite_status === 'accepted') {
+    // R-AUTH-09: the inverse of `remove`. Same guard and audit action as the app's
+    // reactivateMember; the policy follows only when the status really changed.
+    const userId = quote(String(row.user_id));
+    const guard = `id = ${userId} and status = 'suspended' and exists (select 1 from invites where invites.email = users.auth_email and invites.status = 'accepted')`;
+    await deps.d1([
+      `insert into audit_events (id, actor_id, action, entity_type, entity_id, created_at) select ${quote(deps.uuid())}, NULL, 'member.reactivated', 'user', ${userId}, ${now} where exists (select 1 from users where ${guard})`,
+      `update users set status = 'active', updated_at = ${now} where ${guard}`,
+    ]);
+    if ((await readRow(deps, email)).user_status !== 'active') {
+      deps.out(`${email} could not be reactivated; nothing changed.`);
+      return 1;
+    }
+    deps.out(`Reactivated ${email}.`);
+  } else if (row.invite_status === 'accepted' || row.user_status === 'active') {
     deps.out(`${email} is already a member.`);
   } else if (live) {
     deps.out(`${email} already has a pending invite.`);
@@ -192,18 +208,11 @@ async function add(deps, email, name, role) {
 async function remove(deps, email) {
   const now = deps.now ?? Date.now();
   const row = await readRow(deps, email);
-  if (row.user_status === 'active' && row.user_role === 'admin') {
-    const [[admins] = []] = await deps.d1([
-      `select count(*) as n from users where role = 'admin' and status = 'active'`,
-    ]);
-    if (Number(admins?.n ?? 0) < 2) {
-      deps.out(`${email} is the last active admin (R-NAV-06); nothing changed.`);
-      return 1;
-    }
-  }
   if (row.invite_id || row.user_id) {
     const statements = [
-      `update users set status = 'suspended', updated_at = ${now} where auth_email = ${quote(email)} and status <> 'suspended'`,
+      // R-NAV-06: the last-admin test is part of this statement (as keepsAnAdmin in the
+      // app), so a concurrent demotion cannot leave the class without an admin.
+      `update users set status = 'suspended', updated_at = ${now} where auth_email = ${quote(email)} and status <> 'suspended' and (not (role = 'admin' and status = 'active') or (select count(*) from users where role = 'admin' and status = 'active') > 1)`,
     ];
     if (row.invite_id && row.invite_status === 'pending') {
       statements.push(`update invites set status = 'revoked' where id = ${quote(row.invite_id)}`);
@@ -213,10 +222,15 @@ async function remove(deps, email) {
     }
     if (row.user_id && row.user_status === 'active') {
       statements.push(
-        `insert into audit_events (id, actor_id, action, entity_type, entity_id, created_at) values (${quote(deps.uuid())}, NULL, 'member.suspended', 'user', ${quote(row.user_id)}, ${now})`,
+        `insert into audit_events (id, actor_id, action, entity_type, entity_id, created_at) select ${quote(deps.uuid())}, NULL, 'member.suspended', 'user', ${quote(row.user_id)}, ${now} where exists (select 1 from users where id = ${quote(row.user_id)} and status = 'suspended')`,
       );
     }
     await deps.d1(statements);
+    const after = await readRow(deps, email);
+    if (row.user_status === 'active' && after.user_status === 'active') {
+      deps.out(`${email} is the last active admin (R-NAV-06); nothing changed.`);
+      return 1;
+    }
     // Only a row that was `invited` before this change may go, and only while it shows
     // no sign of membership (as revokeInvite in the app); any other row stays suspended.
     if (row.user_id && row.user_status === 'invited') {
@@ -284,38 +298,35 @@ export async function runInvite(argv, deps) {
 }
 
 /**
- * The Access policy through the Cloudflare API. Ids come from the gitignored
- * .env.cloudflare (INV-6); every call has a timeout. The include rule's other entries
- * and the policy's `require`/`exclude` are kept as they are, so login methods (Google
- * and the one-time PIN, R-AUTH-15) are never touched.
- * @param {{ accountId: string; token: string; policyId: string; appId?: string; fetch?: typeof fetch; timeoutMs?: number }} options
+ * The Access policy through `scripts/cf.mjs api` (INV-9): the account guard runs on
+ * every call and the token never reaches this process. Ids come from the gitignored
+ * .env.cloudflare (INV-6). The include rule's other entries and the policy's
+ * `require`/`exclude` are kept as they are, so login methods (Google and the one-time
+ * PIN, R-AUTH-15) are never touched.
+ * @param {{ run: import('./cf-child.mjs').CfRunner; policyId: string; appId?: string }} options
  * @returns {AccessPolicy}
  */
 export function createAccessPolicy(options) {
-  const doFetch = options.fetch ?? fetch;
-  const base = `https://api.cloudflare.com/client/v4/accounts/${options.accountId}/access`;
-  const url = options.appId
-    ? `${base}/apps/${options.appId}/policies/${options.policyId}`
-    : `${base}/policies/${options.policyId}`;
-  const headers = { authorization: `Bearer ${options.token}`, 'content-type': 'application/json' };
+  const path = options.appId
+    ? `/access/apps/${options.appId}/policies/${options.policyId}`
+    : `/access/policies/${options.policyId}`;
 
-  /** @param {RequestInit} init */
-  async function call(init) {
-    const response = await doFetch(url, {
-      ...init,
-      headers,
-      signal: AbortSignal.timeout(options.timeoutMs ?? 15_000),
-    });
-    if (response.status === 401 || response.status === 403) {
-      throw new AccessScopeError('token lacks Access: Apps and Policies');
+  /** @param {string[]} args @param {string} [input] @returns {Record<string, unknown>} */
+  function call(args, input) {
+    const result = options.run(args, input === undefined ? {} : { input });
+    if (result.status !== 0) {
+      if (/\bHTTP (?:401|403)\b/.test(result.stderr)) {
+        throw new AccessScopeError('token lacks Access: Apps and Policies');
+      }
+      throw new Error(reason(result));
     }
-    const body = /** @type {{ success?: boolean; result?: Record<string, unknown> }} */ (
-      await response.json().catch(() => ({}))
-    );
-    if (!response.ok || !body.success || !body.result) {
-      throw new Error(`Cloudflare API answered ${response.status}`);
+    try {
+      const parsed = JSON.parse(result.stdout);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch {
+      /* falls through */
     }
-    return body.result;
+    throw new Error('the Access API answer was not JSON');
   }
 
   /** @param {unknown} rule */
@@ -323,17 +334,17 @@ export function createAccessPolicy(options) {
 
   return {
     async emails() {
-      const policy = await call({ method: 'GET' });
+      const policy = call(['api', path]);
       const include = Array.isArray(policy.include) ? policy.include : [];
       return include.map(emailOf).filter((email) => typeof email === 'string');
     },
     async setEmails(emails) {
-      const policy = await call({ method: 'GET' });
+      const policy = call(['api', path]);
       const include = Array.isArray(policy.include) ? policy.include : [];
       const others = include.filter((rule) => typeof emailOf(rule) !== 'string');
-      await call({
-        method: 'PUT',
-        body: JSON.stringify({
+      call(
+        ['api', '--put', path],
+        JSON.stringify({
           name: policy.name,
           decision: policy.decision,
           include: [...others, ...emails.map((email) => ({ email: { email } }))],
@@ -341,7 +352,7 @@ export function createAccessPolicy(options) {
           require: policy.require ?? [],
           ...(policy.precedence === undefined ? {} : { precedence: policy.precedence }),
         }),
-      });
+      );
     },
   };
 }

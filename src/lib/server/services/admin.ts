@@ -24,7 +24,7 @@ import {
   type Outcome,
   type Refusal,
 } from './members';
-import { takeRateLimit } from './rate-limit';
+import { takeRateLimit, type RateLimitKind } from './rate-limit';
 
 // The admin invite screen's commands, shared by `/api/v1/admin/*` and the `/admin`
 // form actions so both take the same permission, validation and rate-limit path.
@@ -69,9 +69,13 @@ export function parse<S extends z.ZodType>(
   return { ok: false, code: 'validation', fields };
 }
 
-/** R-AUTH-21: invite changes, 30 per hour per admin. */
-async function inviteLimit(context: MemberServices, member: Member): Promise<AdminFailure | null> {
-  const taken = await takeRateLimit(context.database, 'invite', member.id);
+/** R-AUTH-21: a refusal when `member` is past the `kind` limit (invites, profile writes). */
+export async function rateLimit(
+  context: MemberServices,
+  member: Member,
+  kind: RateLimitKind,
+): Promise<AdminFailure | null> {
+  const taken = await takeRateLimit(context.database, kind, member.id);
   return taken.ok
     ? null
     : { ok: false, code: 'rate_limited', retryAfterSeconds: taken.retryAfterSeconds };
@@ -103,7 +107,7 @@ export async function adminCreateInvite(context: MemberServices, member: Member,
   if (!can(member, 'members.manage')) return forbidden;
   const parsed = parse(inviteCreateSchema, input);
   if (!parsed.ok) return parsed;
-  const limited = await inviteLimit(context, member);
+  const limited = await rateLimit(context, member, 'invite');
   if (limited) return limited;
   const outcome = await inviteMember(context, member, parsed.data);
   return done(outcome, outcome.ok && outcome.created ? 201 : 200);
@@ -113,7 +117,7 @@ export async function adminRevokeInvite(context: MemberServices, member: Member,
   if (!can(member, 'members.manage')) return forbidden;
   const parsed = parse(inviteRevokeSchema, input);
   if (!parsed.ok) return parsed;
-  const limited = await inviteLimit(context, member);
+  const limited = await rateLimit(context, member, 'invite');
   if (limited) return limited;
   return done(await revokeInvite(context, member, parsed.data.id));
 }

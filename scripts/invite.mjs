@@ -12,15 +12,14 @@ import { createAccessPolicy, runInvite } from './lib/invite.mjs';
 
 const env = readEnvFile(join(root, '.env.cloudflare')) ?? {};
 
-const access =
-  env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN && env.ACCESS_POLICY_ID
-    ? createAccessPolicy({
-        accountId: env.CLOUDFLARE_ACCOUNT_ID,
-        token: env.CLOUDFLARE_API_TOKEN,
-        policyId: env.ACCESS_POLICY_ID,
-        ...(env.ACCESS_APP_ID ? { appId: env.ACCESS_APP_ID } : {}),
-      })
-    : null;
+// The Access policy goes through cf.mjs too, so its account guard runs first (INV-9).
+const access = env.ACCESS_POLICY_ID
+  ? createAccessPolicy({
+      run: runCf,
+      policyId: env.ACCESS_POLICY_ID,
+      ...(env.ACCESS_APP_ID ? { appId: env.ACCESS_APP_ID } : {}),
+    })
+  : null;
 
 try {
   process.exitCode = await runInvite(process.argv.slice(2), {

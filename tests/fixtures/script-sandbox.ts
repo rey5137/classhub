@@ -38,6 +38,7 @@ const FILES = [
   'migrations',
   'site.config.ts',
   'src/lib/shared/normalize.ts',
+  'src/lib/shared/seats.ts',
   'src/lib/themes/registry.ts',
   'src/lib/i18n/index.ts',
 ];
@@ -132,10 +133,17 @@ export async function createSandbox(): Promise<Sandbox> {
     },
     runner(args, options = {}) {
       if (args[0] === 'api') {
-        const { status, body } = fakeApi(args[1] ?? '', stateDir);
+        // `api --put <path>` takes its body on stdin; the fake knows no policy, so both 404.
+        const put = args[1] === '--put';
+        const path = (put ? args[2] : args[1]) ?? '';
+        const { status, body } = fakeApi(path, stateDir);
         return status === 200
           ? { status: 0, stdout: JSON.stringify(body.result), stderr: '' }
-          : { status: 1, stdout: '', stderr: `cf.mjs: GET ${args[1]} failed: HTTP ${status}` };
+          : {
+              status: 1,
+              stdout: '',
+              stderr: `cf.mjs: ${put ? 'PUT' : 'GET'} ${path} failed: HTTP ${status}`,
+            };
       }
       return fakeCli(args, { stateDir, cwd: dir, account: ACCOUNT, input: options.input ?? '' });
     },

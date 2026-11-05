@@ -49,7 +49,11 @@ npm run unlock       # opens the site to approved members
   5. generates and stores `INTERNAL_CONTEXT_KEY` (R-CHAT-04) and `LOG_HASH_SALT` (R-AUTH-23) as Worker secrets if
      missing;
   6. applies remote migrations and seeds only `site_settings` defaults and the bootstrap admin invite, never demo
-     content and never over existing members;
+     content and never over existing members. A rerun offers to correct the bootstrap admin email while that admin is
+     still `invited` with no Access subject: `users.auth_email` and `invites.email` change in one batch guarded on
+     both conditions, and an address that already belongs to another user or invite is refused before any write; the rewrite also clears
+     `invites.access_synced_at` and setup prints that the Access policy needs `npm run invite -- remove <old>` then
+     `add <new>`;
   7. prints the account id, Worker hostname (`<slug>.<subdomain>.workers.dev`), D1 id, bucket name, admin email and
      the Google redirect URI to use; never a secret.
 - **R-OPS-05** `docs/DEPLOY_CLOUDFLARE.md` has a manual fallback for each setup step (dashboard and `wrangler`
@@ -83,8 +87,10 @@ npm run unlock       # opens the site to approved members
   account id matches; D1, R2 and DO bindings exist; remote migrations are current (and none destructive is pending
   without a newer verified backup, R-DB-11); `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are set and the team JWKS loads;
   every known hostname without a cookie is redirected to `<team>.cloudflareaccess.com` (R-AUTH-02); preview URLs are
-  off; the bucket has no public `r2.dev` access and no custom domain (AC-MEM-08); a bootstrap admin is active;
-  seats are under 50; a backup exists or the admin is warned none does; the newest GitHub release (R-OPS-13).
+  off; the bucket has no public `r2.dev` access and no custom domain (AC-MEM-08); an admin is active (before the first
+  unlock: the bootstrap admin has signed in, R-AUTH-12);
+  seats are under 50; a backup exists or the admin is warned none does; the newest GitHub release (R-OPS-13). It warns while the
+  Worker var `WS_PROBE` is set, since the probe's sockets have no frame cap.
 - **R-OPS-11** **`npm run unlock`** runs preflight and sets `setup_state = "unlocked"` only if it passes; `npm run
   lock` sets it back (an emergency switch).
 - **R-OPS-12** **Updates:** the docs' update workflow is `git pull --ff-only` → `npm ci` → `npm run backup` (must

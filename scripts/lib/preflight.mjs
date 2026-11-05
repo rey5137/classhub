@@ -130,7 +130,10 @@ export async function runPreflight(deps) {
   );
 
   // One D1 round trip for the database-side items.
+  // R-OPS-10: any active admin passes; the bootstrap admin (R-AUTH-12) is required only
+  // until the first unlock has been audited.
   const bootstrap = `select u.status from users u join invites i on i.email = u.auth_email and i.invited_by = u.id where u.role = 'admin' order by u.created_at limit 1`;
+  const adminState = `select (select count(*) from users where role = 'admin' and status = 'active') as active, (select count(*) from audit_events where action = 'site.unlocked') as unlocked`;
   /** @type {Record<string, unknown>[][] | null} */
   let rows = null;
   let d1Error = '';
@@ -138,6 +141,7 @@ export async function runPreflight(deps) {
     rows = await d1Remote(run, [
       'select name from d1_migrations order by id',
       bootstrap,
+      adminState,
       `select ${seatsUsedSql(now)} as used`,
       'select count(*) as n from backup_runs where verified_at is not null',
     ]);
@@ -239,6 +243,17 @@ export async function runPreflight(deps) {
       : fail('preview', 'preview URLs are not off in wrangler.jsonc.', setupFix),
   );
 
+  // The WebSocket probe is members-only and echo-only, but its sockets have no frame
+  // cap and survive suspension, so it must not outlive the check (docs/DEPLOY_CLOUDFLARE.md).
+  if (config.vars?.WS_PROBE) {
+    checks.push({
+      id: 'ws-probe',
+      status: 'warn',
+      detail: 'vars.WS_PROBE is set in wrangler.jsonc, so /__probe/ws is live.',
+      fix: 'remove WS_PROBE from vars in wrangler.jsonc and npm run deploy again.',
+    });
+  }
+
   // AC-MEM-08: the bucket is reachable only through the Worker.
   const bucket = String(media?.bucket_name ?? '');
   const managed = /** @type {{ enabled?: boolean } | null} */ (
@@ -266,18 +281,35 @@ export async function runPreflight(deps) {
 
   if (rows) {
     const status = rows[1]?.[0]?.status;
-    checks.push(
-      status === 'active'
-        ? pass('admin', 'the bootstrap admin has signed in and is active.')
-        : fail(
-            'admin',
-            status ? `the bootstrap admin is ${status}.` : 'no bootstrap admin exists.',
-            status === 'invited'
-              ? 'sign in once with the bootstrap admin email (it opens /admin/setup).'
-              : setupFix,
-          ),
-    );
-    const used = countOf(rows[2], 'used');
+    const activeAdmins = countOf(rows[2], 'active');
+    const everUnlocked = (countOf(rows[2], 'unlocked') ?? 0) > 0;
+    // Fail closed: an unreadable count never passes.
+    if (activeAdmins === null) {
+      checks.push(fail('admin', 'the admin count could not be read from D1.', setupFix));
+    } else if (everUnlocked) {
+      checks.push(
+        activeAdmins > 0
+          ? pass('admin', `${activeAdmins} active admin(s).`)
+          : fail(
+              'admin',
+              'no admin is active.',
+              'reactivate an admin in /admin, or add one (npm run invite -- add <email> --role admin) and have them sign in.',
+            ),
+      );
+    } else {
+      checks.push(
+        status === 'active'
+          ? pass('admin', 'the bootstrap admin has signed in and is active.')
+          : fail(
+              'admin',
+              status ? `the bootstrap admin is ${status}.` : 'no bootstrap admin exists.',
+              status === 'invited'
+                ? 'sign in once with the bootstrap admin email (it opens /admin/setup), or rerun npm run setup to correct the email.'
+                : setupFix,
+            ),
+      );
+    }
+    const used = countOf(rows[3], 'used');
     checks.push(
       used === null
         ? fail('seats', 'the seat count could not be read from D1.', setupFix)
@@ -289,7 +321,7 @@ export async function runPreflight(deps) {
               'remove members or revoke invites (npm run invite -- remove <email>).',
             ),
     );
-    const backups = countOf(rows[3], 'n');
+    const backups = countOf(rows[4], 'n');
     checks.push(
       backups === null
         ? fail('backup', 'the backup count could not be read from D1.', setupFix)

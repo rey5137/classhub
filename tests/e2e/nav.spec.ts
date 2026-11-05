@@ -93,7 +93,7 @@ test.describe('AC-UI-02 AC-NAV-01 every route renders without axe violations in 
 test('R-UI-10 every route has its own translated document title (WCAG 2.4.2)', async ({ page }) => {
   const titles = new Set<string>();
   for (const route of routes) {
-    await page.goto(route);
+    await page.goto(await routePath(page.request, route));
     const title = await page.title();
     expect(title, route).toMatch(/ · Class Hub$/);
     expect(title, route).not.toBe('Class Hub');
@@ -125,21 +125,22 @@ test('R-UI-08 the account menu closes on Esc, navigation, language switch and ou
 }) => {
   await page.goto('/');
   const menu = page.locator('details.account');
-  await page.locator('summary').click();
+  const toggle = menu.locator('summary');
+  await toggle.click();
   await expect(menu).toHaveJSProperty('open', true);
   await page.keyboard.press('Escape');
   await expect(menu).toHaveJSProperty('open', false);
 
-  await page.locator('summary').click();
+  await toggle.click();
   await page.getByRole('link', { name: 'Trang cá nhân' }).click();
   await expect(page).toHaveURL(/\/profile$/);
   await expect(menu).toHaveJSProperty('open', false);
 
-  await page.locator('summary').click();
+  await toggle.click();
   await page.locator('h1').click();
   await expect(menu).toHaveJSProperty('open', false);
 
-  await page.locator('summary').click();
+  await toggle.click();
   await page.getByRole('button', { name: 'Chuyển sang English' }).click();
   await expect(menu).toHaveJSProperty('open', false);
 });

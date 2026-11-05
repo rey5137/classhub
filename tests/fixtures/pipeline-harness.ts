@@ -77,6 +77,8 @@ export async function createHarness(
     accessConfigured?: boolean;
     /** R-OPS-16: the probe as `WS_PROBE=1` provides it. */
     wsProbe?: AppContext['wsProbe'];
+    /** The pipeline clock (R-AUTH-26). */
+    now?: () => number;
   } = {},
 ): Promise<Harness> {
   const teamKey = await createTestKey('team-key');
@@ -94,7 +96,11 @@ export async function createHarness(
     ...(options.logHashSalt ? { logHashSalt: options.logHashSalt } : {}),
     ...(options.wsProbe ? { wsProbe: options.wsProbe } : {}),
   };
-  const handle = createSecurityHandle({ getContext: async () => context, production: false });
+  const handle = createSecurityHandle({
+    getContext: async () => context,
+    production: false,
+    ...(options.now ? { now: options.now } : {}),
+  });
   const resolved: string[] = [];
 
   return {

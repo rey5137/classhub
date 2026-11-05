@@ -19,6 +19,12 @@ export async function readJson(request: Request): Promise<unknown> {
   return request.json().catch(() => undefined);
 }
 
+/** A form field as text; a missing field or an uploaded file reads as `undefined`. */
+export function formText(form: FormData, name: string): string | undefined {
+  const value = form.get(name);
+  return typeof value === 'string' ? value : undefined;
+}
+
 /** R-API-02: a service result as JSON, or the error shape with `Retry-After` on a 429. */
 export function toResponse<T>(locals: App.Locals, result: AdminResult<T>): Response {
   if (result.ok) {

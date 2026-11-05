@@ -88,11 +88,6 @@ export function apiLookup(run, path) {
  * @param {CfRunner} run @param {string} path @returns {unknown}
  */
 export function apiGet(run, path) {
-  const result = run(['api', path]);
-  if (result.status !== 0) return null;
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    return null;
-  }
+  const lookup = apiLookup(run, path);
+  return lookup.found ? lookup.result : null;
 }

@@ -12,8 +12,19 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  SEAT_LIMIT as APP_SEAT_LIMIT,
+  SEAT_WARNING as APP_SEAT_WARNING,
+} from '../../src/lib/server/services/members';
+import type { CfRunner } from '../../scripts/lib/cf-child.mjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createAccessPolicy, parseArgs, runInvite, SEAT_LIMIT } from '../../scripts/lib/invite.mjs';
+import {
+  createAccessPolicy,
+  parseArgs,
+  runInvite,
+  SEAT_LIMIT,
+  seatsUsedSql,
+} from '../../scripts/lib/invite.mjs';
 
 // AC-AUTH-11: `npm run invite` against SQLite standing in for D1 and a fake Access
 // API standing in for Cloudflare; no network and no real account.
@@ -38,7 +49,7 @@ function d1(statements: string[]) {
 }
 
 interface FakeApi {
-  fetch: typeof fetch;
+  run: CfRunner;
   policy: {
     include: unknown[];
     require: unknown[];
@@ -46,13 +57,7 @@ interface FakeApi {
     name: string;
     decision: string;
   };
-  requests: {
-    method: string;
-    url: string;
-    auth: string | null;
-    hasSignal: boolean;
-    body?: unknown;
-  }[];
+  requests: { method: string; path: string; body?: unknown }[];
   status: number;
 }
 
@@ -68,19 +73,21 @@ function fakeAccess(emails: string[] = []): FakeApi {
     },
     requests: [],
     status: 200,
-    fetch: (async (input: string | URL | Request, init?: RequestInit) => {
-      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    // The `cf.mjs api` contract: `api <path>` is a GET, `api --put <path>` takes the body on stdin.
+    run: (args, options = {}) => {
+      const put = args[1] === '--put';
+      const body = put ? JSON.parse(options.input ?? '{}') : undefined;
       api.requests.push({
-        method: init?.method ?? 'GET',
-        url: String(input),
-        auth: new Headers(init?.headers).get('authorization'),
-        hasSignal: init?.signal instanceof AbortSignal,
+        method: put ? 'PUT' : 'GET',
+        path: args[put ? 2 : 1] ?? '',
         ...(body ? { body } : {}),
       });
-      if (api.status !== 200) return new Response('{}', { status: api.status });
-      if (init?.method === 'PUT') api.policy = { ...api.policy, ...body };
-      return Response.json({ success: true, result: api.policy });
-    }) as typeof fetch,
+      if (api.status !== 200) {
+        return { status: 1, stdout: '', stderr: `cf.mjs: failed: HTTP ${api.status}` };
+      }
+      if (put) api.policy = { ...api.policy, ...body };
+      return { status: 0, stdout: JSON.stringify(api.policy), stderr: '' };
+    },
   };
   return api;
 }
@@ -97,15 +104,7 @@ function deps(api: FakeApi | null) {
     out: (line: string) => output.push(line),
     uuid: () => `01900000-0000-7000-8000-${String(++counter).padStart(12, '0')}`,
     expiryDays: 30 as number | null,
-    access: api
-      ? createAccessPolicy({
-          accountId: ACCOUNT,
-          token: TOKEN,
-          policyId: 'pol-1',
-          appId: 'app-1',
-          fetch: api.fetch,
-        })
-      : null,
+    access: api ? createAccessPolicy({ run: api.run, policyId: 'pol-1', appId: 'app-1' }) : null,
   };
 }
 
@@ -165,12 +164,11 @@ describe('invite add/remove (R-AUTH-18)', () => {
       { login_method: { id: 'google' } },
       { login_method: { id: 'otp' } },
     ]);
-    expect(
-      api.requests.every((request) => request.auth === `Bearer ${TOKEN}` && request.hasSignal),
-    ).toBe(true);
-    expect(api.requests[0]?.url).toBe(
-      `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/access/apps/app-1/policies/pol-1`,
-    );
+    expect(api.requests.map((request) => `${request.method} ${request.path}`)).toEqual([
+      'GET /access/apps/app-1/policies/pol-1',
+      'GET /access/apps/app-1/policies/pol-1',
+      'PUT /access/apps/app-1/policies/pol-1',
+    ]);
     expect(output.join('\n')).not.toContain(TOKEN);
   });
 
@@ -324,6 +322,115 @@ describe('invite add/remove (R-AUTH-18)', () => {
   });
 });
 
+describe('invite parity with the app (gate fixes)', () => {
+  const addMember = (id: string, email: string, role: string, status: string) => {
+    const now = Date.now();
+    sqlite
+      .prepare(
+        `insert into users (id, auth_email, display_name, display_name_norm, role, status, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(id, email, id, id, role, status, now, now);
+    sqlite
+      .prepare(
+        `insert into invites (id, email, invited_by, role, status, created_at) values (?, ?, ?, ?, 'accepted', ?)`,
+      )
+      .run(`inv-${id}`, email, ADMIN.id, role, now);
+  };
+  const synced = (email: string) =>
+    row(`select access_synced_at as at from invites where email = '${email}'`)?.at;
+
+  it('R-AUTH-10 remove clears access_synced_at, and a CLI renew keeps it clear until synced', async () => {
+    const api = fakeAccess();
+    await runInvite(['add', 'gone@example.test'], deps(api));
+    expect(synced('gone@example.test')).not.toBeNull();
+    await runInvite(['remove', 'gone@example.test'], deps(api));
+    expect(synced('gone@example.test')).toBeNull();
+    // Without the Access scope the renew cannot sync, so it stays clear.
+    await runInvite(['add', 'gone@example.test'], deps(null));
+    expect(synced('gone@example.test')).toBeNull();
+  });
+
+  it('R-AUTH-09 add reactivates a suspended member with an accepted invite, audits it, then syncs the policy', async () => {
+    addMember('ann', 'ann@example.test', 'member', 'active');
+    const api = fakeAccess();
+    await runInvite(['remove', 'ann@example.test'], deps(api));
+    expect(row(`select status from users where id = 'ann'`)).toEqual({ status: 'suspended' });
+    expect(policyEmails(api)).toEqual([]);
+
+    expect(await runInvite(['add', 'ann@example.test'], deps(api))).toBe(0);
+    expect(row(`select status from users where id = 'ann'`)).toEqual({ status: 'active' });
+    expect(
+      row(
+        `select action, actor_id from audit_events where entity_id = 'ann' and action = 'member.reactivated'`,
+      ),
+    ).toEqual({ action: 'member.reactivated', actor_id: null });
+    expect(row(`select status from invites where id = 'inv-ann'`)).toEqual({ status: 'accepted' });
+    expect(policyEmails(api)).toEqual(['ann@example.test']);
+    expect(output.join('\n')).toContain('Reactivated ann@example.test.');
+  });
+
+  it('R-AUTH-09 add leaves a suspended member without an accepted invite out of the app, as the app does', async () => {
+    addMember('bob', 'bob@example.test', 'member', 'suspended');
+    sqlite.prepare(`update invites set status = 'revoked' where id = 'inv-bob'`).run();
+    await runInvite(['add', 'bob@example.test', '--name', 'Bob'], deps(null));
+    // The ordinary invite path: pending again, never straight to active.
+    expect(row(`select status from users where id = 'bob'`)).toEqual({ status: 'invited' });
+    expect(
+      row(`select action from audit_events where action = 'member.reactivated'`),
+    ).toBeUndefined();
+  });
+
+  it('R-AUTH-09 a reactivation that does not apply syncs nothing and fails', async () => {
+    addMember('cy', 'cy@example.test', 'member', 'suspended');
+    // A trigger stands in for a concurrent change: the guarded update finds no suspended row.
+    sqlite.exec(
+      `create trigger undo before update on users when old.id = 'cy' begin select raise(ignore); end`,
+    );
+    const api = fakeAccess();
+    expect(await runInvite(['add', 'cy@example.test'], deps(api))).toBe(1);
+    expect(api.requests).toEqual([]);
+    expect(row(`select status from users where id = 'cy'`)).toEqual({ status: 'suspended' });
+    expect(output.join('\n')).toContain('could not be reactivated');
+  });
+
+  it('R-NAV-06 removing the last active admin is refused in the update itself, with no audit and no policy change', async () => {
+    const api = fakeAccess([ADMIN.email]);
+    expect(await runInvite(['remove', ADMIN.email], deps(api))).toBe(1);
+    expect(row(`select status from users where id = '${ADMIN.id}'`)).toEqual({ status: 'active' });
+    expect(row(`select count(*) as n from audit_events where action = 'member.suspended'`)).toEqual(
+      { n: 0 },
+    );
+    expect(api.requests).toEqual([]);
+    expect(output.join('\n')).toContain('last active admin');
+  });
+
+  it('R-NAV-06 with a second active admin the first can be removed, then the second cannot', async () => {
+    addMember('adm2', 'adm2@example.test', 'admin', 'active');
+    expect(await runInvite(['remove', ADMIN.email], deps(null))).toBe(0);
+    expect(row(`select status from users where id = '${ADMIN.id}'`)).toEqual({
+      status: 'suspended',
+    });
+    expect(row(`select count(*) as n from audit_events where action = 'member.suspended'`)).toEqual(
+      { n: 1 },
+    );
+    expect(await runInvite(['remove', 'adm2@example.test'], deps(null))).toBe(1);
+    expect(row(`select status from users where id = 'adm2'`)).toEqual({ status: 'active' });
+  });
+
+  it('N7 the seat numbers and the seat count agree between the app and the CLI', () => {
+    expect(SEAT_LIMIT).toBe(APP_SEAT_LIMIT);
+    expect(APP_SEAT_WARNING).toBeLessThan(SEAT_LIMIT);
+    // The CLI's expression counts active members plus live pending invites, as the app's.
+    addMember('dee', 'dee@example.test', 'member', 'active');
+    sqlite
+      .prepare(
+        `insert into invites (id, email, invited_by, status, created_at, expires_at) values ('p1', 'p1@example.test', ?, 'pending', 0, NULL), ('p2', 'p2@example.test', ?, 'pending', 0, 5), ('p3', 'p3@example.test', ?, 'revoked', 0, NULL)`,
+      )
+      .run(ADMIN.id, ADMIN.id, ADMIN.id);
+    expect(row(`select ${seatsUsedSql(10)} as used`)).toEqual({ used: 3 });
+  });
+});
+
 describe('scripts/invite.mjs (INV-9)', () => {
   let dir: string;
 
@@ -341,10 +448,12 @@ describe('scripts/invite.mjs (INV-9)', () => {
       copyFileSync(join(repoRoot, 'scripts', file), join(dir, 'scripts', file));
     }
     mkdirSync(join(dir, 'src', 'lib', 'shared'), { recursive: true });
-    copyFileSync(
-      join(repoRoot, 'src', 'lib', 'shared', 'normalize.ts'),
-      join(dir, 'src', 'lib', 'shared', 'normalize.ts'),
-    );
+    for (const file of ['normalize.ts', 'seats.ts']) {
+      copyFileSync(
+        join(repoRoot, 'src', 'lib', 'shared', file),
+        join(dir, 'src', 'lib', 'shared', file),
+      );
+    }
     copyFileSync(join(repoRoot, 'site.config.ts'), join(dir, 'site.config.ts'));
     copyFileSync(
       join(repoRoot, 'tests', 'fixtures', 'fake-wrangler.mjs'),

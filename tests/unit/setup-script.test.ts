@@ -159,6 +159,89 @@ describe('scripts/setup.mjs (R-OPS-04)', () => {
     after.close();
   });
 
+  describe('correcting the bootstrap admin email (R-OPS-04 step 6)', () => {
+    const rows = () => {
+      const db = d1();
+      const out = {
+        users: db.prepare('select auth_email, display_name, display_name_norm from users').all(),
+        invites: db.prepare('select email from invites').pluck().all(),
+        audits: db.prepare('select count(*) from audit_events').pluck().get(),
+      };
+      db.close();
+      return out;
+    };
+
+    it('AC-OPS-01 replaces the address while the admin has not signed in, in users and invites together', async () => {
+      await setup(firstRun);
+      const before = rows();
+      const marked = d1();
+      marked.prepare('update invites set access_synced_at = 12345').run();
+      marked.close();
+      const result = await setup(['--admin', 'Right.Admin@Example.test']);
+      expect(result.status).toBe(0);
+      const check = d1();
+      expect(check.prepare('select access_synced_at from invites').pluck().all()).toEqual([null]);
+      check.close();
+      expect(result.stdout).toContain(`npm run invite -- remove ${ADMIN}`);
+      expect(result.stdout).toContain('npm run invite -- add right.admin@example.test');
+      expect(rows()).toEqual({
+        users: [
+          {
+            auth_email: 'right.admin@example.test',
+            display_name: 'right.admin',
+            display_name_norm: 'right.admin',
+          },
+        ],
+        invites: ['right.admin@example.test'],
+        // No audit row for the rewrite.
+        audits: before.audits,
+      });
+      expect(result.stdout).toContain('right.admin@example.test');
+    });
+
+    it('AC-OPS-01 keeps the address when the answer is the same or the default', async () => {
+      await setup(firstRun);
+      const before = rows();
+      expect((await setup(['--admin', ADMIN])).status).toBe(0);
+      expect((await setup()).status).toBe(0);
+      expect(rows()).toEqual(before);
+    });
+
+    it.each([
+      ['signed in (has an Access subject)', `update users set access_sub = 'sub-1'`],
+      ['active', `update users set status = 'active'`],
+    ])('AC-OPS-01 never rewrites an admin who has %s', async (_name, change) => {
+      await setup(firstRun);
+      const db = d1();
+      db.prepare(change).run();
+      db.close();
+      const before = rows();
+      const result = await setup(['--admin', 'right.admin@example.test']);
+      expect(result.status).toBe(0);
+      expect(rows()).toEqual(before);
+    });
+
+    it('AC-OPS-01 refuses an address that already belongs to another user or invite, before any write', async () => {
+      await setup(firstRun);
+      const db = d1();
+      db.prepare(
+        `insert into users (id, auth_email, display_name, display_name_norm, role, status, created_at, updated_at) values ('u2', 'taken@example.test', 'T', 't', 'member', 'invited', 1, 1)`,
+      ).run();
+      db.prepare(
+        `insert into invites (id, email, invited_by, role, status, created_at) select 'i2', 'pending.only@example.test', id, 'member', 'revoked', 1 from users where id = 'u2'`,
+      ).run();
+      db.close();
+      const before = rows();
+      for (const email of ['taken@example.test', 'Pending.Only@example.test']) {
+        const result = await setup(['--admin', email]);
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('already belongs to another member or invite');
+        expect(result.stderr).not.toMatch(/UNIQUE|constraint/i);
+        expect(rows()).toEqual(before);
+      }
+    });
+  });
+
   it('AC-PLAT-08 generates wrangler.jsonc with the configured account, and Git ignores it', async () => {
     await setup(firstRun);
     const config = JSON.parse(readFileSync(join(dir, 'wrangler.jsonc'), 'utf8')) as Record<

@@ -69,7 +69,7 @@ gitignored `wrangler.jsonc`.
 Interactive and safe to re-run. It asks the **project slug** (the Worker name, e.g. `classhub`), and, while the
 database has none yet, the **site title**, **default theme**, **language** and the **bootstrap admin email** (yours).
 Each answer can also be passed as a flag: `npm run setup -- --slug classhub --title "Lớp 12A" --theme yearbook
---locale vi --admin you@gmail.com`.
+--locale vi --admin you@gmail.com`. If you mistyped the admin email, run setup again and give the right one: it is replaced as long as that admin has not signed in yet. Setup then prints a reminder to update the Access policy: `npm run invite -- remove <old>`, then `npm run invite -- add <new>`.
 
 What it does, in order:
 
@@ -151,9 +151,10 @@ when anything fails:
 | `hostnames` | every hostname of the Worker, without a cookie, redirects to `<team>.cloudflareaccess.com` |
 | `preview` | preview URLs are off |
 | `bucket` | the bucket has no public `r2.dev` URL and no custom domain |
-| `admin` | the bootstrap admin has signed in once and is active |
+| `admin` | an admin is active (before the first unlock: the bootstrap admin has signed in once) |
 | `seats` | fewer than 50 Zero Trust seats are used |
 | `backup` | a verified backup exists (until `npm run backup` arrives this is a **warning**, never a failure) |
+| `ws-probe` | a **warning** only while `WS_PROBE` is still in `vars` (remove it after the WebSocket check) |
 | `release` | information only: the newest GitHub release compared with your version |
 
 `npm run unlock` runs preflight and sets the site to `unlocked` only if everything passes. While you are the only

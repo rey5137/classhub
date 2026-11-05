@@ -220,6 +220,19 @@ describe('admin invites API (§11.2)', () => {
     expect(row?.status).toBe('revoked');
   });
 
+  it('R-AUTH-10 a renewed invite no longer claims to be in the Access policy', async () => {
+    const body = { email: 'renewed.here@example.test', displayName: 'Renewed Here' };
+    const created = await send(PEOPLE.admin.email, 'POST', '/api/v1/admin/invites', body);
+    const { inviteId } = (await created.json()) as { inviteId: string };
+    // The CLI stamped the sync; then the invite was revoked (the CLI clears it on remove too).
+    await database.db.update(invites).set({ accessSyncedAt: 123 }).where(eq(invites.id, inviteId));
+    await send(PEOPLE.admin.email, 'DELETE', '/api/v1/admin/invites', { id: inviteId });
+    const renewed = await send(PEOPLE.admin.email, 'POST', '/api/v1/admin/invites', body);
+    expect(renewed.status).toBe(201);
+    const [row] = await database.db.select().from(invites).where(eq(invites.id, inviteId));
+    expect(row).toMatchObject({ status: 'pending', accessSyncedAt: null });
+  });
+
   it('refuses an invalid invite with validation fields', async () => {
     const response = await send(PEOPLE.admin.email, 'POST', '/api/v1/admin/invites', {
       email: 'not-an-email',

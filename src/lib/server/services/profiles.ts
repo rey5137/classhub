@@ -20,10 +20,9 @@ import {
   listActiveProfiles,
   type StoredProfile,
 } from '../repositories/profiles';
-import { parse, type AdminFailure, type AdminResult } from './admin';
+import { parse, rateLimit, type AdminFailure, type AdminResult } from './admin';
 import type { MemberServices } from './members';
 import { projectProfile, visibilityOf } from './projection';
-import { takeRateLimit } from './rate-limit';
 
 // §4: the member's own profile, the directory and one member's page. Every member
 // payload is built by `projectProfile` (R-PROF-04); `auth_email` leaves only in the
@@ -33,14 +32,6 @@ export const DIRECTORY_PAGE = 50;
 
 const notFound: AdminFailure = { ok: false, code: 'not_found' };
 const forbidden: AdminFailure = { ok: false, code: 'forbidden' };
-
-/** R-AUTH-21: profile writes, 20 per hour per member. */
-async function profileLimit(context: MemberServices, member: Member): Promise<AdminFailure | null> {
-  const taken = await takeRateLimit(context.database, 'profile', member.id);
-  return taken.ok
-    ? null
-    : { ok: false, code: 'rate_limited', retryAfterSeconds: taken.retryAfterSeconds };
-}
 
 function ownView(member: Member, stored: StoredProfile): OwnProfile {
   return {
@@ -210,7 +201,7 @@ export async function updateOwnProfile(
   if (!can(member, 'profile.edit')) return forbidden;
   const parsed = parse(profilePatchSchema, input);
   if (!parsed.ok) return parsed;
-  const limited = await profileLimit(context, member);
+  const limited = await rateLimit(context, member, 'profile');
   if (limited) return limited;
   const stored = await writeProfile(context, member, parsed.data, now);
   return stored ? { ok: true, status: 200, body: ownView(member, stored) } : notFound;
@@ -223,7 +214,7 @@ export async function clearOwnProfile(
   now: number = Date.now(),
 ): Promise<AdminResult<OwnProfile>> {
   if (!can(member, 'profile.edit')) return forbidden;
-  const limited = await profileLimit(context, member);
+  const limited = await rateLimit(context, member, 'profile');
   if (limited) return limited;
   const stored = await writeProfile(
     context,
@@ -256,7 +247,7 @@ export async function requestDeletion(
   if (!can(member, 'profile.edit')) return forbidden;
   const parsed = parse(deletionRequestSchema, input);
   if (!parsed.ok) return parsed;
-  const limited = await profileLimit(context, member);
+  const limited = await rateLimit(context, member, 'profile');
   if (limited) return limited;
   const { database } = context;
   const open = and(eq(users.id, member.id), isNull(users.deletionRequestedAt));

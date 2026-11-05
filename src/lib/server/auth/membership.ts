@@ -1,3 +1,4 @@
+import { normalizeEmail } from '../../shared/normalize';
 import type { Database } from '../ports/database';
 import {
   activateInvitedUser,
@@ -8,10 +9,7 @@ import {
 
 export type Member = ActiveMember;
 
-/** R-AUTH-06: trim and lower-case only; no Gmail dot or plus folding. */
-export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
+export { normalizeEmail };
 
 /**
  * R-AUTH-07: the app's half of the two layers. Matching is by normalized email

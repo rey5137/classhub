@@ -191,26 +191,28 @@
                     >
                   </form>
                 {/if}
-                <form method="POST" action="?/member" use:enhance>
-                  <input type="hidden" name="userId" value={invite.userId} />
-                  <input
-                    type="hidden"
-                    name="role"
-                    value={invite.role === 'admin' ? 'member' : 'admin'}
-                  />
-                  <Button
-                    type="submit"
-                    variant="ghost"
-                    aria-label={labelFor(
-                      invite.role === 'admin' ? 'admin.makeMember' : 'admin.makeAdmin',
-                      invite,
-                    )}
-                  >
-                    {invite.role === 'admin'
-                      ? i18n.t('admin.makeMember')
-                      : i18n.t('admin.makeAdmin')}
-                  </Button>
-                </form>
+                {#if invite.userStatus === 'active'}
+                  <form method="POST" action="?/member" use:enhance>
+                    <input type="hidden" name="userId" value={invite.userId} />
+                    <input
+                      type="hidden"
+                      name="role"
+                      value={invite.role === 'admin' ? 'member' : 'admin'}
+                    />
+                    <Button
+                      type="submit"
+                      variant="ghost"
+                      aria-label={labelFor(
+                        invite.role === 'admin' ? 'admin.makeMember' : 'admin.makeAdmin',
+                        invite,
+                      )}
+                    >
+                      {invite.role === 'admin'
+                        ? i18n.t('admin.makeMember')
+                        : i18n.t('admin.makeAdmin')}
+                    </Button>
+                  </form>
+                {/if}
               {/if}
             </div>
           </li>
