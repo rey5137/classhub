@@ -12,7 +12,7 @@ criteria (`AC-*`, spec §0) it proves.
 * **Deployment target:** the owner's **second Cloudflare account** (not the account other projects use); every remote command through `scripts/cf.mjs` (spec §2.6, INV-9)
 * **Worker:** `classhub` on `classhub.<account-subdomain>.workers.dev`; no custom domain in v1.0 unless the owner adds one, or the 1d WebSocket-through-Access probe fails and a custom domain becomes the fallback (spec R-OPS-16)
 * **Resources:** D1 `classhub-db`, R2 `classhub-media`, Durable Object class `ChatRoom` (binding `CHAT_ROOM`)
-* **Identity:** Zero Trust Free organization in the second account, Google login method, one self-hosted Access application for the Worker hostname (covering the custom hostname too, one AUD, if a custom domain is added)
+* **Identity:** Zero Trust Free organization in the second account, Google and One-time PIN login methods, one self-hosted Access application for the Worker hostname (covering the custom hostname too, one AUD, if a custom domain is added)
 * **Stack:** SvelteKit 2 + Svelte 5 + TypeScript strict, Drizzle, Zod, Vitest, `@cloudflare/vitest-pool-workers`, Playwright
 * **Locales:** `vi` (default), `en`
 
@@ -185,7 +185,7 @@ successful independent restore. Deploying is not enough.
   covering both hostnames and one AUD (R-OPS-16); nothing in 1a-1c depends on the outcome, but 4a/4b do.
 - **Owner steps (confirm each):** activate R2 billing in the second account; create the account-scoped API token;
   run `setup` and `deploy`; create the Zero Trust organization, the Google OAuth client and the Access application;
-  add your own and one test classmate's Gmail (`age` is not needed until 2c).
+  add your own and one test classmate's Gmail, and enable One-time PIN (`age` is not needed until 2c).
 - **Done when:** preflight passes against the live deployment and the site unlocks.
 
 **Manual Verification Checklist (1d, phase gate)**
@@ -195,9 +195,10 @@ successful independent restore. Deploying is not enough.
 4. `npm run preflight` lists every check passing; `npm run unlock` succeeds.
 5. Invite a second Gmail with `npm run invite -- add <email>`; it reaches the site. A third, uninvited Gmail is stopped at the Access screen.
 6. Remove the second Gmail from the app list only (leave it in Access): it sees `/denied`.
-7. In the Cloudflare dashboard of the **second** account: the Worker, D1, bucket and Access app are there; your other account shows none of them.
-8. Set a phone to *members* on one account and confirm the other sees it, then back to *private* and it's gone.
-9. The echo probe: a WebSocket through Access on `workers.dev` returns `101` and echoes; without a session it is refused. If not, the custom-domain decision is made before Phase 2.
+7. Invite a non-Gmail address; it signs in with the One-time PIN and reaches the site.
+8. In the Cloudflare dashboard of the **second** account: the Worker, D1, bucket and Access app are there; your other account shows none of them.
+9. Set a phone to *members* on one account and confirm the other sees it, then back to *private* and it's gone.
+10. The echo probe: a WebSocket through Access on `workers.dev` returns `101` and echoes; without a session it is refused. If not, the custom-domain decision is made before Phase 2.
 
 ### Phase 2 — Memories
 

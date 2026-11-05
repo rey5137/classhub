@@ -77,8 +77,9 @@
   peer address with a loopback `Host` (R-PLAT-10).
 - **R-AUTH-14** A second admin is recommended at unlock time and on `/admin` while only one exists (§15 risk
   "admin leaves").
-- **R-AUTH-15** **Email PIN fallback.** `docs/GOOGLE_ACCESS.md` documents Access's one-time PIN as an alternative
-  login method for first deployments; the app's checks are identical, since the JWT carries the same verified email.
+- **R-AUTH-15** **Email PIN login.** Access's one-time PIN is enabled as a second login method beside Google, so an
+  invited address without a Google account can sign in; `docs/GOOGLE_ACCESS.md` documents both. The app's checks are
+  identical, since the JWT carries the same verified email. The app has no passwords of its own.
 
 ## 6.5 Requests, sessions and CSRF
 

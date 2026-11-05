@@ -85,9 +85,9 @@ contradict.
   administrators included (the Cloudflare Zero Trust Free seat limit, §14). Multi-tenant hosting is out of scope.
 - **Everything is private.** No anonymous read API, public gallery, public member endpoint, public R2 bucket or search
   indexing. The only unauthenticated responses are `/health` (non-identifying) and the Access login itself.
-- **Invited Google accounts only.** Members sign in with Google through Cloudflare Access; only explicitly approved
-  email addresses get in, and the app checks its own membership list as a second layer (§6). No application
-  passwords. A one-time email PIN is a documented fallback, not the default (R-AUTH-15).
+- **Invited email addresses only.** Members sign in through Cloudflare Access with Google or with Access's one-time
+  email PIN (for addresses without a Google account); only explicitly approved email addresses get in, and the app
+  checks its own membership list as a second layer (§6). No application passwords (R-AUTH-15).
 - **Features:** Home with pinned notices and reunion details; Memories (photo wall, albums, years, captions); a
   discussion board with one-level comments; one live chat room; a private member directory with per-field contact
   visibility; an admin page (§3).

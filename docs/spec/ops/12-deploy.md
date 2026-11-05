@@ -59,7 +59,8 @@ npm run unlock       # opens the site to approved members
   2. in Google Cloud Console, configure the OAuth consent screen and create a **Web application** OAuth client;
   3. authorized JavaScript origin `https://<team>.cloudflareaccess.com`;
   4. authorized redirect URI `https://<team>.cloudflareaccess.com/cdn-cgi/access/callback`;
-  5. in Zero Trust, add **Google** as a login method with the client id and secret (the secret stays in Cloudflare);
+  5. in Zero Trust, add **Google** as a login method with the client id and secret (the secret stays in Cloudflare),
+     and add **One-time PIN** as a second login method (R-AUTH-15);
   6. create a **self-hosted** Access application for the exact Worker hostname (and the custom hostname, if any)
      with an **Allow** policy whose include rule lists each approved email. With a custom domain, **one** Access
      application lists both hostnames, so there is one AUD (R-OPS-16);
