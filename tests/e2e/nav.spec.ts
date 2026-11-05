@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import { MEMBER_DEMO, demoMemberPath, routePath } from './demo';
 
 const routes = [
   '/',
@@ -9,7 +10,7 @@ const routes = [
   '/discussions/thread-demo',
   '/chat',
   '/members',
-  '/members/member-demo',
+  MEMBER_DEMO,
   '/profile',
   '/admin',
   '/locked',
@@ -40,8 +41,9 @@ test('AC-NAV-01 the shell links reach every area from a nested route', async ({ 
     ['Trang chủ', '/'],
   ] as const;
 
+  const nested = await demoMemberPath(page.request);
   for (const [name, path] of areas) {
-    await page.goto('/members/member-demo');
+    await page.goto(nested);
     await expect(page.locator('html')).toHaveAttribute('data-locale', 'vi');
     const navigation = page.getByRole('navigation', { name: 'Khu vực' }).first();
     const href = await navigation
@@ -60,7 +62,7 @@ test.describe('AC-UI-02 AC-NAV-01 every route renders without axe violations in 
       for (const width of widths) {
         test(`${route} ${theme}/${mode} at ${width}`, async ({ page }) => {
           await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
-          const response = await page.goto(url(route, theme, mode));
+          const response = await page.goto(url(await routePath(page.request, route), theme, mode));
 
           // R-AUTH-11: /denied is a 403 for everyone who lands on it.
           expect(response?.status()).toBe(route === '/denied' ? 403 : 200);

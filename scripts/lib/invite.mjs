@@ -3,6 +3,8 @@
 // this is the only place the policy changes. Pure over its two injected sides so
 // tests run it against SQLite and a fake Access API (AC-AUTH-11).
 
+import { normalizeName } from '../../src/lib/shared/normalize.ts';
+
 const DAY = 86_400_000;
 export const SEAT_LIMIT = 50;
 const EMAIL = /^[^\s@'"\\;]+@[^\s@'"\\;]+\.[^\s@'"\\;]+$/;
@@ -152,7 +154,7 @@ async function add(deps, email, name, role) {
       : `insert into invites (id, email, invited_by, role, status, created_at, expires_at) select ${quote(inviteId)}, ${quote(email)}, ${by}, ${quote(role)}, 'pending', ${now}, ${expires} where ${seatFree}`;
     const userStatement = row.user_id
       ? `update users set status = 'invited', role = ${quote(role)}, updated_at = ${now} where id = ${quote(row.user_id)} and status <> 'active' and ${live}`
-      : `insert into users (id, auth_email, display_name, display_name_norm, role, status, created_at, updated_at) select ${quote(deps.uuid())}, ${quote(email)}, ${quote(name)}, ${quote(name.toLowerCase())}, ${quote(role)}, 'invited', ${now}, ${now} where ${live}`;
+      : `insert into users (id, auth_email, display_name, display_name_norm, role, status, created_at, updated_at) select ${quote(deps.uuid())}, ${quote(email)}, ${quote(name)}, ${quote(normalizeName(name))}, ${quote(role)}, 'invited', ${now}, ${now} where ${live}`;
     await deps.d1([
       inviteStatement,
       userStatement,

@@ -1,12 +1,23 @@
-import { and, asc, count, eq, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, eq, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 import { siteConfig } from '../../config';
+import { t } from '../../i18n';
+import { normalizeName } from '../../shared/normalize';
 import type { Member } from '../auth/membership';
 import { normalizeEmail } from '../auth/membership';
-import { invites, profileContacts, users } from '../db/schema';
+import {
+  chatMessages,
+  comments,
+  invites,
+  media,
+  posts,
+  profileContacts,
+  users,
+} from '../db/schema';
 import { uuidv7 } from '../ids';
 import type { Database, DatabaseHandle } from '../ports/database';
 import type { RealtimeHub } from '../ports/realtime';
 import { auditInsertWhere } from '../repositories/audit';
+import { deleteAvatarMedia } from '../repositories/profiles';
 
 const DAY = 86_400_000;
 
@@ -44,6 +55,7 @@ export interface InviteView {
   userId: string | null;
   userStatus: 'invited' | 'active' | 'suspended' | null;
   displayName: string | null;
+  deletionRequestedAt: number | null;
   createdAt: number;
   expiresAt: number | null;
   accessSyncedAt: number | null;
@@ -83,6 +95,7 @@ export async function listInvites(
       userRole: users.role,
       userStatus: users.status,
       displayName: users.displayName,
+      deletionRequestedAt: users.deletionRequestedAt,
     })
     .from(invites)
     .leftJoin(users, eq(users.authEmail, invites.email))
@@ -98,6 +111,7 @@ export async function listInvites(
     userId: row.userId,
     userStatus: row.userStatus,
     displayName: row.displayName,
+    deletionRequestedAt: row.deletionRequestedAt,
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
     accessSyncedAt: row.accessSyncedAt,
@@ -174,7 +188,7 @@ export async function inviteMember(
     : db
         .insert(users)
         .select(
-          sql`select ${uuidv7(now)}, ${email}, null, ${input.displayName}, ${input.displayName.toLowerCase()}, null, null, ${input.role}, 'invited', null, null, 0, ${now}, ${now}, null where ${nowLive}`,
+          sql`select ${uuidv7(now)}, ${email}, null, ${input.displayName}, ${normalizeName(input.displayName)}, null, null, ${input.role}, 'invited', null, null, 0, ${now}, ${now}, null where ${nowLive}`,
         );
   const event = {
     actorId: actor.id,
@@ -340,6 +354,147 @@ export async function reactivateMember(
   ]);
   if ((audited?.changes ?? 0) === 0)
     return explain(database.db, userId, (row) => row.status === 'active');
+  return { ok: true, changed: true };
+}
+
+/** R-PROF-11: the login email after a completed deletion; lower-case for the `CHECK`. */
+export function tombstoneEmail(userId: string): string {
+  return `deleted+${userId.toLowerCase()}@invalid`;
+}
+
+/**
+ * R-PROF-11: an admin completes a member's deletion request in one batch. Every
+ * statement is guarded by the same condition (the request stands, the email is still
+ * the live one, R-NAV-06 holds), so a refused or repeated completion changes nothing.
+ * The content goes first, then the invite and contacts, and the `users` row last,
+ * since its update ends the guard. Authorship rows keep their foreign keys (R-DB-04).
+ */
+export async function completeDeletion(
+  services: MemberServices,
+  actor: Member,
+  userId: string,
+  now: number = Date.now(),
+): Promise<Outcome<{ changed: boolean }>> {
+  const { database } = services;
+  const { db } = database;
+  const rows = await db
+    .select({
+      authEmail: users.authEmail,
+      deletionRequestedAt: users.deletionRequestedAt,
+      deletionKeepContent: users.deletionKeepContent,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return { ok: false, refusal: 'not_found' };
+  const tombstone = tombstoneEmail(userId);
+  if (row.authEmail === tombstone) return { ok: true, changed: false };
+  if (row.deletionRequestedAt === null) return { ok: false, refusal: 'wrong_status' };
+
+  const guard = and(
+    eq(users.id, userId),
+    eq(users.authEmail, row.authEmail),
+    isNotNull(users.deletionRequestedAt),
+    keepsAnAdmin(),
+  );
+  const live = sql`exists (select 1 from ${users} where ${guard})`;
+  // Deleted content keeps no text: the row stays for its foreign keys, the words go.
+  const content = row.deletionKeepContent
+    ? []
+    : [
+        db
+          .update(posts)
+          .set({ title: '', bodyMd: '', deletedAt: now, updatedAt: now })
+          .where(and(eq(posts.authorId, userId), isNull(posts.deletedAt), live)),
+        db
+          .update(comments)
+          .set({ bodyMd: '', deletedAt: now, updatedAt: now })
+          .where(and(eq(comments.authorId, userId), isNull(comments.deletedAt), live)),
+        db
+          .update(posts)
+          .set({
+            commentCount: sql`(select count(*) from ${comments} where ${comments.postId} = ${posts.id} and ${comments.deletedAt} is null)`,
+          })
+          .where(
+            and(
+              sql`${posts.id} in (select ${comments.postId} from ${comments} where ${comments.authorId} = ${userId})`,
+              live,
+            ),
+          ),
+        db
+          .update(chatMessages)
+          .set({ body: '', deletedAt: now })
+          .where(and(eq(chatMessages.senderId, userId), isNull(chatMessages.deletedAt), live)),
+        // Their photos only: `site` media (logo, banner) belong to the class, and the
+        // avatar goes below either way. R-MEM-20 purges the objects after the grace period.
+        db
+          .update(media)
+          .set({ caption: null, deletedAt: now })
+          .where(
+            and(
+              eq(media.ownerId, userId),
+              eq(media.mediaType, 'photo'),
+              isNull(media.deletedAt),
+              live,
+            ),
+          ),
+      ];
+  const formerMember = t(siteConfig.locale, 'member.former');
+  const [audited] = await database.batch([
+    auditInsertWhere(
+      db,
+      {
+        actorId: actor.id,
+        action: 'member.deletion_completed',
+        entityType: 'user',
+        entityId: userId,
+        createdAt: now,
+      },
+      live,
+    ),
+    ...content,
+    // The profile is cleared, picture included, even when the content is kept.
+    deleteAvatarMedia(db, userId, now, live),
+    // R-DB-13: the invite is never deleted, so its real email is rewritten instead.
+    db
+      .update(invites)
+      .set({ email: tombstone, status: 'revoked' })
+      .where(and(eq(invites.email, row.authEmail), live)),
+    db.delete(profileContacts).where(and(eq(profileContacts.userId, userId), live)),
+    db
+      .update(users)
+      .set({
+        status: 'suspended',
+        authEmail: tombstone,
+        accessSub: null,
+        displayName: formerMember,
+        displayNameNorm: normalizeName(formerMember),
+        preferredName: null,
+        preferredNameNorm: null,
+        avatarMediaId: null,
+        updatedAt: now,
+      })
+      .where(guard),
+  ]);
+  if ((audited?.changes ?? 0) === 0) {
+    const [current] = await db
+      .select({ authEmail: users.authEmail, status: users.status, role: users.role })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (!current) return { ok: false, refusal: 'not_found' };
+    // A concurrent completion won: the same end state.
+    if (current.authEmail === tombstone) return { ok: true, changed: false };
+    if (current.role === 'admin' && current.status === 'active') {
+      return { ok: false, refusal: 'last_admin' };
+    }
+    return { ok: false, refusal: 'wrong_status' };
+  }
+  try {
+    await services.realtime.disconnectMember(userId);
+  } catch {
+    // R-CHAT-09: best effort; the suspension already stops delivery (R-CHAT-16).
+  }
   return { ok: true, changed: true };
 }
 

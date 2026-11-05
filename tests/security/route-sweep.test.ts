@@ -34,6 +34,19 @@ describe('route sweep', () => {
     );
   });
 
+  it('AC-API-01 sweeps the §4 routes as built files, not only as spec rows', () => {
+    expect(fileRoutes().map(key)).toEqual(
+      expect.arrayContaining([
+        'GET /api/v1/me',
+        'PATCH /api/v1/me',
+        'GET /api/v1/me/export',
+        'POST /api/v1/me/deletion-request',
+        'GET /api/v1/members',
+        'GET /api/v1/members/[id]',
+      ]),
+    );
+  });
+
   it('AC-API-01 every route except GET /health and /denied refuses a request with no identity', async () => {
     const reached: string[] = [];
     for (const route of unique) {

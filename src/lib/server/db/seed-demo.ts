@@ -1,7 +1,9 @@
+import { DEFAULT_VISIBILITY } from '../../contracts/profile';
+import { normalizeName } from '../../shared/normalize';
 import { uuidv7 } from '../ids';
 import type { Database } from '../ports/database';
 import type { ObjectStorage } from '../ports/object-storage';
-import { invites, siteSettings, users } from './schema';
+import { invites, profileContacts, siteSettings, users } from './schema';
 
 interface DemoMember {
   email: string;
@@ -54,6 +56,21 @@ const DEMO_MEMBERS: DemoMember[] = [
 
 const ADMIN_EMAIL = DEMO_MEMBERS[0]!.email;
 
+// Invented contact details (INV-6) so the directory and member pages show each kind of
+// field; the phone numbers are not dialable and the links point at no real account.
+const DEMO_CONTACTS: Record<string, { city: string; bio: string; phone?: string; link?: string }> =
+  {
+    'mai.nguyen@example.com': {
+      city: 'Hà Nội',
+      bio: 'Still in touch with half the class. Ask me about the reunion.',
+      phone: '+84000000001',
+      link: 'https://zalo.me/demo-mai',
+    },
+    'linh.tran@example.com': { city: 'Huế', bio: 'Teaching chemistry now.' },
+    'bao.pham@example.com': { city: 'Đà Nẵng', bio: 'Back home after ten years away.' },
+    'chi.le@example.com': { city: 'TP. Hồ Chí Minh', bio: 'Photos from every trip.' },
+  };
+
 // D1 caps a statement at 100 bound variables (7 user rows x 13 columns = 91).
 const INSERT_CHUNK = 7;
 
@@ -88,9 +105,9 @@ export async function seedDemo(
     id: uuidv7(),
     authEmail: member.email,
     displayName: member.displayName,
-    displayNameNorm: member.displayName.toLowerCase(),
+    displayNameNorm: normalizeName(member.displayName),
     preferredName: member.preferredName,
-    preferredNameNorm: member.preferredName?.toLowerCase() ?? null,
+    preferredNameNorm: member.preferredName === null ? null : normalizeName(member.preferredName),
     role: member.role,
     status: 'active' as const,
     createdAt: now,
@@ -120,6 +137,28 @@ export async function seedDemo(
   const insertedInvites = await insertChunked(inviteRows, (chunk) =>
     database.db.insert(invites).values(chunk).onConflictDoNothing().returning({ id: invites.id }),
   );
+
+  const contactRows = Object.entries(DEMO_CONTACTS).flatMap(([email, contact]) => {
+    const userId = idByEmail.get(email);
+    if (!userId) return [];
+    return [
+      {
+        userId,
+        city: contact.city,
+        bio: contact.bio,
+        phone: contact.phone ?? null,
+        messagingUrl: contact.link ?? null,
+        visibilityJson: JSON.stringify({
+          ...DEFAULT_VISIBILITY,
+          city: 'members',
+          messaging_url: 'members',
+          phone: 'admins',
+        }),
+        updatedAt: now,
+      },
+    ];
+  });
+  await database.db.insert(profileContacts).values(contactRows).onConflictDoNothing();
 
   // R-PLAT-10: the demo site is open, so `dev:offline` and e2e reach every route; a
   // deployment stays locked until `npm run unlock` (R-AUTH-12). An existing state wins.

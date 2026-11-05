@@ -174,6 +174,13 @@ describe('invite add/remove (R-AUTH-18)', () => {
     expect(output.join('\n')).not.toContain(TOKEN);
   });
 
+  it('R-PROF-08 stores the accent-folded name the directory searches', async () => {
+    expect(await runInvite(['add', 'duc@example.test', '--name', 'Đặng Đức'], deps(null))).toBe(0);
+    expect(
+      row(`select display_name_norm from users where auth_email = 'duc@example.test'`),
+    ).toEqual({ display_name_norm: 'dang duc' });
+  });
+
   it('AC-AUTH-11 a repeated add changes nothing and does not rewrite the policy', async () => {
     const api = fakeAccess();
     await runInvite(['add', 'twice@example.test'], deps(api));
@@ -326,6 +333,11 @@ describe('scripts/invite.mjs (INV-9)', () => {
     for (const file of ['invite.mjs', 'cf.mjs', 'lib/invite.mjs', 'lib/env-file.mjs']) {
       copyFileSync(join(repoRoot, 'scripts', file), join(dir, 'scripts', file));
     }
+    mkdirSync(join(dir, 'src', 'lib', 'shared'), { recursive: true });
+    copyFileSync(
+      join(repoRoot, 'src', 'lib', 'shared', 'normalize.ts'),
+      join(dir, 'src', 'lib', 'shared', 'normalize.ts'),
+    );
     copyFileSync(join(repoRoot, 'site.config.ts'), join(dir, 'site.config.ts'));
     copyFileSync(
       join(repoRoot, 'tests', 'fixtures', 'fake-wrangler.mjs'),

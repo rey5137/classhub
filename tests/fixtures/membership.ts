@@ -1,5 +1,6 @@
 import { invites, siteSettings, users } from '../../src/lib/server/db/schema';
 import type { Database } from '../../src/lib/server/ports/database';
+import { normalizeName } from '../../src/lib/shared/normalize';
 
 // Synthetic people for the identity tests (INV-6), one per membership state.
 export const PEOPLE = {
@@ -37,7 +38,7 @@ export async function seedMembership(
     id: person.id,
     authEmail: person.email,
     displayName: name,
-    displayNameNorm: name.toLowerCase(),
+    displayNameNorm: normalizeName(name),
     role,
     status,
     createdAt: now,

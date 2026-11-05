@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { createD1Database } from '../../src/lib/server/adapters/cloudflare/d1-database';
 import { R2ObjectStorage } from '../../src/lib/server/adapters/cloudflare/r2-storage';
 import { seedDemo } from '../../src/lib/server/db/seed-demo';
-import { invites, users } from '../../src/lib/server/db/schema';
+import { invites, profileContacts, users } from '../../src/lib/server/db/schema';
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
@@ -25,6 +25,8 @@ describe('seedDemo on D1', () => {
     expect(members).toHaveLength(12);
     expect(rows).toHaveLength(12);
     expect(members.filter((member) => member.role === 'admin')).toHaveLength(1);
+    // A few invented contact rows, so the directory shows each kind of field.
+    expect(await database.db.select().from(profileContacts)).toHaveLength(4);
     expect(members.every((member) => member.authEmail.endsWith('@example.com'))).toBe(true);
   });
 });

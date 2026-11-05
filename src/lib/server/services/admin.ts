@@ -11,6 +11,7 @@ import type { Member } from '../auth/membership';
 import { can } from '../auth/permissions';
 import {
   changeRole,
+  completeDeletion,
   countSeats,
   inviteMember,
   listInvites,
@@ -56,7 +57,8 @@ function refused(refusal: Refusal): AdminFailure {
   };
 }
 
-function parse<S extends z.ZodType>(
+/** Zod at the boundary (R-DB-09): a `validation` failure names each bad field. */
+export function parse<S extends z.ZodType>(
   schema: S,
   input: unknown,
 ): { ok: true; data: z.infer<S> } | AdminFailure {
@@ -116,7 +118,7 @@ export async function adminRevokeInvite(context: MemberServices, member: Member,
   return done(await revokeInvite(context, member, parsed.data.id));
 }
 
-/** R-AUTH-09, R-NAV-06: role, suspend or reactivate one member. */
+/** R-AUTH-09, R-NAV-06, R-PROF-11: role, suspend, reactivate or complete a deletion. */
 export async function adminPatchMember(
   context: MemberServices,
   member: Member,
@@ -128,6 +130,7 @@ export async function adminPatchMember(
   if (!parsed.ok) return parsed;
   const change = parsed.data;
   if ('role' in change) return done(await changeRole(context, member, userId, change.role));
+  if ('deletion' in change) return done(await completeDeletion(context, member, userId));
   return done(
     change.status === 'suspended'
       ? await suspendMember(context, member, userId)

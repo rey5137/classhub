@@ -338,3 +338,19 @@ describe('rate limits (R-AUTH-21)', () => {
     });
   });
 });
+
+describe('invite name normalization (R-PROF-08)', () => {
+  it('stores the accent-folded display name the directory searches', async () => {
+    const outcome = await inviteMember(services, admin, {
+      email: 'dang.duc@example.test',
+      displayName: 'Đặng Đức',
+      role: 'member',
+    });
+    expect(outcome.ok).toBe(true);
+    const [row] = await database.db
+      .select({ norm: users.displayNameNorm })
+      .from(users)
+      .where(eq(users.authEmail, 'dang.duc@example.test'));
+    expect(row?.norm).toBe('dang duc');
+  });
+});

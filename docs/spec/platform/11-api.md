@@ -26,7 +26,7 @@
 | Method | Route | Behaviour |
 |---|---|---|
 | `GET` | `/api/v1/me` | current member, own full profile, role |
-| `PATCH` | `/api/v1/me` | update own names, contacts, visibility, avatar id, locale |
+| `PATCH` | `/api/v1/me` | update own names, contacts, visibility, avatar id (the locale stays client-side, R-UI-10) |
 | `GET` | `/api/v1/me/export` | own data export (R-PROF-09) |
 | `POST` | `/api/v1/me/deletion-request` | request deletion (R-PROF-11) |
 | `GET` | `/api/v1/members` | directory, visibility-projected, `?q=&cursor=` |

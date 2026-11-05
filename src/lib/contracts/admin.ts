@@ -26,6 +26,8 @@ export const inviteRevokeSchema = z.object({ id: z.string().min(1).max(64) }).st
 export const memberPatchSchema = z.union([
   z.object({ role }).strict(),
   z.object({ status: z.enum(['active', 'suspended']) }).strict(),
+  // R-PROF-11: complete the member's standing deletion request.
+  z.object({ deletion: z.literal('complete') }).strict(),
 ]);
 
 export const inviteViewSchema = z.object({
@@ -36,6 +38,8 @@ export const inviteViewSchema = z.object({
   userId: z.string().nullable(),
   userStatus: z.enum(['invited', 'active', 'suspended']).nullable(),
   displayName: z.string().nullable(),
+  /** R-PROF-11: a standing deletion request, shown to admins. */
+  deletionRequestedAt: z.number().nullable(),
   createdAt: z.number(),
   expiresAt: z.number().nullable(),
   accessSyncedAt: z.number().nullable(),

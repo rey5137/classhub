@@ -137,7 +137,8 @@ test('R-UI-05 prototype tints vary across tiles and people without clipped RSVP 
       .evaluateAll((elements) =>
         elements.map((element) => getComputedStyle(element).backgroundColor),
       );
-    expect(new Set(avatars).size).toBe(avatars.length);
+    // The palette has ten tones: the first ten classmates each get their own.
+    expect(new Set(avatars.slice(0, 10)).size).toBe(Math.min(avatars.length, 10));
   }
 });
 

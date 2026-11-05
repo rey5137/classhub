@@ -119,6 +119,18 @@ const watchdog = setTimeout(() => {
   void shutdown(1);
 }, WATCHDOG_MS);
 
+/** The seed draws ids at random, so the demo classmate's page is looked up (dev identity). */
+async function demoMemberPath() {
+  const response = await fetch(`${BASE}/api/v1/members?q=mai`, {
+    signal: AbortSignal.timeout(10_000),
+  });
+  /** @type {{ items: { id: string; displayName: string }[] }} */
+  const body = await response.json();
+  const mai = body.items.find((item) => item.displayName === 'Mai Nguyen');
+  if (!mai) throw new Error('screenshots: the demo seed has no Mai Nguyen');
+  return `/members/${mai.id}`;
+}
+
 async function run() {
   if (!(await isUp())) {
     server = spawn('npm', ['run', 'dev:offline'], {
@@ -138,10 +150,11 @@ async function run() {
   const page = await browser.newPage();
 
   for (const route of selectedRoutes) {
+    const target = route === '/members/member-demo' ? await demoMemberPath() : route;
     for (const { theme, mode } of combos) {
       for (const { width, height } of sizes) {
         await page.setViewportSize({ width, height });
-        const response = await page.goto(url(route, theme, mode), { waitUntil: 'load' });
+        const response = await page.goto(url(target, theme, mode), { waitUntil: 'load' });
         if (!response || response.status() !== 200) {
           throw new Error(`${route} ${theme}/${mode} ${width} returned ${response?.status()}`);
         }

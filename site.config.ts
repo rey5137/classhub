@@ -19,5 +19,6 @@ export const siteDefaults = {
   chat: { retainDays: 365, maxMessages: 30_000 },
   // R-AUTH-08: days an invite stays usable; null means it never expires.
   invite: { expiryDays: 30 },
-  messagingHosts: ['zalo.me', 'm.me', 'wa.me'],
+  // R-PROF-06: hosts a `messaging_url` may point at (subdomains included); add to extend.
+  messagingHosts: ['zalo.me', 'wa.me', 'm.me', 'messenger.com', 't.me', 'facebook.com', 'line.me'],
 } as const;

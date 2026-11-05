@@ -43,7 +43,7 @@
 ## 4.3 Directory
 
 - **R-PROF-08** `/members` lists `active` members only, ordered by `display_name`, 50 per page with a keyset cursor,
-  searchable by `display_name` and `preferred_name` (case- and accent-insensitive prefix match on the normalized
+  searchable by `display_name` and `preferred_name` (case- and accent-insensitive prefix match on any word of the normalized
   columns `display_name_norm` and `preferred_name_norm`). Members never get a bulk contact export from the UI.
 
 ## 4.4 Own data, deletion and retention

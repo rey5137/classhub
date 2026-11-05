@@ -125,3 +125,13 @@ export async function recordAccessSub(
     database.db.update(users).set({ accessSub: subject, updatedAt: now }).where(changing),
   ]);
 }
+
+/** The login email of one user, for an admin-only screen (R-PROF-05). */
+export async function findAuthEmail(db: DatabaseHandle, userId: string): Promise<string | null> {
+  const rows = await db
+    .select({ authEmail: users.authEmail })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  return rows[0]?.authEmail ?? null;
+}

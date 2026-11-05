@@ -1,7 +1,9 @@
 import type { Member } from './auth/membership';
 import type { AppContext } from './context';
 import { apiError } from './errors';
-import type { AdminResult } from './services/admin';
+import { fail } from '@sveltejs/kit';
+import { t } from '../i18n';
+import type { AdminFailure, AdminResult } from './services/admin';
 
 /**
  * R-PLAT-01: a guarded route's member and adapters. The pipeline sets both before
@@ -33,5 +35,17 @@ export function toResponse<T>(locals: App.Locals, result: AdminResult<T>): Respo
     ...(result.retryAfterSeconds
       ? { headers: { 'retry-after': String(result.retryAfterSeconds) } }
       : {}),
+  });
+}
+
+/** A form action's refusal: its status, a localized sentence and the bad field names. */
+export function formFailure(action: string, locals: App.Locals, result: AdminFailure) {
+  const status = { validation: 400, forbidden: 403, not_found: 404, rate_limited: 429 }[
+    result.code as 'validation'
+  ];
+  return fail(status ?? 409, {
+    action,
+    message: t(locals.locale, result.messageKey ?? `error.${result.code}`),
+    fields: result.fields ?? {},
   });
 }

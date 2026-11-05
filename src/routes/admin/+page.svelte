@@ -38,7 +38,11 @@
   }
 
   const notice = $derived(
-    form && 'done' in form && form.done ? i18n.t(`admin.done.${form.done}` as MessageKey) : null,
+    form && 'done' in form && form.done
+      ? i18n.t(`admin.done.${form.done}` as MessageKey, {
+          email: 'email' in form && typeof form.email === 'string' ? form.email : '',
+        })
+      : null,
   );
   const failure = $derived(form && 'message' in form ? form.message : null);
   const fieldError = (name: string) =>
@@ -133,6 +137,9 @@
                     >{i18n.t('admin.expires', { date: dateFormat.format(invite.expiresAt) })}</span
                   >
                 {/if}
+                {#if invite.deletionRequestedAt !== null && invite.status === 'accepted'}
+                  <span class="status suspended">{i18n.t('admin.deletionRequested')}</span>
+                {/if}
                 <span class="access" class:synced={invite.accessSyncedAt !== null}>
                   {invite.accessSyncedAt !== null
                     ? i18n.t('admin.access.synced')
@@ -172,6 +179,18 @@
                     >
                   {/if}
                 </form>
+                {#if invite.deletionRequestedAt !== null && invite.status === 'accepted'}
+                  <form method="POST" action="?/member" use:enhance>
+                    <input type="hidden" name="userId" value={invite.userId} />
+                    <input type="hidden" name="deletion" value="complete" />
+                    <Button
+                      type="submit"
+                      variant="ghost"
+                      aria-label={labelFor('admin.completeDeletion', invite)}
+                      >{i18n.t('admin.completeDeletion')}</Button
+                    >
+                  </form>
+                {/if}
                 <form method="POST" action="?/member" use:enhance>
                   <input type="hidden" name="userId" value={invite.userId} />
                   <input

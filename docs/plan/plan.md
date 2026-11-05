@@ -169,7 +169,7 @@ successful independent restore. Deploying is not enough.
 - **Done when:** the lock, invite → active and the permission matrix are covered by integration tests.
 
 #### Slice 1c — profiles and the directory
-- **Covers:** AC-PROF-01, 02, 03, 04, 05, 06, 07.
+- **Covers:** AC-PROF-01, 02, 03, 04, 05, 06, 07, 08.
 - `projectProfile`, contact normalizers and allow-list, `/profile`, `/members`, `/members/[id]`, own export,
   clear-profile, deletion request and admin completion. Avatars wait for 2b (placeholder initials).
 - **Done when:** the projection table test and the email-leak sweep pass.
