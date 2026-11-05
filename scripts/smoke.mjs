@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { chromium } from '@playwright/test';
+import { devMemberEnv } from './lib/dev-member.mjs';
 
 const ROOT = process.cwd();
 const BASE = process.env.SMOKE_BASE_URL ?? 'http://127.0.0.1:5173';
@@ -57,7 +58,7 @@ async function run() {
       cwd: ROOT,
       stdio: 'ignore',
       detached: true,
-      env: { ...process.env, CLASSHUB_OFFLINE: '1' },
+      env: devMemberEnv(ROOT),
     });
   }
   await waitForServer();

@@ -114,6 +114,15 @@ describe('scripts/check-worker-exports.mjs', () => {
     expect(result.stderr).toContain('DevIdentityProvider');
   });
 
+  it('AC-PLAT-09 fails when a minified bundle keeps only the dev identity text', () => {
+    const result = run(
+      'export { ChatRoom } from "./chat-room.js";\nclass a{x(){throw new E("dev identity refuses proxied requests")}}\n',
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('dev identity');
+  });
+
   it('AC-PLAT-09 fails when the bundle contains the filesystem adapter identifier', () => {
     const result = run(
       'export { ChatRoom } from "./chat-room.js";\nconst storage = FsObjectStorage;\n',

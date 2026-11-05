@@ -8,6 +8,8 @@ export interface AppContext {
   storage: ObjectStorage;
   /** Required (INV-1): a caller cannot skip the check by testing for its presence. */
   identity: IdentityProvider;
+  /** R-AUTH-23: the `LOG_HASH_SALT` secret; unset in dev and tests (see log.ts). */
+  logHashSalt?: string;
 }
 
 let localContext: Promise<AppContext> | undefined;

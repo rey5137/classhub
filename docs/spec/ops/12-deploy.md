@@ -43,7 +43,8 @@ npm run unlock       # opens the site to approved members
   4. generates the gitignored `wrangler.jsonc` from `wrangler.jsonc.example`: `account_id`, `name`, D1 and R2
      bindings, the `CHAT_ROOM` Durable Object binding with a `new_sqlite_classes` migration, `workers_dev: true`,
      `preview_urls: false`, vars `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` left empty until known;
-  5. generates and stores `INTERNAL_CONTEXT_KEY` as a Worker secret (R-CHAT-04) if missing;
+  5. generates and stores `INTERNAL_CONTEXT_KEY` (R-CHAT-04) and `LOG_HASH_SALT` (R-AUTH-23) as Worker secrets if
+     missing;
   6. applies remote migrations and seeds only `site_settings` defaults and the bootstrap admin invite, never demo
      content and never over existing members;
   7. prints the account id, Worker hostname (`<slug>.<subdomain>.workers.dev`), D1 id, bucket name, admin email and

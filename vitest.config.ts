@@ -15,6 +15,7 @@ export default defineConfig({
           name: 'security',
           include: ['tests/security/**/*.test.ts'],
           environment: 'node',
+          setupFiles: ['tests/security/setup-log-capture.ts'],
         },
       },
       './vitest.integration.config.ts',

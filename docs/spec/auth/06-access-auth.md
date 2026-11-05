@@ -59,7 +59,10 @@
   when the token can read the policy; otherwise it shows the manual step.
 - **R-AUTH-11** **Uniform denial.** A valid Google identity without an active membership, an invited-but-revoked
   email and a suspended user all get the same `/denied` page and the same `403 { error: { code: "forbidden" } }`, with
-  no hint whether the email is known. Denials are not logged with the email (only a salted hash and the reason).
+  no hint whether the email is known. Every cause takes the same path per request kind: a page navigation gets
+  `303` to `/denied` (itself always `403`), SvelteKit's `__data.json` request gets the same redirect as JSON, and
+  everything else (API, WebSocket upgrade, form post) gets `403 forbidden`. Denials are not logged with the email
+  (only a salted hash and the reason).
 
 ## 6.4 Setup lock and bootstrap
 
@@ -82,9 +85,10 @@
 - **R-AUTH-16** The app keeps no session of its own: the Access cookie is the session, and every request is
   re-verified (R-AUTH-03). Logout links to `/cdn-cgi/access/logout`.
 - **R-AUTH-17** **Mutating requests** (`POST`, `PUT`, `PATCH`, `DELETE`, and the WebSocket upgrade) require an
-  `Origin` header equal to the site origin (SvelteKit's `csrf.checkOrigin` for forms, and the same check in the API
-  helper and the WebSocket route); JSON APIs require `Content-Type: application/json` except media uploads, which
-  require the declared image type (R-MEM-08).
+  `Origin` header equal to the site origin. The check is in the request hook, for every mutating request (forms
+  included) and the upgrade; SvelteKit's own form check is off (`csrf.trustedOrigins: ['*']`), so every refusal
+  carries the §6.7 headers and the R-API-02 error shape. JSON APIs require `Content-Type: application/json` except
+  media uploads, which require the declared image type (R-MEM-08).
 
 ## 6.6 Access policy sync
 
@@ -100,7 +104,8 @@
 
 - **R-AUTH-20** **Headers on every response:** `Content-Security-Policy` (`default-src 'self'`; `img-src 'self' blob:
   data:`; `connect-src 'self'` plus the same-origin WebSocket; `script-src 'self'` with SvelteKit's nonce mode;
-  `frame-ancestors 'none'`; `form-action 'self'`; `base-uri 'none'`), `Referrer-Policy: no-referrer`,
+  `style-src 'self'` plus the page nonce (the inline theme `<style>` in `app.html`), never `'unsafe-inline'`;
+  `style-src-attr 'unsafe-inline'` for component `style=` attributes; `frame-ancestors 'none'`; `form-action 'self'`; `base-uri 'none'`), `Referrer-Policy: no-referrer`,
   `X-Content-Type-Options: nosniff`, `Strict-Transport-Security: max-age=31536000`, `Permissions-Policy` with camera,
   microphone and geolocation off, and `X-Robots-Tag: noindex, nofollow`; **every private HTML page and JSON response also carries `Cache-Control: private, no-store`** (static assets excepted). `robots.txt` disallows everything as a
   secondary measure only.
@@ -110,7 +115,9 @@
 - **R-AUTH-22** **Bodies are bounded** before parsing: 64 KB for JSON, the media limits for uploads (R-MEM-08), 4 KB
   for a chat frame.
 - **R-AUTH-23** **Logs** carry a request id, route, status and a salted member-id hash, never emails, contact
-  fields, message bodies, captions or JWTs. Errors use `{ error: { code, message, requestId } }` (§11.1).
+  fields, message bodies, captions or JWTs. The salt is the Worker secret `LOG_HASH_SALT` (created by `setup`); when
+  it is unset (dev, tests) each isolate draws a random salt, and a production build logs one `config` warning without
+  any value. Errors use `{ error: { code, message, requestId } }` (§11.1).
 - **R-AUTH-24** No third-party analytics, embeds, fonts or scripts by default.
 
 ## Acceptance criteria

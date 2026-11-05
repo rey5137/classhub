@@ -1,15 +1,12 @@
 import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
 import type { AppContext } from '../../context';
-import { IdentityError, type IdentityProvider } from '../../ports/identity';
+import { AccessIdentityProvider } from './access-identity';
 import { createD1Database } from './d1-database';
 import { createR2Storage } from './r2-storage';
 
-/** Until the Access verifier lands (1a) nobody is identified, so every call fails closed (INV-1). */
-const unavailableIdentity: IdentityProvider = {
-  async requireIdentity() {
-    throw new IdentityError('identity verification is not available yet');
-  },
-};
+function stringVar(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
 
 /** The Cloudflare bindings are named only here and in src/worker.ts (INV-4). */
 export function createCloudflareContext(env: Record<string, unknown>): AppContext {
@@ -20,6 +17,11 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
   return {
     database: createD1Database(database),
     storage: createR2Storage(media),
-    identity: unavailableIdentity,
+    // R-AUTH-05: account-specific vars, written into wrangler.jsonc by setup; missing means nobody is verified.
+    identity: new AccessIdentityProvider({
+      teamDomain: stringVar(env.ACCESS_TEAM_DOMAIN),
+      audience: stringVar(env.ACCESS_AUD),
+    }),
+    logHashSalt: stringVar(env.LOG_HASH_SALT),
   };
 }

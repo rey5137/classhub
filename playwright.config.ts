@@ -16,8 +16,10 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:5173',
     ...channel,
   },
+  // The dev identity lets nobody in by itself: seed the demo data and sign in as its admin.
   webServer: {
-    command: 'npm run dev:offline',
+    command: 'npm run db:seed:demo && npm run dev:offline',
+    env: { CLASSHUB_DEV_MEMBER: process.env.CLASSHUB_DEV_MEMBER ?? 'admin@example.com' },
     url: 'http://127.0.0.1:5173/health',
     reuseExistingServer: !process.env.CI,
   },

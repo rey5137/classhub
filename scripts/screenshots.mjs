@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
+import { devMemberEnv } from './lib/dev-member.mjs';
 
 const ROOT = process.cwd();
 const BASE = 'http://127.0.0.1:5173';
@@ -123,7 +124,7 @@ async function run() {
       cwd: ROOT,
       stdio: 'ignore',
       detached: true,
-      env: { ...process.env, CLASSHUB_OFFLINE: '1' },
+      env: devMemberEnv(ROOT),
     });
   }
   await waitForServer();

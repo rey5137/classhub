@@ -13,7 +13,8 @@
   admin endpoints also require `role = admin`.
 - **R-API-02** Errors are `{ error: { code, message, requestId } }` with a stable `code`: `unauthenticated`,
   `forbidden`, `locked`, `not_found`, `validation` (plus `fields`), `rate_limited`, `storage_full`,
-  `feature_disabled`, `conflict`, `payload_too_large`, `unavailable`, `internal`. `message` is a localized,
+  `feature_disabled`, `conflict`, `payload_too_large`, `unavailable`, `internal`. A JSON API sent another
+  `Content-Type` (R-AUTH-17) answers `415` with code `validation`. `message` is a localized,
   non-sensitive sentence; `requestId` is echoed in the `X-Request-Id` header.
 - **R-API-03** Lists return `{ items, nextCursor }`; the cursor is an opaque base64url of the keyset values.
 - **R-API-04** Request and response DTOs are Zod schemas in `src/lib/contracts/`. Generating `docs/openapi.json` from

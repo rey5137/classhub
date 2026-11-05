@@ -58,10 +58,12 @@ if (!exportedNames(entrySource).has('ChatRoom')) {
 }
 
 // AC-PLAT-02/09: the Worker bundle must not carry the local adapters or the
-// dev identity. `context.ts` imports them only in the dev/offline branch.
+// dev identity. `context.ts` imports them only in the dev/offline branch. The
+// dev identity's error text is matched too: string literals survive minification.
 for (const token of [
   'better-sqlite3',
   'DevIdentityProvider',
+  'dev identity',
   'FsObjectStorage',
   'createLocalDatabase',
   'node:fs',

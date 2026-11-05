@@ -62,7 +62,8 @@ test.describe('AC-UI-02 AC-NAV-01 every route renders without axe violations in 
           await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
           const response = await page.goto(url(route, theme, mode));
 
-          expect(response?.status()).toBe(200);
+          // R-AUTH-11: /denied is a 403 for everyone who lands on it.
+          expect(response?.status()).toBe(route === '/denied' ? 403 : 200);
           await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
           await expect(page.locator('main')).toBeVisible();
 

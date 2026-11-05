@@ -1,10 +1,13 @@
 import type { Handle } from '@sveltejs/kit';
+import { sequence } from '@sveltejs/kit/hooks';
 import { siteDefaults } from '../site.config';
 import { siteConfig, validateSiteConfig } from '$lib/config';
 import { isThemeId, resolveMode } from '$lib/themes/registry';
 import { accentCss } from '$lib/themes/accent';
 import type { RenderedMode, ThemeId } from '$lib/themes/theme-tokens';
 import { LOCALE_STORAGE_KEY, parseLocaleCookie } from '$lib/i18n';
+import { createContext } from '$lib/server/context';
+import { createSecurityHandle, handleServerError } from '$lib/server/pipeline';
 
 const PLACEHOLDER = {
   theme: '%classhub.theme%',
@@ -16,7 +19,7 @@ const PLACEHOLDER = {
 // R-UI-08: resolve the active theme and mode before the first paint, then write
 // them into <html>. The query override exists only on the dev server so
 // `npm run screenshots` and e2e can render every theme × mode.
-export const handle: Handle = async ({ event, resolve }) => {
+const appearance: Handle = async ({ event, resolve }) => {
   const preview = import.meta.env.DEV;
   const requestedTheme = preview ? event.url.searchParams.get('theme') : null;
   const theme: ThemeId =
@@ -60,3 +63,15 @@ export const handle: Handle = async ({ event, resolve }) => {
         .replaceAll(PLACEHOLDER.accent, accentCss(accent, mode)),
   });
 };
+
+// Appearance first so a denial is localized; it reads only the theme query and
+// the locale cookie, nothing private.
+export const handle = sequence(
+  appearance,
+  createSecurityHandle({
+    getContext: (event) => createContext(event.platform),
+    production: !import.meta.env.DEV,
+  }),
+);
+
+export const handleError = handleServerError;
