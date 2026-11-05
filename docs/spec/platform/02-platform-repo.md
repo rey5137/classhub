@@ -29,9 +29,11 @@ flowchart TD
   prerendered. API endpoints live under `/api/v1/*` (§11) and use the same authorization service. Media is streamed by
   `/api/v1/media/:id/:variant` (§7.5); chat upgrades on `/api/v1/chat/ws` (§9.2).
 - **R-PLAT-02** **One Worker, one entry.** The Worker entry (`src/worker.ts`) wraps SvelteKit's `adapter-cloudflare`
-  output and exports the `ChatRoom` Durable Object class from `src/workers/chat-room.ts`; there is no second Worker,
-  no Pages project and no separate API service. `wrangler.jsonc` sets `workers_dev: true` and `preview_urls: false`
-  (preview hostnames would sit outside the Access application, R-AUTH-02).
+  output and exports the `ChatRoom` Durable Object class from
+  `src/lib/server/adapters/cloudflare/chat-room.ts` (INV-4 keeps Cloudflare types inside the adapter directory);
+  there is no second Worker, no Pages project and no separate API service. `wrangler.jsonc` sets
+  `workers_dev: true` and `preview_urls: false` (preview hostnames would sit outside the Access application,
+  R-AUTH-02).
 
 ## 2.2 Stack
 
@@ -81,10 +83,10 @@ classhub/
 │   ├── worker.ts                  # Worker entry: SvelteKit + ChatRoom export (R-PLAT-02)
 │   ├── hooks.server.ts            # identity, membership, headers, request id
 │   ├── routes/                    # pages and /api/v1 endpoints (§3, §11)
-│   ├── workers/chat-room.ts       # Durable Object class
 │   └── lib/
 │       ├── components/  themes/  i18n/  contracts/  config/
 │       └── server/ services/ repositories/ ports/ auth/ db/ adapters/{cloudflare,local}/
+│           └── cloudflare/chat-room.ts  # Durable Object class (R-PLAT-02)
 ├── migrations/                    # numbered portable SQL (§5.5)
 ├── scripts/                       # cf.mjs guard, setup, invite, backup, restore, verify-backup, export-chat, preflight, unlock
 ├── tests/ unit/ contract/ integration/ e2e/ security/ fixtures/

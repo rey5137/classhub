@@ -1,7 +1,7 @@
 # 09 — Live chat
 
 **Covers:** The chat room, the WebSocket handshake and trusted context, the ChatRoom Durable Object, message persistence, history, presence, suspension, retention, archive and pruning.
-**Read when:** touching `/chat`, `src/workers/chat-room.ts`, the `RealtimeHub` port, chat history or the chat archive scripts.
+**Read when:** touching `/chat`, `src/lib/server/adapters/cloudflare/chat-room.ts`, the `RealtimeHub` port, chat history or the chat archive scripts.
 **Owns:** `R-CHAT-*`, `AC-CHAT-*`.
 **Index:** `docs/spec/SPEC.md` (product boundary §1, locked decisions D1–D10, routing). Section numbers are global: `§9.n` is in this file.
 

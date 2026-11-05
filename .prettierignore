@@ -1,0 +1,14 @@
+.svelte-kit/
+.wrangler/
+build/
+coverage/
+data/
+dist/
+package-lock.json
+node_modules/
+playwright-report/
+test-results/
+backups/
+.env*
+docs/
+*.md

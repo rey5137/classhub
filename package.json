@@ -1,0 +1,51 @@
+{
+  "name": "classhub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "build:node": "CLASSHUB_TARGET=node vite build",
+    "build:worker-check": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('.wrangler/dry-run', { recursive: true, force: true })\" && node scripts/cf.mjs deploy --dry-run --outdir .wrangler/dry-run && node scripts/check-worker-exports.mjs .wrangler/dry-run/worker.js",
+    "preview": "vite preview",
+    "lint": "prettier --check . && eslint .",
+    "format": "prettier --write .",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc --noEmit && tsc -p tsconfig.scripts.json --noEmit",
+    "test": "vitest run --project unit --project integration",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:migrations": "node scripts/test-migrations.mjs",
+    "test:security": "vitest run --project security",
+    "test:e2e": "playwright test",
+    "verify": "npm run lint && npm run check && npm run test && npm run test:migrations && npm run test:security && npm run build && npm run build:worker-check && npm run build:node",
+    "deploy": "node scripts/cf.mjs --check-deploy && npm run build && node scripts/cf.mjs deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.23.0",
+    "@cloudflare/workers-types": "^5.20261104.1",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
+    "@sveltejs/adapter-cloudflare": "^7.2.9",
+    "@sveltejs/adapter-node": "^5.5.7",
+    "@sveltejs/kit": "^2.70.3",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@types/node": "^24.19.2",
+    "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-svelte": "^3.24.0",
+    "globals": "^17.14.0",
+    "prettier": "^3.9.10",
+    "prettier-plugin-svelte": "^4.1.1",
+    "svelte": "^5.57.3",
+    "svelte-check": "^4.7.8",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.6",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.157.0"
+  }
+}
