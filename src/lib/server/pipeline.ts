@@ -1,5 +1,6 @@
 import type { Handle, HandleServerError, RequestEvent } from '@sveltejs/kit';
 import { normalizeEmail, resolveMember } from './auth/membership';
+import { isBootstrapAdmin, readSetupUnlocked } from './repositories/settings';
 import type { AppContext } from './context';
 import { apiError } from './errors';
 import { securityHeaders, staticCsp, withStyleNonce } from './headers';
@@ -10,9 +11,11 @@ import { logLine, redact, resolveLogSalt, saltedHash, type LogFields } from './l
 /** R-AUTH-22: JSON and form bodies; uploads (R-MEM-08) and chat frames have their own bounds. */
 export const JSON_BODY_LIMIT = 64 * 1024;
 export const DENIED_PATH = '/denied';
+export const LOCKED_PATH = '/locked';
+export const SETUP_PATH = '/admin/setup';
 
 // R-API-01: everything else, and any other method on these, needs a verified identity and an active membership.
-const PUBLIC_PATHS = new Set(['/health', DENIED_PATH]);
+const PUBLIC_PATHS = new Set(['/health', DENIED_PATH, LOCKED_PATH]);
 const PUBLIC_METHODS = new Set(['GET', 'HEAD']);
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 // R-MEM-08: the streamed upload (PUT only) is bounded by the media limits in its own route.
@@ -40,27 +43,42 @@ function clientAddress(event: RequestEvent): string {
   }
 }
 
+function isNavigation(event: RequestEvent): boolean {
+  const { method } = event.request;
+  return (
+    (method === 'GET' || method === 'HEAD') &&
+    !pathOf(event).startsWith('/api/') &&
+    !isUpgrade(event.request)
+  );
+}
+
+/** A page is sent to `location`; SvelteKit's data request gets the same redirect as JSON. */
+function redirectOr(event: RequestEvent, location: string, otherwise: () => Response): Response {
+  if (event.isDataRequest) {
+    return new Response(JSON.stringify({ type: 'redirect', location }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+  if (isNavigation(event)) return new Response(null, { status: 303, headers: { location } });
+  return otherwise();
+}
+
 /**
  * R-AUTH-11: one response per request kind, whatever the cause: a navigation
  * is sent to /denied, SvelteKit's data request gets the same redirect as JSON,
  * and everything else (API, upgrade, form post) gets `403 forbidden`.
  */
 function deny(event: RequestEvent): Response {
-  const requestId = event.locals.requestId;
-  if (event.isDataRequest) {
-    return new Response(JSON.stringify({ type: 'redirect', location: DENIED_PATH }), {
-      headers: { 'content-type': 'application/json' },
-    });
-  }
-  const { method } = event.request;
-  if (
-    (method === 'GET' || method === 'HEAD') &&
-    !pathOf(event).startsWith('/api/') &&
-    !isUpgrade(event.request)
-  ) {
-    return new Response(null, { status: 303, headers: { location: DENIED_PATH } });
-  }
-  return apiError('forbidden', { requestId, locale: event.locals.locale });
+  return redirectOr(event, DENIED_PATH, () =>
+    apiError('forbidden', { requestId: event.locals.requestId, locale: event.locals.locale }),
+  );
+}
+
+/** R-AUTH-12: while locked every page shows /locked and every API answers `423 locked`. */
+function locked(event: RequestEvent): Response {
+  return redirectOr(event, LOCKED_PATH, () =>
+    apiError('locked', { requestId: event.locals.requestId, locale: event.locals.locale }),
+  );
 }
 
 function isJson(contentType: string | null): boolean {
@@ -174,6 +192,14 @@ async function guard(
 
   const context = await options.getContext(event);
   const salt = resolveLogSalt(context.logHashSalt, options.production);
+  event.locals.context = context;
+
+  // R-AUTH-12: without the Access vars nobody, not even the bootstrap admin, gets further.
+  if (!context.accessConfigured) {
+    log.denied = 'locked';
+    return locked(event);
+  }
+  const unlocked = await readSetupUnlocked(context.database.db);
 
   let identity: { email: string; subject: string };
   try {
@@ -183,10 +209,23 @@ async function guard(
   } catch (error) {
     // INV-1: any failure to verify, expected or not, is a denial.
     log.denied = error instanceof IdentityError ? 'no_identity' : 'identity_error';
-    return deny(event);
+    return unlocked ? deny(event) : locked(event);
   }
 
   const member = await resolveMember(context.database, identity);
+  if (!unlocked) {
+    // R-AUTH-12: one answer for everyone, known or not, except the bootstrap admin,
+    // who reaches the setup checklist and nothing else.
+    const bootstrap = member !== null && (await isBootstrapAdmin(context.database.db, member.id));
+    if (!bootstrap) {
+      log.denied = 'locked';
+      return locked(event);
+    }
+    if (path !== SETUP_PATH || !PUBLIC_METHODS.has(request.method)) {
+      log.denied = 'locked';
+      return redirectOr(event, SETUP_PATH, () => locked(event));
+    }
+  }
   if (!member) {
     log.denied = 'no_membership';
     log.subject = await saltedHash(salt, normalizeEmail(identity.email));

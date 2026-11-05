@@ -1,5 +1,5 @@
 import type { ErrorBody, ErrorCode } from '../contracts/errors';
-import { t, type Locale } from '../i18n';
+import { t, type Locale, type MessageKey } from '../i18n';
 
 const statusFor: Record<ErrorCode, number> = {
   unauthenticated: 401,
@@ -23,6 +23,8 @@ export interface ApiErrorOptions {
   status?: number;
   fields?: Record<string, string>;
   headers?: HeadersInit;
+  /** A more specific localized sentence than the code's default (still non-sensitive). */
+  messageKey?: MessageKey;
 }
 
 /** R-API-02: `{ error: { code, message, requestId } }`, with the id echoed in `X-Request-Id`. */
@@ -30,7 +32,7 @@ export function apiError(code: ErrorCode, options: ApiErrorOptions): Response {
   const body: ErrorBody = {
     error: {
       code,
-      message: t(options.locale, `error.${code}`),
+      message: t(options.locale, options.messageKey ?? `error.${code}`),
       requestId: options.requestId,
       ...(options.fields ? { fields: options.fields } : {}),
     },

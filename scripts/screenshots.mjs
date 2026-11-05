@@ -21,6 +21,7 @@ const routes = [
   '/members/member-demo',
   '/profile',
   '/admin',
+  '/admin/setup',
   '/locked',
   '/denied',
 ];

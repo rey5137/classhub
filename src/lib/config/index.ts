@@ -63,6 +63,11 @@ const siteConfigSchema = z
         maxMessages: z.number().int().positive(),
       })
       .strict(),
+    invite: z
+      .object({
+        expiryDays: z.number().int().positive().max(3650).nullable(),
+      })
+      .strict(),
     messagingHosts: z.array(z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i)).max(20),
   })
   .strict()

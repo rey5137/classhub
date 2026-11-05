@@ -1,4 +1,6 @@
 <script lang="ts">
+  import type { HTMLInputAttributes } from 'svelte/elements';
+
   interface Props {
     id: string;
     label: string;
@@ -9,6 +11,11 @@
     error?: string;
     multiline?: boolean;
     labelHidden?: boolean;
+    /** The form field name; defaults to `id`. */
+    name?: string;
+    required?: boolean;
+    autocomplete?: HTMLInputAttributes['autocomplete'];
+    maxlength?: number;
   }
 
   let {
@@ -21,6 +28,10 @@
     error,
     multiline = false,
     labelHidden = false,
+    name,
+    required = false,
+    autocomplete,
+    maxlength,
   }: Props = $props();
 
   const describedBy = $derived(
@@ -31,9 +42,29 @@
 <div class="field">
   <label for={id} class:visually-hidden={labelHidden}>{label}</label>
   {#if multiline}
-    <textarea {id} {placeholder} aria-describedby={describedBy} rows="3">{value}</textarea>
+    <textarea
+      {id}
+      name={name ?? id}
+      {placeholder}
+      {required}
+      {maxlength}
+      aria-describedby={describedBy}
+      aria-invalid={error ? true : undefined}
+      rows="3">{value}</textarea
+    >
   {:else}
-    <input {id} {type} {value} {placeholder} aria-describedby={describedBy} />
+    <input
+      {id}
+      name={name ?? id}
+      {type}
+      {value}
+      {placeholder}
+      {required}
+      {autocomplete}
+      {maxlength}
+      aria-describedby={describedBy}
+      aria-invalid={error ? true : undefined}
+    />
   {/if}
   {#if hint}<p id="{id}-hint" class="hint">{hint}</p>{/if}
   {#if error}<p id="{id}-error" class="error">{error}</p>{/if}

@@ -2,12 +2,16 @@ import { createCloudflareContext } from './adapters/cloudflare/context';
 import type { Database } from './ports/database';
 import type { IdentityProvider } from './ports/identity';
 import type { ObjectStorage } from './ports/object-storage';
+import type { RealtimeHub } from './ports/realtime';
 
 export interface AppContext {
   database: Database;
   storage: ObjectStorage;
   /** Required (INV-1): a caller cannot skip the check by testing for its presence. */
   identity: IdentityProvider;
+  /** R-AUTH-12: false while `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` is missing, which keeps the site locked. */
+  accessConfigured: boolean;
+  realtime: RealtimeHub;
   /** R-AUTH-23: the `LOG_HASH_SALT` secret; unset in dev and tests (see log.ts). */
   logHashSalt?: string;
 }

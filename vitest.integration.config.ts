@@ -1,9 +1,12 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 const migrations = await readD1Migrations('migrations');
 
 export default defineConfig({
+  // Route modules import `$lib/…` as SvelteKit resolves it.
+  resolve: { alias: { $lib: fileURLToPath(new URL('./src/lib', import.meta.url)) } },
   plugins: [
     cloudflareTest({
       main: './tests/fixtures/pool-worker.ts',

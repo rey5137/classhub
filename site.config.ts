@@ -17,5 +17,7 @@ export const siteDefaults = {
   },
   limits: { mediaWarnBytes: 8_000_000_000, mediaStopBytes: 9_000_000_000, photosPerDay: 25 },
   chat: { retainDays: 365, maxMessages: 30_000 },
+  // R-AUTH-08: days an invite stays usable; null means it never expires.
+  invite: { expiryDays: 30 },
   messagingHosts: ['zalo.me', 'm.me', 'wa.me'],
 } as const;

@@ -4,6 +4,7 @@ import type { AppContext } from '../../src/lib/server/context';
 import { createSecurityHandle } from '../../src/lib/server/pipeline';
 import type { Database } from '../../src/lib/server/ports/database';
 import type { ObjectStorage } from '../../src/lib/server/ports/object-storage';
+import type { RealtimeHub } from '../../src/lib/server/ports/realtime';
 import {
   AUDIENCE,
   createTestKey,
@@ -27,6 +28,7 @@ export interface SendOptions {
   /** The SvelteKit route id the path matched, or null when none did. */
   routeId?: string | null;
   isDataRequest?: boolean;
+  params?: Record<string, string>;
 }
 
 export interface Harness {
@@ -36,6 +38,21 @@ export interface Harness {
   send(path: string, options?: SendOptions): Promise<Response>;
   /** An assertion header for a team-signed JWT carrying `email`. */
   as(email: string, sub?: string): Promise<Record<string, string>>;
+}
+
+/** A RealtimeHub that remembers whom it was asked to disconnect (R-CHAT-09). */
+export function recordingHub(): RealtimeHub & { disconnected: string[] } {
+  const disconnected: string[] = [];
+  return {
+    disconnected,
+    async connect() {
+      return new Response(null, { status: 501 });
+    },
+    async disconnectMember(memberId) {
+      disconnected.push(memberId);
+    },
+    async notify() {},
+  };
 }
 
 /** Stands in for SvelteKit's renderer: a page with a nonced CSP, as nonce mode emits. */
@@ -55,6 +72,9 @@ export async function createHarness(
   options: {
     resolve?: (event: RequestEvent) => Response | Promise<Response>;
     logHashSalt?: string;
+    realtime?: RealtimeHub;
+    /** R-AUTH-12: false acts as a deployment whose Access vars are missing. */
+    accessConfigured?: boolean;
   } = {},
 ): Promise<Harness> {
   const teamKey = await createTestKey('team-key');
@@ -67,6 +87,8 @@ export async function createHarness(
     database,
     storage: {} as ObjectStorage,
     identity,
+    accessConfigured: options.accessConfigured ?? true,
+    realtime: options.realtime ?? recordingHub(),
     ...(options.logHashSalt ? { logHashSalt: options.logHashSalt } : {}),
   };
   const handle = createSecurityHandle({ getContext: async () => context, production: false });
@@ -90,7 +112,7 @@ export async function createHarness(
         url: new URL(request.url),
         locals: { theme: 'yearbook', mode: 'light', locale: 'en' },
         route: { id: sendOptions.routeId === undefined ? path : sendOptions.routeId },
-        params: {},
+        params: sendOptions.params ?? {},
         isDataRequest: sendOptions.isDataRequest ?? false,
         isSubRequest: false,
         platform: undefined,

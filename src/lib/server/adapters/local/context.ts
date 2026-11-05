@@ -1,6 +1,7 @@
 import type { AppContext } from '../../context';
 import { createDevIdentity } from './dev-identity';
 import { FsObjectStorage } from './fs-storage';
+import { createLocalHub } from './realtime-hub';
 import { createLocalDatabase } from './sqlite-database';
 
 export interface LocalContextOptions {
@@ -18,5 +19,8 @@ export function createLocalContext(options: LocalContextOptions = {}): AppContex
     database,
     storage: new FsObjectStorage(options.objectsDir ?? 'data/objects'),
     identity: createDevIdentity(options.devMember),
+    // The dev identity stands in for Access on loopback (R-PLAT-10).
+    accessConfigured: true,
+    realtime: createLocalHub(),
   };
 }

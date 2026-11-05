@@ -1,7 +1,7 @@
 import { uuidv7 } from '../ids';
 import type { Database } from '../ports/database';
 import type { ObjectStorage } from '../ports/object-storage';
-import { invites, users } from './schema';
+import { invites, siteSettings, users } from './schema';
 
 interface DemoMember {
   email: string;
@@ -120,6 +120,13 @@ export async function seedDemo(
   const insertedInvites = await insertChunked(inviteRows, (chunk) =>
     database.db.insert(invites).values(chunk).onConflictDoNothing().returning({ id: invites.id }),
   );
+
+  // R-PLAT-10: the demo site is open, so `dev:offline` and e2e reach every route; a
+  // deployment stays locked until `npm run unlock` (R-AUTH-12). An existing state wins.
+  await database.db
+    .insert(siteSettings)
+    .values({ key: 'setup_state', valueJson: JSON.stringify('unlocked'), updatedAt: now })
+    .onConflictDoNothing();
 
   return { members: insertedMembers, invites: insertedInvites };
 }

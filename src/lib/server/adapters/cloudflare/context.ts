@@ -3,6 +3,7 @@ import type { AppContext } from '../../context';
 import { AccessIdentityProvider } from './access-identity';
 import { createD1Database } from './d1-database';
 import { createR2Storage } from './r2-storage';
+import { createDurableObjectHub } from './realtime-hub';
 
 function stringVar(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
@@ -14,14 +15,15 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
   const media = env.MEDIA as R2Bucket | undefined;
   if (!database) throw new Error('missing D1 binding: DB');
   if (!media) throw new Error('missing R2 binding: MEDIA');
+  const teamDomain = stringVar(env.ACCESS_TEAM_DOMAIN);
+  const audience = stringVar(env.ACCESS_AUD);
   return {
     database: createD1Database(database),
     storage: createR2Storage(media),
     // R-AUTH-05: account-specific vars, written into wrangler.jsonc by setup; missing means nobody is verified.
-    identity: new AccessIdentityProvider({
-      teamDomain: stringVar(env.ACCESS_TEAM_DOMAIN),
-      audience: stringVar(env.ACCESS_AUD),
-    }),
+    identity: new AccessIdentityProvider({ teamDomain, audience }),
+    accessConfigured: Boolean(teamDomain?.trim() && audience?.trim()),
+    realtime: createDurableObjectHub(),
     logHashSalt: stringVar(env.LOG_HASH_SALT),
   };
 }

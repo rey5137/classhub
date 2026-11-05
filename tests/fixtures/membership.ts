@@ -1,4 +1,4 @@
-import { invites, users } from '../../src/lib/server/db/schema';
+import { invites, siteSettings, users } from '../../src/lib/server/db/schema';
 import type { Database } from '../../src/lib/server/ports/database';
 
 // Synthetic people for the identity tests (INV-6), one per membership state.
@@ -14,7 +14,19 @@ export const PEOPLE = {
 /** Contact data that must never reach a log line (AC-AUTH-12). */
 export const FIXTURE_PHONE = '+84 912 345 678';
 
-export async function seedMembership(database: Database): Promise<void> {
+/** R-AUTH-12: `npm run unlock`'s write; the identity suites test an open site. */
+export async function setSetupState(database: Database, state: 'locked' | 'unlocked') {
+  await database.db
+    .insert(siteSettings)
+    .values({ key: 'setup_state', valueJson: JSON.stringify(state) })
+    .onConflictDoUpdate({ target: siteSettings.key, set: { valueJson: JSON.stringify(state) } });
+}
+
+export async function seedMembership(
+  database: Database,
+  options: { setupState?: 'locked' | 'unlocked' } = {},
+): Promise<void> {
+  await setSetupState(database, options.setupState ?? 'unlocked');
   const now = Date.now();
   const row = (
     person: { id: string; email: string },

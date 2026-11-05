@@ -23,6 +23,7 @@
     "test:security": "vitest run --project security",
     "test:e2e": "playwright test",
     "screenshots": "node scripts/screenshots.mjs",
+    "invite": "node scripts/invite.mjs",
     "smoke": "node scripts/smoke.mjs",
     "db:seed:demo": "tsx scripts/seed-demo.ts",
     "verify": "npm run lint && npm run check && npm run test && npm run test:migrations && npm run test:security && npm run build && npm run build:worker-check",

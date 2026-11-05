@@ -27,4 +27,6 @@ if (args[0] === 'whoami') {
   }
 } else if (process.env.FAKE_WRANGLER_EXIT) {
   process.exitCode = Number(process.env.FAKE_WRANGLER_EXIT);
+} else if (process.env.FAKE_WRANGLER_STDOUT) {
+  process.stdout.write(process.env.FAKE_WRANGLER_STDOUT);
 }

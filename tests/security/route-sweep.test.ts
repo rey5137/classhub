@@ -1,71 +1,11 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { errorBodySchema } from '../../src/lib/contracts/errors';
 import { createLocalDatabase } from '../../src/lib/server/adapters/local/sqlite-database';
 import { seedMembership } from '../fixtures/membership';
 import { createHarness, ORIGIN, type Harness } from '../fixtures/pipeline-harness';
+import { fileRoutes, key, specRoutes, unique } from '../fixtures/route-manifest';
 
-// AC-API-01: the route manifest is every route file under src/routes plus every
-// row of the §11.2 table, so a route is swept before and after it is built.
-
-const PUBLIC = ['GET /health', 'GET /denied'];
-
-interface Route {
-  method: string;
-  path: string;
-  upgrade?: boolean;
-}
-
-function sample(path: string): string {
-  return path.replace(/\[[^\]]+\]|:[a-z]+/gi, 'sample-id');
-}
-
-function fileRoutes(dir = 'src/routes'): Route[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry): Route[] => {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) return fileRoutes(full);
-    const route =
-      '/' +
-      relative('src/routes', dir)
-        .split(sep)
-        .filter((part) => !/^\(.*\)$/.test(part))
-        .join('/');
-    const path = route === '/' ? '/' : route.replace(/\/$/, '');
-    if (entry.name === '+page.svelte') return [{ method: 'GET', path }];
-    if (/^\+server\.(ts|js)$/.test(entry.name)) {
-      const source = readFileSync(full, 'utf8');
-      return [
-        ...source.matchAll(
-          /export\s+(?:async\s+)?(?:function|const)\s+(GET|POST|PUT|PATCH|DELETE)\b/g,
-        ),
-      ].map((match) => ({ method: match[1]!, path }));
-    }
-    return [];
-  });
-}
-
-function specRoutes(): Route[] {
-  const spec = readFileSync('docs/spec/platform/11-api.md', 'utf8');
-  const table = spec.slice(spec.indexOf('## 11.2 Routes'), spec.indexOf('## 11.3'));
-  const routes: Route[] = [];
-  for (const line of table.split('\n')) {
-    const cells = line.split('|').map((cell) => cell.trim());
-    if (cells.length < 4 || !cells[2]?.startsWith('`/')) continue;
-    const paths = [...cells[2].matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
-    for (const method of [...cells[1]!.matchAll(/`([A-Z]+)`( \(upgrade\))?/g)]) {
-      for (const path of paths) routes.push({ method: method[1]!, path, upgrade: !!method[2] });
-    }
-  }
-  return routes;
-}
-
-const manifest = [...fileRoutes(), ...specRoutes()].map((route) => ({
-  ...route,
-  path: sample(route.path),
-}));
-const key = (route: Route) => `${route.method} ${route.path}`;
-const unique = [...new Map(manifest.map((route) => [key(route), route])).values()];
+const PUBLIC = ['GET /health', 'GET /denied', 'GET /locked'];
 
 const database = createLocalDatabase(':memory:', { migrationsDir: 'migrations' });
 let harness: Harness;
@@ -82,7 +22,15 @@ describe('route sweep', () => {
     expect(fileRoutes().length).toBeGreaterThanOrEqual(13);
     expect(specRoutes().length).toBeGreaterThanOrEqual(43);
     expect(unique.map(key)).toEqual(
-      expect.arrayContaining(['GET /api/v1/chat/ws', 'PATCH /api/v1/me', ...PUBLIC]),
+      expect.arrayContaining([
+        'GET /api/v1/chat/ws',
+        'PATCH /api/v1/me',
+        'GET /admin/setup',
+        'POST /admin',
+        'DELETE /api/v1/admin/invites',
+        'PATCH /api/v1/admin/members/sample-id',
+        ...PUBLIC,
+      ]),
     );
   });
 
@@ -121,9 +69,11 @@ describe('route sweep', () => {
     expect(reached).toEqual([]);
   });
 
-  it('AC-API-01 only GET and HEAD of exactly /health and /denied are public', async () => {
+  it('AC-API-01 only GET and HEAD of exactly /health, /denied and /locked are public', async () => {
     const cases: [string, string, number][] = [
       ['GET', '/denied/x', 303],
+      ['GET', '/locked/x', 303],
+      ['POST', '/locked', 403],
       ['GET', '/health/x', 303],
       ['POST', '/denied', 403],
       ['DELETE', '/denied', 403],
@@ -143,9 +93,10 @@ describe('route sweep', () => {
     expect(harness.resolved.splice(0)).toEqual(['HEAD /health']);
   });
 
-  it('AC-API-03 GET /health and /denied answer without identity', async () => {
+  it('AC-API-03 GET /health, /denied and /locked answer without identity', async () => {
     expect((await harness.send('/health')).status).toBe(200);
     expect((await harness.send('/denied')).status).toBe(403);
-    expect(harness.resolved.splice(0)).toEqual(['GET /health', 'GET /denied']);
+    expect((await harness.send('/locked')).status).toBe(200);
+    expect(harness.resolved.splice(0)).toEqual(['GET /health', 'GET /denied', 'GET /locked']);
   });
 });
