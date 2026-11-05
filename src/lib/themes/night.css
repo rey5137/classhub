@@ -1,0 +1,24 @@
+/* R-UI-06: night. Summer night, dark by design; it ignores data-mode. */
+[data-theme='night'] {
+  --font-heading: 'Patrick Hand', 'Be Vietnam Pro', cursive;
+  --font-body: 'Be Vietnam Pro', system-ui, sans-serif;
+
+  --color-bg: #14121f;
+  --color-surface: #1d1a2b;
+  --color-surface-2: #272338;
+  --color-text: #f2e9dc;
+  --color-muted: #a89fb8;
+  --color-accent: #ff8a6b;
+  --color-accent-contrast: #14121f;
+  --color-border: #8a809f;
+  --color-divider: #2e2942;
+  --color-mark: #ffc65c;
+  --color-mark-contrast: #14121f;
+  --color-focus: #ffc65c;
+  --color-danger: #ff8a6b;
+  --color-warning: #ffc65c;
+  --color-success: #7dd3a8;
+  --color-dim: 0.45;
+  --radius-card: 12px;
+  --radius-control: 8px;
+}

@@ -1,0 +1,22 @@
+[data-theme='fixture'] {
+  --font-heading: 'Patrick Hand', 'Be Vietnam Pro', cursive;
+  --font-body: 'Be Vietnam Pro', system-ui, sans-serif;
+  --color-bg: #123456;
+  --color-surface: #1b4b7a;
+  --color-surface-2: #235a8f;
+  --color-text: #f4f8fb;
+  --color-muted: #c3d6e6;
+  --color-accent: #ffd166;
+  --color-accent-contrast: #123456;
+  --color-border: #9fc0da;
+  --color-divider: #2f6a9e;
+  --color-mark: #ef476f;
+  --color-mark-contrast: #ffffff;
+  --color-focus: #ffd166;
+  --color-danger: #ff8fa3;
+  --color-warning: #ffd166;
+  --color-success: #6ee7b7;
+  --color-dim: 0.45;
+  --radius-card: 14px;
+  --radius-control: 10px;
+}

@@ -20,8 +20,10 @@
 - **R-UI-03** **Level C, developer themes:** a new `src/lib/themes/<id>.css` that sets only contract tokens (§10.2)
   under `[data-theme='<id>']`, registered in `src/lib/themes/registry.ts`. Pages are never forked for styling.
 - **R-UI-04** Settings are validated with a strict Zod schema: theme ids from the registry, colours as `#rrggbb`
-  with the accent checked for WCAG AA contrast against the theme's surface in both modes (refused with the measured
-  ratio otherwise), text fields length-bounded. Arbitrary CSS, HTML or JavaScript is never accepted. Disabling a
+  with the accent set per mode (`accent: { light?, dark? }`), each key checked for WCAG AA contrast (4.5:1) against
+  the theme's surface in its own mode (refused with the measured ratio otherwise; a key for a mode the theme does
+  not ship is refused). The server render applies the accent of the rendered mode, and for `system` both, the dark
+  one under `prefers-color-scheme: dark`. Text fields length-bounded. Arbitrary CSS, HTML or JavaScript is never accepted. Disabling a
   feature never deletes its data (R-NAV-02).
 
 ```ts
@@ -67,7 +69,10 @@ export const siteDefaults = {
 - **R-UI-10** All user-visible strings live in message dictionaries `src/lib/i18n/vi.ts` and `en.ts`, keyed by area
   (`nav.`, `home.`, `mem.`, `brd.`, `chat.`, `prof.`, `admin.`, `err.`). A key missing from either locale fails the
   check. The default locale comes from settings (`vi` in the shipped defaults); a member may pick theirs in `/profile`
-  (stored in `localStorage`, `classhub.locale`).
+  (stored in `localStorage`, `classhub.locale`, and mirrored in the first-party `classhub.locale` cookie:
+  `Path=/; Max-Age=31536000; SameSite=Lax`, with `Secure` on HTTPS). The server render reads the cookie and validates
+  it against the known locales; an unknown value uses the site default. The initial dictionary and `<html lang>`
+  use this locale so the chosen language renders before JavaScript runs, without a language flash or hydration mismatch.
 - **R-UI-11** Dates and numbers use `Intl` with the active locale; times show in the viewer's time zone.
 
 ## 10.5 Accessibility
@@ -84,7 +89,7 @@ export const siteDefaults = {
 | AC-UI-01 | Switching theme from `/admin` changes every screen's look and no content or markup | R-UI-01, 03, 08 | e2e DOM snapshot equality across themes |
 | AC-UI-02 | Each theme × mode passes axe with no serious or critical issue on every route at 390 and 1280 px | R-UI-06, 12 | e2e (axe) |
 | AC-UI-03 | Screenshots of every route in each theme × mode at 390 and 1280 px are produced for release review | R-UI-06 | `npm run screenshots` |
-| AC-UI-04 | An accent with contrast under 4.5:1, an unknown theme id and a CSS string are refused | R-UI-04 | unit |
+| AC-UI-04 | A per-mode accent with contrast under 4.5:1 on its own mode's surface, a key for a mode the theme lacks, an unknown theme id and a CSS string are refused | R-UI-04 | unit |
 | AC-UI-05 | No component file contains a raw colour or font stack | R-UI-05 | lint (stylelint rule) |
 | AC-UI-06 | Every i18n key exists in `vi` and `en` | R-UI-10 | unit |
 | AC-UI-07 | A new theme file with only tokens works without touching any component | R-UI-03 | e2e with a fixture theme |
