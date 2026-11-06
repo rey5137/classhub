@@ -508,4 +508,35 @@ export const vi = {
   'info.empty': 'Trang này chưa có nội dung.',
   'info.error.slug_taken': 'Một trang khác đã dùng địa chỉ này.',
   'shell.skip': 'Tới nội dung',
+  'install.title': 'Cài ứng dụng',
+  'install.lede': 'Thêm {name} vào màn hình chính để mở nhanh như một ứng dụng.',
+  'install.installed': 'Ứng dụng đã được cài trên thiết bị này.',
+  'install.prompt': 'Bấm nút bên dưới để cài ứng dụng.',
+  'install.button': 'Cài ứng dụng',
+  'install.ios': 'Bấm nút Chia sẻ của Safari, rồi chọn "Thêm vào Màn hình chính".',
+  'install.androidMenu':
+    'Mở menu của trình duyệt, rồi chọn "Cài đặt ứng dụng" hoặc "Thêm vào màn hình chính".',
+  'install.desktopMenu':
+    'Trên Safari (macOS): Tệp → Thêm vào Dock. Trên Chrome hoặc Edge: bấm biểu tượng cài đặt ở thanh địa chỉ.',
+  'install.unsupported':
+    'Trình duyệt này chưa hỗ trợ cài ứng dụng. Hãy mở trang bằng Chrome, Safari hoặc Edge.',
+  'install.inAppIos':
+    'Đây là trình duyệt trong ứng dụng chat. Mở menu của nó và chọn "Mở bằng Safari", rồi cài từ Safari.',
+  'install.inAppAndroid':
+    'Đây là trình duyệt trong ứng dụng chat. Mở menu của nó và chọn "Mở bằng Chrome", rồi cài từ Chrome.',
+  'install.iosSignIn':
+    'Ứng dụng trên Màn hình chính đăng nhập riêng với Safari: lần đầu mở, bạn cần đăng nhập thêm một lần.',
+  'install.copyLink': 'Sao chép liên kết',
+  'install.copied': 'Đã sao chép liên kết',
+  'install.linkLabel': 'Liên kết của trang',
+  'install.others': 'Hướng dẫn cho thiết bị khác',
+  'install.other.prompt': 'Chrome và Edge (có nút cài đặt)',
+  'install.other.ios': 'iPhone và iPad',
+  'install.other.androidMenu': 'Android',
+  'install.other.inApp': 'Trình duyệt trong Zalo, Messenger, Facebook…',
+  'install.other.desktopMenu': 'Máy tính',
+  'install.card.text': 'Cài ứng dụng để mở lớp nhanh hơn.',
+  'install.card.link': 'Xem cách cài',
+  'install.card.dismiss': 'Để sau',
+  'install.profileLink': 'Cài ứng dụng lên màn hình chính',
 } as const;

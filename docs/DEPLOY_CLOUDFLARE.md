@@ -191,6 +191,24 @@ Rerun `npm run setup` after an update that changes `wrangler.jsonc.example`: it 
 compatibility settings, `assets`) and any new Durable Object binding or migration tag from it, and keeps your own
 values.
 
+## Installable app: manifest and icons (R-NAV-07)
+
+Android's install service fetches `/manifest.webmanifest` and the icons without the member's Access cookie, so both sit
+in an Access **Bypass** application like `/health`: Zero Trust → **Access → Applications → Add an application →
+Self-hosted**, name "Class Hub public", domain = the Worker hostname (and the custom domain, if any), paths
+**`manifest.webmanifest`** and **`icons`**, Policy Action **Bypass**, Include **Everyone**. If you also enable join
+requests (next section), add `join` and `_app` to this same application. The manifest holds the site name, language
+and theme colours only; nothing else under these paths answers without Access. No setup or deploy script creates this
+application (they never write Access applications); a deployment without it still works, but Android Chrome shows a
+browser badge on the installed icon. Check it in a private window: `https://<worker-hostname>/manifest.webmanifest`
+shows the JSON.
+
+**Your own icons.** The default set in `static/icons/` is drawn from `static/favicon.svg`. Either edit `favicon.svg` and
+run `node scripts/render-icons.mjs` (Playwright's Chromium), or replace the four PNGs by hand with the same names and
+sizes: `icon-192.png` (192 px), `icon-512.png` (512 px), `icon-maskable-512.png` (512 px, keep the mark inside the
+centre 80% so a round mask doesn't cut it) and `apple-touch-icon.png` (180 px, opaque). Set the label under the icon
+with `shortName` in `site.config.ts` (otherwise the site name is used). Then `npm run deploy`.
+
 ## Join requests (optional, R-AUTH-27..30)
 
 `/join` is a public form where someone who isn't invited yet can ask to be. It is off until an admin ticks
@@ -205,13 +223,11 @@ Before turning it on:
    `"TURNSTILE_SITE_KEY": "<site key>"` (public; setup keeps it on later runs). Store the secret as a Worker secret:
    `node scripts/cf.mjs secret put TURNSTILE_SECRET_KEY` and paste it when asked (it goes in on stdin, never in a
    file). Then `npm run deploy`. Without both, every request is refused with "try again" and nothing is stored.
-3. **The `/join` bypass.** Like the `/health` bypass (GOOGLE_ACCESS.md section 4): Zero Trust → **Access →
-   Applications → Add an application → Self-hosted**, name "Class Hub public", domain = the Worker hostname (and the
-   custom domain, if any), with two paths: **`join`** and **`_app`** (the public build assets: the page's styles,
-   scripts and fonts, which hold no member data; without them `/join` loads unstyled for someone who isn't signed
-   in). Policy Action **Bypass**, Include **Everyone**. The installable app's manifest and icons (slice 4e) go in this
-   same application. Every other path stays behind the Class Hub application, and the app still answers `/join` only
-   while the setting is on.
+3. **The `/join` bypass.** Like the `/health` bypass (GOOGLE_ACCESS.md section 4): in the "Class Hub public"
+   application already created above (Installable app), add two more paths: **`join`** and **`_app`** (the public
+   build assets: the page's styles, scripts and fonts, which hold no member data; without them `/join` loads
+   unstyled for someone who isn't signed in). Every other path stays behind the Class Hub application, and the app
+   still answers `/join` only while the setting is on.
 4. **Check it.** In a private window open `https://<worker-hostname>/join`: the form, with the Turnstile box. Send a
    request; it shows on `/admin` under "Join requests".
 

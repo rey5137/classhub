@@ -10,6 +10,7 @@
   import { resolve } from '$app/paths';
   import AppShell from '$lib/components/AppShell.svelte';
   import Banner from '$lib/components/Banner.svelte';
+  import { installState } from '$lib/install/state.svelte';
   import { provideI18n } from '$lib/i18n/context';
   import { storeLocale, t as translate, type Locale, type MessageKey } from '$lib/i18n';
   import { isTimeZone, timeZoneCookie } from '$lib/shared/time';
@@ -41,6 +42,7 @@
   });
 
   onMount(() => {
+    installState.start();
     document.documentElement.dataset.locale = locale;
     // R-UI-11: the server renders times in the zone it was told; tell it this browser's when
     // they differ (first visit, a trip, a changed clock) and re-render with it once.

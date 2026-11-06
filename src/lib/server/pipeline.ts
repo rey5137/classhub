@@ -6,6 +6,7 @@ import type { AppContext } from './context';
 import { apiError } from './errors';
 import { disabledFeature, routeKey } from './features';
 import { securityHeaders, staticCsp, withStyleNonce, withTurnstile } from './headers';
+import { ICON_URLS } from '../install/sw-core';
 import { uuidv7 } from './ids';
 import { IdentityError, type VerifiedIdentity } from './ports/identity';
 import { logLine, redact, resolveLogSalt, saltedHash, type LogFields } from './log';
@@ -21,6 +22,9 @@ export const SETUP_PATH = '/admin/setup';
 export const JOIN_PATH = '/join';
 
 // R-API-01: everything else, and any other method on these, needs a verified identity and an active membership.
+const MANIFEST_PATH = '/manifest.webmanifest';
+// R-NAV-07: the install icons (Level B static files) sit in the same Access Bypass application.
+const ICON_PATHS = new Set(ICON_URLS);
 const PUBLIC_PATHS = new Set(['/health', DENIED_PATH, LOCKED_PATH]);
 const PUBLIC_METHODS = new Set(['GET', 'HEAD']);
 // R-AUTH-27: the form page and its post; any other method on /join needs Access.
@@ -199,9 +203,13 @@ async function guard(
     }
   }
 
-  if (PUBLIC_PATHS.has(path) && PUBLIC_METHODS.has(request.method)) {
-    // /locked and /denied wear the admin's theme and language; a failed read keeps the defaults.
-    if (path !== '/health') {
+  // The Bypass paths are matched on the raw pathname: no trailing slash, no variants.
+  const rawPath = event.url.pathname;
+  const bypass = rawPath === MANIFEST_PATH || ICON_PATHS.has(rawPath);
+  if ((PUBLIC_PATHS.has(path) || bypass) && PUBLIC_METHODS.has(request.method)) {
+    // /locked and /denied wear the admin's theme and language, the manifest its name and
+    // colours; a failed read keeps the defaults. Health and icons read nothing.
+    if (path !== '/health' && !ICON_PATHS.has(rawPath)) {
       await options
         .getContext(event)
         .then((context) => loadSiteState(context.database.db))

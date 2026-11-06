@@ -504,4 +504,35 @@ export const en: Record<keyof typeof vi, string> = {
   'info.empty': 'Nothing written here yet.',
   'info.error.slug_taken': 'Another page already uses this address.',
   'shell.skip': 'Skip to content',
+  'install.title': 'Install the app',
+  'install.lede': 'Add {name} to your Home Screen to open it like an app.',
+  'install.installed': 'The app is already installed on this device.',
+  'install.prompt': 'Press the button below to install the app.',
+  'install.button': 'Install app',
+  'install.ios': 'Tap Safari\'s Share button, then choose "Add to Home Screen".',
+  'install.androidMenu':
+    'Open the browser menu, then choose "Install app" or "Add to Home screen".',
+  'install.desktopMenu':
+    'In Safari on macOS: File → Add to Dock. In Chrome or Edge: use the install icon in the address bar.',
+  'install.unsupported':
+    'This browser cannot install the app. Open the page in Chrome, Safari or Edge.',
+  'install.inAppIos':
+    'This is a chat app\'s built-in browser. Open its menu and choose "Open in Safari", then install from Safari.',
+  'install.inAppAndroid':
+    'This is a chat app\'s built-in browser. Open its menu and choose "Open in Chrome", then install from Chrome.',
+  'install.iosSignIn':
+    'The Home Screen app signs in separately from Safari: the first time it opens, sign in once more.',
+  'install.copyLink': 'Copy link',
+  'install.copied': 'Link copied',
+  'install.linkLabel': 'Link to this page',
+  'install.others': 'Steps for other devices',
+  'install.other.prompt': 'Chrome and Edge (with an install button)',
+  'install.other.ios': 'iPhone and iPad',
+  'install.other.androidMenu': 'Android',
+  'install.other.inApp': 'Zalo, Messenger, Facebook… in-app browsers',
+  'install.other.desktopMenu': 'Computer',
+  'install.card.text': 'Install the app to open the class faster.',
+  'install.card.link': 'See how',
+  'install.card.dismiss': 'Not now',
+  'install.profileLink': 'Install the app on your Home Screen',
 };

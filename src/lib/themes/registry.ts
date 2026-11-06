@@ -31,3 +31,9 @@ export function tokensFor(theme: ThemeId, mode: ThemeMode) {
   const resolved = resolveMode(theme, mode);
   return themeTokens[theme][resolved === 'system' ? 'light' : resolved];
 }
+
+/** R-NAV-07: the browser-chrome and splash colour of the active theme (`system` is light). */
+export function themeColorFor(theme: ThemeId, mode: RenderedMode): string {
+  const tokens = tokensFor(theme, mode === 'system' ? 'light' : mode);
+  return (tokens ?? themeTokens[theme].light ?? themeTokens[theme].dark)!.bg;
+}

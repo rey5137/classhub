@@ -1,6 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import Card from '$lib/components/Card.svelte';
+  import InstallCard from '$lib/components/InstallCard.svelte';
   import MarkdownBody from '$lib/components/MarkdownBody.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import PostCard from '$lib/components/PostCard.svelte';
@@ -20,6 +21,8 @@
   const threadMeta = (post: { author: { displayName: string }; commentCount: number }) =>
     `${post.author.displayName} · ${replies(post.commentCount)}`;
 </script>
+
+<InstallCard />
 
 <!-- R-BRD-01: welcome, pinned, reunion, newest photos, active threads, in that order. -->
 <div class="head">

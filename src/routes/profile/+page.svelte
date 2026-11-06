@@ -126,6 +126,8 @@
 
 <PageHeader title={i18n.t('prof.title')} lede={i18n.t('prof.lede')} />
 
+<p class="install-link"><a href={resolve('/install')}>{i18n.t('install.profileLink')}</a></p>
+
 {#snippet visibilityFor(field: Editable)}
   <div class="visibility">
     <label for="visibility-{field}">{i18n.t('prof.visibility')}</label>
@@ -264,6 +266,16 @@
 </div>
 
 <style>
+  .install-link {
+    margin: 0 0 calc(var(--space-unit) * 4);
+  }
+  .install-link a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--color-accent);
+  }
+
   .profile-page,
   .stack {
     display: grid;

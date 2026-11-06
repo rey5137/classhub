@@ -75,7 +75,8 @@ Never turn on Worker-level Access ("Protect all Workers" or a Workers route rule
 1. **Add an application → Self-hosted**, name "Class Hub health", domain = the Worker hostname, **path `health`**.
 2. Policy: Action **Bypass**, Include **Everyone**.
 
-Every other path stays behind the Class Hub application.
+Every other path stays behind the Class Hub application. The installable app's manifest and icons need their own
+bypass paths (DEPLOY_CLOUDFLARE.md, "Installable app").
 
 ## 5. Into the deployment
 

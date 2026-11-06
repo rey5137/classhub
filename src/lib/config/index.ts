@@ -75,6 +75,8 @@ const MAX_IMAGE_BYTES = 25_000_000;
 const siteConfigSchema = z
   .object({
     appName: safeText(60),
+    // R-NAV-07: the label under the installed icon; absent, the site name is used.
+    shortName: safeText(30).optional(),
     name: safeText(80),
     years: safeText(40),
     locale: localeSchema,

@@ -22,6 +22,9 @@ const routes = [
   '/members/member-demo',
   '/info/reunion',
   '/profile',
+  '/install',
+  // Home as an Android phone sees it: the install card needs a coarse pointer (R-NAV-11).
+  '/home-install-card',
   '/admin',
   '/admin/setup',
   '/locked',
@@ -190,11 +193,21 @@ async function run() {
       ? { channel: 'chrome' }
       : {};
   browser = await chromium.launch(launchOptions);
-  const page = await browser.newPage();
+  const desktopPage = await browser.newPage();
+  const phoneContext = await browser.newContext({
+    userAgent:
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+    hasTouch: true,
+    isMobile: true,
+  });
+  const phonePage = await phoneContext.newPage();
 
   for (const route of selectedRoutes) {
-    const target =
-      route === '/members/member-demo'
+    const phone = route === '/home-install-card';
+    const page = phone ? phonePage : desktopPage;
+    const target = phone
+      ? '/'
+      : route === '/members/member-demo'
         ? await demoMemberPath()
         : route === '/memories/photo-demo'
           ? await demoPhotoPath()
@@ -215,6 +228,8 @@ async function run() {
           { timeout: 15_000 },
         );
         await page.locator('h1').first().waitFor({ state: 'visible', timeout: 15_000 });
+        if (phone)
+          await page.locator('.install-card').waitFor({ state: 'visible', timeout: 15_000 });
         await page.evaluate(async () => {
           await Promise.all([
             document.fonts.load('400 34px "Patrick Hand"'),

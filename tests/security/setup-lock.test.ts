@@ -10,7 +10,7 @@ import { key, unique } from '../fixtures/route-manifest';
 // R-AUTH-12: while locked, every route in the manifest answers /locked or `423 locked`
 // for everyone; only the bootstrap admin reaches /admin/setup, and nothing else.
 
-const PUBLIC = ['GET /health', 'GET /denied', 'GET /locked'];
+const PUBLIC = ['GET /health', 'GET /manifest.webmanifest', 'GET /denied', 'GET /locked'];
 const OTHER_ADMIN = {
   id: '01900000-0000-7000-8000-000000000009',
   email: 'second.admin@example.test',

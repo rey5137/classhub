@@ -13,6 +13,7 @@ const routes = [
   MEMBER_DEMO,
   '/info/reunion',
   '/profile',
+  '/install',
   '/admin',
   '/locked',
   '/denied',

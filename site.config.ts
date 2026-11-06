@@ -2,6 +2,8 @@
 // Every service reads this through src/lib/config/ and never re-declares a default.
 export const siteDefaults = {
   appName: 'Class Hub',
+  // R-NAV-07: the label under the installed icon (optional; the site name is used without it).
+  // shortName: 'Class Hub',
   name: 'Our Class',
   years: '20XX–20YY',
   locale: 'vi',

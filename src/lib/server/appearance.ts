@@ -4,7 +4,7 @@ import { siteConfig, validateSiteConfig } from '../config';
 import { LOCALE_STORAGE_KEY, parseLocaleCookie } from '../i18n';
 import { parseTimeZone, TIME_ZONE_COOKIE } from '../shared/time';
 import { accentCss, type AccentConfig } from '../themes/accent';
-import { isThemeId, resolveMode } from '../themes/registry';
+import { isThemeId, resolveMode, themeColorFor } from '../themes/registry';
 import type { RenderedMode, ThemeId } from '../themes/theme-tokens';
 import { defaultSettings } from './services/settings';
 
@@ -15,9 +15,14 @@ const PLACEHOLDER = {
   lang: '%classhub.lang%',
   accent: '%classhub.accent%',
   favicon: '%classhub.favicon%',
+  themeColor: '%classhub.themeColor%',
+  shortName: '%classhub.shortName%',
 } as const;
 
 const STATIC_FAVICON = '/favicon.svg';
+
+const escapeAttribute = (value: string) =>
+  value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 
 /**
  * R-UI-08: the active theme, mode and accent from the request's settings. The query
@@ -92,13 +97,21 @@ export const appearance: Handle = async ({ event, resolve }) => {
         event.locals.member && faviconMediaId
           ? `/api/v1/media/${faviconMediaId}/image`
           : STATIC_FAVICON;
-      return html
-        .replaceAll(PLACEHOLDER.theme, theme)
-        .replaceAll(PLACEHOLDER.mode, mode)
-        .replaceAll(PLACEHOLDER.density, density)
-        .replaceAll(PLACEHOLDER.lang, event.locals.locale)
-        .replaceAll(PLACEHOLDER.accent, accentCss(accent, mode))
-        .replaceAll(PLACEHOLDER.favicon, favicon);
+      // R-NAV-07: the installed app's label and the browser chrome colour, same as the manifest's.
+      const themeColor = themeColorFor(theme, mode);
+      const shortName = siteConfig.shortName ?? event.locals.settings.name;
+      return (
+        html
+          .replaceAll(PLACEHOLDER.themeColor, themeColor)
+          .replaceAll(PLACEHOLDER.theme, theme)
+          .replaceAll(PLACEHOLDER.mode, mode)
+          .replaceAll(PLACEHOLDER.density, density)
+          .replaceAll(PLACEHOLDER.lang, event.locals.locale)
+          .replaceAll(PLACEHOLDER.accent, accentCss(accent, mode))
+          .replaceAll(PLACEHOLDER.favicon, favicon)
+          // Last: the name is free text and must not meet a placeholder replaced after it.
+          .replaceAll(PLACEHOLDER.shortName, escapeAttribute(shortName))
+      );
     },
   });
 };
