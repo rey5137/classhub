@@ -19,6 +19,7 @@ const routes = [
   '/chat',
   '/members',
   '/members/member-demo',
+  '/info/reunion',
   '/profile',
   '/admin',
   '/admin/setup',

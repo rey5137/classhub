@@ -34,7 +34,8 @@ function summary(stdout: string): string {
   return stdout.slice(stdout.indexOf('Class Hub setup is complete:'));
 }
 
-describe('scripts/setup.mjs (R-OPS-04)', () => {
+// Each case spawns setup.mjs (~2 s alone); under the full verify run that exceeds vitest's 5 s default.
+describe('scripts/setup.mjs (R-OPS-04)', { timeout: 30_000 }, () => {
   it('AC-OPS-01 a second run creates nothing, keeps members and settings, and prints the same values', async () => {
     const first = await setup(firstRun);
     expect(first.stderr).toBe('');

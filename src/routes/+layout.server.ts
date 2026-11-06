@@ -3,16 +3,21 @@ import { siteConfig } from '$lib/config';
 import { navHref, type NavArea } from '$lib/nav';
 import { storageWarning } from '$lib/server/services/gallery';
 
-function isVisible(id: NavArea): boolean {
-  if (id === 'home' || id === 'members') return true;
-  return siteConfig.features[id];
-}
-
 export const load: LayoutServerLoad = async ({ locals }) => {
+  const { settings } = locals;
+  // R-NAV-02: a disabled feature leaves the nav; its pages 404 in their own layouts.
+  const isVisible = (id: NavArea) => id === 'home' || id === 'members' || settings.features[id];
   const nav = siteConfig.nav.filter(isVisible).map((id) => ({ id, href: navHref[id] }));
 
   return {
-    site: { name: siteConfig.name, years: siteConfig.years, appName: siteConfig.appName },
+    site: {
+      name: settings.name,
+      years: settings.years,
+      appName: siteConfig.appName,
+      // Site media is private (§7): public pages keep the shipped mark.
+      logoMediaId: locals.member ? settings.logoMediaId : null,
+    },
+    features: settings.features,
     locale: locals.locale,
     theme: locals.theme,
     mode: locals.mode,

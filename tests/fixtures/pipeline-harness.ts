@@ -1,6 +1,7 @@
-import type { RequestEvent } from '@sveltejs/kit';
+import type { Handle, RequestEvent, ResolveOptions } from '@sveltejs/kit';
 import { AccessIdentityProvider } from '../../src/lib/server/adapters/cloudflare/access-identity';
 import type { AppContext } from '../../src/lib/server/context';
+import { appearance, applyAppearance } from '../../src/lib/server/appearance';
 import { createSecurityHandle } from '../../src/lib/server/pipeline';
 import type { Database } from '../../src/lib/server/ports/database';
 import type { ObjectStorage } from '../../src/lib/server/ports/object-storage';
@@ -29,6 +30,7 @@ export interface SendOptions {
   routeId?: string | null;
   isDataRequest?: boolean;
   params?: Record<string, string>;
+  cookies?: Record<string, string>;
 }
 
 export interface Harness {
@@ -59,7 +61,7 @@ export function recordingHub(): RealtimeHub & { disconnected: string[] } {
 /** Stands in for SvelteKit's renderer: a page with a nonced CSP, as nonce mode emits. */
 function render(event: RequestEvent): Response {
   const nonce = crypto.randomUUID();
-  const html = `<!doctype html><html><head><style nonce="${nonce}">#app{display:contents}</style><script nonce="${nonce}">0</script></head><body>${event.url.pathname}</body></html>`;
+  const html = `<!doctype html><html lang="%classhub.lang%" data-theme="%classhub.theme%" data-mode="%classhub.mode%" data-density="%classhub.density%"><head><link rel="icon" href="%classhub.favicon%" /><style nonce="${nonce}">#app{display:contents}%classhub.accent%</style><script nonce="${nonce}">0</script></head><body>${event.url.pathname}</body></html>`;
   return new Response(html, {
     headers: {
       'content-type': 'text/html',
@@ -81,6 +83,8 @@ export async function createHarness(
     /** The pipeline clock (R-AUTH-26). */
     now?: () => number;
     storage?: ObjectStorage;
+    /** R-UI-08: run hooks.server.ts's appearance handle in front, as the app does. */
+    appearance?: boolean;
   } = {},
 ): Promise<Harness> {
   const teamKey = await createTestKey('team-key');
@@ -99,14 +103,23 @@ export async function createHarness(
     ...(options.wsProbe ? { wsProbe: options.wsProbe } : {}),
   };
   const background: Promise<void>[] = [];
-  const handle = createSecurityHandle({
+  const security = createSecurityHandle({
     onHousekeeping: (work) => {
       background.push(work);
     },
     getContext: async () => context,
     production: false,
     ...(options.now ? { now: options.now } : {}),
+    ...(options.appearance ? { onSettings: applyAppearance } : {}),
   });
+  const handle: Handle = options.appearance
+    ? ({ event, resolve }) =>
+        appearance({
+          event,
+          resolve: (inner, opts) =>
+            security({ event: inner, resolve: (last) => resolve(last, opts) }),
+        })
+    : security;
   const resolved: string[] = [];
 
   return {
@@ -136,13 +149,19 @@ export async function createHarness(
         platform: undefined,
         getClientAddress: () => '203.0.113.7',
         setHeaders: () => {},
-        cookies: { get: () => undefined },
+        cookies: { get: (name: string) => sendOptions.cookies?.[name] },
       } as unknown as RequestEvent;
       return handle({
         event,
-        resolve: async (resolvedEvent: RequestEvent) => {
+        resolve: async (resolvedEvent: RequestEvent, opts?: ResolveOptions) => {
           resolved.push(`${resolvedEvent.request.method} ${resolvedEvent.url.pathname}`);
-          return await (options.resolve ?? render)(resolvedEvent);
+          const response = await (options.resolve ?? render)(resolvedEvent);
+          const transform = opts?.transformPageChunk;
+          if (!transform || !response.headers.get('content-type')?.startsWith('text/html')) {
+            return response;
+          }
+          const html = (await transform({ html: await response.text(), done: true })) ?? '';
+          return new Response(html, response);
         },
       });
     },

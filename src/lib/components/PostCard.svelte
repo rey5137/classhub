@@ -32,7 +32,8 @@
   .post {
     display: grid;
     gap: calc(var(--space-unit) * 0.5);
-    padding: calc(var(--space-unit) * 3.5) calc(var(--space-unit) * 5);
+    padding: calc(var(--space-unit) * 3.5 * var(--density))
+      calc(var(--space-unit) * 5 * var(--density));
     border-top: 1px solid var(--color-divider);
   }
 

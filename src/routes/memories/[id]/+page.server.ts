@@ -35,13 +35,14 @@ export const actions: Actions = {
       member,
       { id: params.id },
       { caption: caption || null, ...(albumId === undefined ? {} : { albumId: albumId || null }) },
+      locals.settings.features,
     );
     if (!result.ok) return formFailure('edit', locals, result);
     return { action: 'edit', done: 'saved' };
   },
   delete: async ({ locals, params }) => {
     const { member, context } = guarded(locals);
-    const result = await deletePhoto(context, member, { id: params.id });
+    const result = await deletePhoto(context, member, { id: params.id }, locals.settings.features);
     if (!result.ok) return formFailure('delete', locals, result);
     redirect(303, '/memories');
   },

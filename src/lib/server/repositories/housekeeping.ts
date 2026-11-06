@@ -1,5 +1,6 @@
 import { and, asc, eq, gt, inArray, isNull, lte, notExists, or, sql } from 'drizzle-orm';
-import { media, storageUsage, uploadReservations, users } from '../db/schema';
+import { siteMediaKeys } from '../../contracts/settings';
+import { media, siteSettings, storageUsage, uploadReservations, users } from '../db/schema';
 import { finalKeys } from './media';
 import { uuidv7 } from '../ids';
 import type { Database } from '../ports/database';
@@ -82,6 +83,45 @@ export async function retireOrphanAvatars(database: Database, now: number) {
             .where(
               and(eq(media.mediaType, 'avatar'), orphan, lte(media.createdAt, now - 3_600_000)),
             )
+            .orderBy(asc(media.createdAt))
+            .limit(20),
+        ),
+      ),
+    );
+}
+
+/**
+ * R-UI-01: soft-delete up to 20 live `site` pictures older than a day that no banner, logo
+ * or favicon setting names (an upload whose linking PATCH never landed); R-MEM-20 purges them.
+ * One statement, so a settings write that lands meanwhile keeps its row.
+ */
+export async function retireOrphanSiteMedia(database: Database, now: number) {
+  const orphan = and(
+    isNull(media.deletedAt),
+    notExists(
+      database.db
+        .select({ one: sql`1` })
+        .from(siteSettings)
+        .where(
+          and(
+            inArray(siteSettings.key, [...siteMediaKeys]),
+            sql`${siteSettings.valueJson} = json_quote(${media.id})`,
+          ),
+        ),
+    ),
+  );
+  await database.db
+    .update(media)
+    .set({ deletedAt: now })
+    .where(
+      and(
+        orphan,
+        inArray(
+          media.id,
+          database.db
+            .select({ id: media.id })
+            .from(media)
+            .where(and(eq(media.mediaType, 'site'), orphan, lte(media.createdAt, now - 86_400_000)))
             .orderBy(asc(media.createdAt))
             .limit(20),
         ),

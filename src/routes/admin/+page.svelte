@@ -6,14 +6,14 @@
   import Card from '$lib/components/Card.svelte';
   import FormField from '$lib/components/FormField.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
+  import InfoPagesCard from './InfoPagesCard.svelte';
+  import SiteSettingsCard from './SiteSettingsCard.svelte';
   import { useI18n } from '$lib/i18n/context';
   import type { MessageKey } from '$lib/i18n';
   import type { PageProps } from './$types';
 
   let { data, form }: PageProps = $props();
   const i18n = useI18n();
-
-  const sections = ['admin.settings', 'admin.theme', 'admin.backup'] as const;
 
   // R-AUTH-19: warn from 45 seats, refuse at 50.
   const seatsFull = $derived(data.seats.used >= data.seats.limit);
@@ -61,7 +61,11 @@
       : undefined;
 </script>
 
-<PageHeader title={i18n.t('admin.title')} lede={i18n.t('admin.lede')} />
+<PageHeader title={i18n.t('admin.title')} lede={i18n.t('admin.lede')}>
+  {#snippet actions()}
+    <a href={resolve('/admin/setup')}>{i18n.t('admin.setupLink')}</a>
+  {/snippet}
+</PageHeader>
 
 <div class="stack">
   {#if data.soleAdmin}
@@ -291,15 +295,9 @@
     </Card>
   {/if}
 
-  <p><a href={resolve('/admin/setup')}>{i18n.t('admin.setupLink')}</a></p>
+  <SiteSettingsCard settings={data.settings} themes={data.themes} form={form ?? null} />
 
-  <div class="sections">
-    {#each sections as section (section)}
-      <Card class="section">
-        <h2>{i18n.t(section)}</h2>
-      </Card>
-    {/each}
-  </div>
+  <InfoPagesCard pages={data.infoPages} form={form ?? null} />
 </div>
 
 <style>
@@ -486,20 +484,5 @@
   a {
     color: var(--color-accent);
     font-weight: 600;
-  }
-
-  .sections {
-    display: grid;
-    gap: calc(var(--space-unit) * 3);
-  }
-
-  @media (min-width: 768px) {
-    .sections {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  .sections :global(.section) {
-    padding: calc(var(--space-unit) * 5);
   }
 </style>

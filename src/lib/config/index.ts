@@ -1,18 +1,71 @@
 import { z } from 'zod';
 import { siteDefaults } from '../../../site.config';
-import { contrastRatio, formatRatio } from '../themes/contrast';
+import { contrastRatio, formatRatio, parseHexColor } from '../themes/contrast';
 import { themeIds, themes } from '../themes/registry';
 import { themeTokens, type ThemeId, type ThemeMode } from '../themes/theme-tokens';
 
-const hexColour = z.string().regex(/^#[0-9a-f]{6}$/i, 'Expected a #rrggbb colour');
+// Level B (this file) and Level A (`contracts/settings.ts`, R-UI-01) share these validators.
+export const hexColour = z.string().regex(/^#[0-9a-f]{6}$/i, 'Expected a #rrggbb colour');
 
 // R-UI-04: only plain text reaches a page; CSS, markup and scripts are refused.
-const safeText = (max: number) =>
+export const safeText = (max: number) =>
   z
     .string()
     .min(1)
     .max(max)
     .refine((value) => !/[{}<>]|url\(|expression\(/i.test(value), 'CSS and markup are not allowed');
+
+export const localeSchema = z.enum(['vi', 'en']);
+export const themeIdSchema = z.enum(themeIds as [ThemeId, ...ThemeId[]], {
+  message: 'Unknown theme id',
+});
+export const modeSchema = z.enum(['light', 'dark', 'system']);
+export const accentSchema = z
+  .object({ light: hexColour.optional(), dark: hexColour.optional() })
+  .strict()
+  .nullable();
+export const featuresSchema = z
+  .object({
+    memories: z.boolean(),
+    discussions: z.boolean(),
+    chat: z.boolean(),
+  })
+  .strict();
+
+/**
+ * R-UI-04: the accent is set per mode; each key must clear WCAG AA against its own
+ * mode's surface, and a mode the theme does not ship is refused.
+ */
+export function refineAccent(
+  theme: ThemeId,
+  accent: z.infer<typeof accentSchema> | undefined,
+  ctx: z.RefinementCtx,
+): void {
+  if (!accent) return;
+  const shipped: ThemeMode[] = themes[theme].modes;
+  for (const mode of ['light', 'dark'] as const) {
+    const colour = accent[mode];
+    // A malformed colour already has its format issue; the refinement still runs on it.
+    if (colour === undefined || !parseHexColor(colour)) continue;
+    const surface = shipped.includes(mode) ? themeTokens[theme][mode]?.surface : undefined;
+    if (!surface) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['accent', mode],
+        message: `Theme ${theme} has no ${mode} mode, so a ${mode} accent is refused`,
+      });
+      continue;
+    }
+    const ratio = contrastRatio(colour, surface);
+    if (ratio < 4.5) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['accent', mode],
+        message: `Accent ${colour} measures ${formatRatio(ratio)} against the ${theme} ${mode} surface; 4.5:1 is required`,
+      });
+    }
+  }
+}
 
 // R-MEM-06: uploads stay within the configured per-image ceiling.
 const MAX_IMAGE_BYTES = 25_000_000;
@@ -22,13 +75,10 @@ const siteConfigSchema = z
     appName: safeText(60),
     name: safeText(80),
     years: safeText(40),
-    locale: z.enum(['vi', 'en']),
-    theme: z.enum(themeIds as [ThemeId, ...ThemeId[]], { message: 'Unknown theme id' }),
-    mode: z.enum(['light', 'dark', 'system']),
-    accent: z
-      .object({ light: hexColour.optional(), dark: hexColour.optional() })
-      .strict()
-      .nullable(),
+    locale: localeSchema,
+    theme: themeIdSchema,
+    mode: modeSchema,
+    accent: accentSchema,
     nav: z
       .array(z.enum(['home', 'memories', 'discussions', 'chat', 'members']))
       .min(1)
@@ -37,13 +87,7 @@ const siteConfigSchema = z
     profileFields: z
       .array(z.enum(['city', 'bio', 'contact_email', 'phone', 'messaging_url']))
       .max(16),
-    features: z
-      .object({
-        memories: z.boolean(),
-        discussions: z.boolean(),
-        chat: z.boolean(),
-      })
-      .strict(),
+    features: featuresSchema,
     uploads: z
       .object({
         maxImageBytes: z.number().int().positive().max(MAX_IMAGE_BYTES),
@@ -72,33 +116,7 @@ const siteConfigSchema = z
     messagingHosts: z.array(z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i)).max(20),
   })
   .strict()
-  .superRefine((value, ctx) => {
-    // R-UI-04: the accent is set per mode; each key must clear WCAG AA against its own
-    // mode's surface, and a mode the theme does not ship is refused.
-    if (value.accent === null) return;
-    const shipped: ThemeMode[] = themes[value.theme].modes;
-    for (const mode of ['light', 'dark'] as const) {
-      const colour = value.accent[mode];
-      if (colour === undefined) continue;
-      const surface = shipped.includes(mode) ? themeTokens[value.theme][mode]?.surface : undefined;
-      if (!surface) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['accent', mode],
-          message: `Theme ${value.theme} has no ${mode} mode, so a ${mode} accent is refused`,
-        });
-        continue;
-      }
-      const ratio = contrastRatio(colour, surface);
-      if (ratio < 4.5) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['accent', mode],
-          message: `Accent ${colour} measures ${formatRatio(ratio)} against the ${value.theme} ${mode} surface; 4.5:1 is required`,
-        });
-      }
-    }
-  });
+  .superRefine((value, ctx) => refineAccent(value.theme, value.accent, ctx));
 
 export type SiteConfig = z.infer<typeof siteConfigSchema>;
 

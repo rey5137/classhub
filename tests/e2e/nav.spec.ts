@@ -11,6 +11,7 @@ const routes = [
   '/chat',
   '/members',
   MEMBER_DEMO,
+  '/info/reunion',
   '/profile',
   '/admin',
   '/locked',

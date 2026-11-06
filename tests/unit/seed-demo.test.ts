@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FsObjectStorage } from '../../src/lib/server/adapters/local/fs-storage';
 import { createLocalDatabase } from '../../src/lib/server/adapters/local/sqlite-database';
 import { seedDemo } from '../../src/lib/server/db/seed-demo';
-import { albums, invites, media, storageUsage, users } from '../../src/lib/server/db/schema';
+import {
+  albums,
+  infoPages,
+  invites,
+  media,
+  storageUsage,
+  users,
+} from '../../src/lib/server/db/schema';
 
 let directory: string;
 
@@ -51,6 +58,10 @@ describe('seedDemo', () => {
         const album = albumYears.find((row) => row.id === photo.albumId)!;
         expect(photo.effectiveYear).toBe(album.yearTag ?? photo.takenYear);
       }
+      // R-BRD-02: the demo info pages, once, with the reunion page pinned.
+      const pages = await database.db.select().from(infoPages);
+      expect(pages.map((page) => page.slug).sort()).toEqual(['quy-lop', 'reunion']);
+      expect(pages.find((page) => page.slug === 'reunion')?.isPinned).toBe(true);
     } finally {
       database.close();
     }

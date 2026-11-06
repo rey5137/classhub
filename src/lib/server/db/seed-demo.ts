@@ -6,6 +6,7 @@ import type { ObjectStorage } from '../ports/object-storage';
 import { eq, sql } from 'drizzle-orm';
 import {
   albums,
+  infoPages,
   invites,
   media,
   profileContacts,
@@ -179,6 +180,26 @@ const DEMO_PHOTOS: {
   },
 ];
 
+// R-BRD-02: synthetic class info. `reunion` is the page Home shows as the reunion card.
+const DEMO_INFO = [
+  {
+    slug: 'reunion',
+    title: 'Họp lớp 20 năm',
+    bodyMd:
+      '**Ngày:** thứ Bảy, 18/7\n\n**Địa điểm:** sân trường cũ, cổng chính\n\n- 17:00 đón khách\n- 18:00 ăn tối\n- 20:00 chụp ảnh chung\n\n[Bản đồ](https://maps.example.com/school)',
+    isPinned: true,
+    sortOrder: 0,
+  },
+  {
+    slug: 'quy-lop',
+    title: 'Quỹ lớp',
+    bodyMd:
+      'Quỹ lớp dùng cho buổi họp lớp và thăm thầy cô.\n\n1. Đóng góp tuỳ tâm\n2. Thủ quỹ báo cáo mỗi quý\n\n> Cảm ơn cả lớp!',
+    isPinned: false,
+    sortOrder: 1,
+  },
+];
+
 // D1 caps a statement at 100 bound variables (7 user rows x 13 columns = 91).
 const INSERT_CHUNK = 7;
 
@@ -271,6 +292,13 @@ export async function seedDemo(
   await database.db
     .insert(siteSettings)
     .values({ key: 'setup_state', valueJson: JSON.stringify('unlocked'), updatedAt: now })
+    .onConflictDoNothing();
+
+  await database.db
+    .insert(infoPages)
+    .values(
+      DEMO_INFO.map((page) => ({ id: uuidv7(), ...page, updatedBy: adminId, updatedAt: now })),
+    )
     .onConflictDoNothing();
 
   const photos = await seedPhotos(database, storage, idByEmail, now);

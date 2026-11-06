@@ -7,6 +7,7 @@ import { R2ObjectStorage } from '../../src/lib/server/adapters/cloudflare/r2-sto
 import {
   media,
   schemaMeta,
+  siteSettings,
   storageUsage,
   uploadReservations,
   users,
@@ -16,6 +17,7 @@ import {
   releaseExpired,
   retainedObjectKeys,
   retireOrphanAvatars,
+  retireOrphanSiteMedia,
 } from '../../src/lib/server/repositories/housekeeping';
 import { uuidv7 } from '../../src/lib/server/ids';
 import {
@@ -109,6 +111,48 @@ describe('housekeeping on D1/R2', () => {
       .update(users)
       .set({ avatarMediaId: null })
       .where(eq(users.id, PEOPLE.active.id));
+  });
+
+  it('R-UI-01 a traffic run retires site pictures no setting names after a day, keeping named and recent ones', async () => {
+    const site = (overrides: Partial<typeof media.$inferInsert> = {}) =>
+      seedDeletedMedia(database, {
+        mediaType: 'site',
+        deletedAt: null,
+        createdAt: now - 2 * 86_400_000,
+        ...overrides,
+      });
+    const named = await site();
+    const orphan = await site();
+    const recent = await site({ createdAt: now - 3_600_000 });
+    const photo = await seedDeletedMedia(database, {
+      deletedAt: null,
+      createdAt: now - 2 * 86_400_000,
+    });
+    await database.db
+      .insert(siteSettings)
+      .values({ key: 'logoMediaId', valueJson: JSON.stringify(named.id), updatedAt: now })
+      .onConflictDoUpdate({
+        target: siteSettings.key,
+        set: { valueJson: JSON.stringify(named.id) },
+      });
+    // The CLI run never touches them; the traffic run does.
+    await runner().run(now);
+    const deleted = async (id: string) =>
+      (await database.db.select().from(media).where(eq(media.id, id)))[0]!.deletedAt;
+    expect(await deleted(orphan.id)).toBeNull();
+    await runner().trigger(now);
+    expect(await deleted(orphan.id)).toBe(now);
+    expect(await deleted(named.id)).toBeNull();
+    expect(await deleted(recent.id)).toBeNull();
+    expect(await deleted(photo.id)).toBeNull();
+    // At most 20 per run.
+    for (let n = 0; n < 22; n++) await site();
+    await retireOrphanSiteMedia(database, now + 1);
+    const left = (await database.db.select().from(media).where(eq(media.mediaType, 'site'))).filter(
+      (row) => row.deletedAt === null,
+    );
+    expect(left).toHaveLength(4);
+    await database.db.delete(siteSettings).where(eq(siteSettings.key, 'logoMediaId'));
   });
 
   it('R-MEM-13 retireOrphanAvatars takes at most 20 per run, and a traffic run does it while the CLI run does not', async () => {

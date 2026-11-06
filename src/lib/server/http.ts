@@ -45,8 +45,16 @@ export function toResponse<T>(locals: App.Locals, result: AdminResult<T>): Respo
   });
 }
 
-/** A form action's refusal: its status, a localized sentence and the bad field names. */
-export function formFailure(action: string, locals: App.Locals, result: AdminFailure) {
+/**
+ * A form action's refusal: its status, a localized sentence and the bad field names;
+ * `target` names the row a list form acted on, so only that row shows the error.
+ */
+export function formFailure(
+  action: string,
+  locals: App.Locals,
+  result: AdminFailure,
+  target?: string,
+) {
   const status = { validation: 400, forbidden: 403, not_found: 404, rate_limited: 429 }[
     result.code as 'validation'
   ];
@@ -54,5 +62,6 @@ export function formFailure(action: string, locals: App.Locals, result: AdminFai
     action,
     message: t(locals.locale, result.messageKey ?? `error.${result.code}`),
     fields: result.fields ?? {},
+    ...(target ? { target } : {}),
   });
 }

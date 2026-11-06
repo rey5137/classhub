@@ -7,7 +7,8 @@
   import type { NavArea, NavItem } from '$lib/nav';
 
   interface Props {
-    site: { name: string; years: string };
+    /** `logoMediaId` is set for members only (site media is private, §7). */
+    site: { name: string; years: string; logoMediaId?: string | null };
     nav: NavItem[];
     children: Snippet;
   }
@@ -61,7 +62,11 @@
 
 <header class="top">
   <a class="brand" href={resolve('/')}>
-    <i class="spine" aria-hidden="true"></i>
+    {#if site.logoMediaId}
+      <img class="logo" src="/api/v1/media/{site.logoMediaId}/image" alt="" />
+    {:else}
+      <i class="spine" aria-hidden="true"></i>
+    {/if}
     <b>{site.name}</b>
     <span class="tnum">{site.years}</span>
   </a>
@@ -154,6 +159,14 @@
     height: 30px;
     border-radius: 2px;
     background: var(--color-mark);
+  }
+
+  .logo {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-control);
+    object-fit: cover;
   }
 
   .brand b {

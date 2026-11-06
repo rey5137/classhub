@@ -10,13 +10,20 @@ const channel =
     : {};
 
 const uploadSpecs = /(memories-upload|avatar|memories)\.spec\.ts$/;
+// R-UI-01: these change the site's own settings (theme, feature flags), which every
+// other spec sees, so they run alone after the others and restore what they change.
+const settingsSpecs = /site-settings\.spec\.ts$/;
 
 // R-PLAT-11: e2e runs against dev:offline (local adapters), so no build step is needed.
 export default defineConfig({
   testDir: 'tests/e2e',
   use: { baseURL: 'http://127.0.0.1:5173' },
   projects: [
-    { name: 'chromium', use: { browserName: 'chromium', ...channel }, testIgnore: uploadSpecs },
+    {
+      name: 'chromium',
+      use: { browserName: 'chromium', ...channel },
+      testIgnore: [uploadSpecs, settingsSpecs],
+    },
     // Every worker signs in as the one demo admin, who may hold 2 open uploads (AC-MEM-01),
     // so the specs that upload run in a project limited to one worker.
     {
@@ -24,6 +31,13 @@ export default defineConfig({
       use: { browserName: 'chromium', ...channel },
       testMatch: uploadSpecs,
       workers: 1,
+    },
+    {
+      name: 'chromium-settings',
+      use: { browserName: 'chromium', ...channel },
+      testMatch: settingsSpecs,
+      workers: 1,
+      dependencies: ['chromium', 'chromium-uploads'],
     },
     // Risk 4: Safari can't encode WebP and decodes differently, so the browser encoder
     // (AC-MEM-01, AC-MEM-02) and the avatar crop also run in WebKit.

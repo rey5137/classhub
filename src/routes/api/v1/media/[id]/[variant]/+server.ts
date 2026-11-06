@@ -4,6 +4,6 @@ import { deliverMedia } from '$lib/server/services/media';
 
 export const GET: RequestHandler = async ({ locals, params, request }) => {
   const { member, context } = guarded(locals);
-  const result = await deliverMedia(context, member, params, request);
+  const result = await deliverMedia(context, member, params, request, locals.settings.features);
   return result instanceof Response ? result : toResponse(locals, result);
 };

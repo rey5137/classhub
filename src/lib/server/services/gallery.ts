@@ -13,6 +13,7 @@ import {
   type GalleryItem,
   type GalleryPage,
 } from '../../contracts/media';
+import type { Features } from '../../contracts/settings';
 import type { Member } from '../auth/membership';
 import { can } from '../auth/permissions';
 import type { AppContext } from '../context';
@@ -28,7 +29,13 @@ import {
   updatePhoto,
   type GalleryRow,
 } from '../repositories/gallery';
-import { findAlbum, listAlbumChoices, readStorageUsage } from '../repositories/media';
+import {
+  findAlbum,
+  findLiveMedia,
+  listAlbumChoices,
+  readStorageUsage,
+} from '../repositories/media';
+import { softDeleteUnusedSiteMedia } from '../repositories/settings';
 import { readOperations } from '../repositories/operations';
 import { parse, type AdminFailure, type AdminResult } from './admin';
 import { monthKey } from './operations';
@@ -179,9 +186,11 @@ export async function editPhoto(
   member: Member,
   params: unknown,
   input: unknown,
+  features: Features,
 ): Promise<AdminResult<unknown>> {
   const row = await ownPhoto(context, member, params, 'edit');
-  if (!row) return denied;
+  // R-NAV-02: with memories off a photo answers like an unknown id, so ids can't be probed.
+  if (!row || !features.memories) return denied;
   const parsed = parse(mediaPatchSchema, input);
   if (!parsed.ok) return parsed;
   if (parsed.data.albumId && !(await findAlbum(context.database, parsed.data.albumId)))
@@ -195,10 +204,32 @@ export async function deletePhoto(
   context: AppContext,
   member: Member,
   params: unknown,
+  features: Features,
   now = Date.now(),
 ): Promise<AdminResult<unknown>> {
   const row = await ownPhoto(context, member, params, 'delete');
-  if (!row || !(await softDeletePhoto(context.database, row.id, now))) return denied;
+  // R-NAV-02: a site picture is not the gallery's, so it goes whatever the memories flag.
+  if (!row) return deleteSiteMedia(context, member, params, now);
+  // A gallery photo with memories off answers like an unknown id (no probing).
+  if (!features.memories) return denied;
+  if (!(await softDeletePhoto(context.database, row.id, now))) return denied;
+  return { ok: true, status: 200, body: mediaMutationResponseSchema.parse({ ok: true }) };
+}
+
+/** R-UI-01: an admin removes an unused site picture; one a setting still names is refused. */
+async function deleteSiteMedia(
+  context: AppContext,
+  member: Member,
+  params: unknown,
+  now: number,
+): Promise<AdminResult<unknown>> {
+  const path = parse(mediaIdSchema, params);
+  if (!path.ok || !can(member, 'settings.edit')) return denied;
+  const row = await findLiveMedia(context.database, path.data.id);
+  if (row?.mediaType !== 'site') return denied;
+  if (!(await softDeleteUnusedSiteMedia(context.database, row.id, now))) {
+    return { ok: false, code: 'conflict', messageKey: 'admin.refusal.site_media_in_use' };
+  }
   return { ok: true, status: 200, body: mediaMutationResponseSchema.parse({ ok: true }) };
 }
 

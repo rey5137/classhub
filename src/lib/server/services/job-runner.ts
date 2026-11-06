@@ -8,6 +8,7 @@ import {
   purgeableMedia,
   releaseExpired,
   retireOrphanAvatars,
+  retireOrphanSiteMedia,
 } from '../repositories/housekeeping';
 import { finishYearRewrite } from '../repositories/gallery';
 import { DAY, mediaKeys, reservationKeys } from '../repositories/media';
@@ -37,6 +38,8 @@ export class JobRunner {
       await this.run(now, operations);
       // Traffic only: the CLI's REST write allow-list has no such statement (R-MEM-13).
       await retireOrphanAvatars(this.context.database, now);
+      // Traffic only: a site picture whose linking settings PATCH never landed (R-UI-01).
+      await retireOrphanSiteMedia(this.context.database, now);
       // Traffic only, bounded to one chunk: finishes an interrupted album year rewrite (R-MEM-14).
       await finishYearRewrite(this.context.database);
     } finally {

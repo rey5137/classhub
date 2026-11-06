@@ -97,7 +97,7 @@ const json = (body: unknown): RequestInit => ({
 /** Uploads one encoded picture and answers its media id; `progress` runs from 0 to 1. */
 export async function uploadEncoded(
   encoded: Encoded,
-  purpose: 'photo' | 'avatar',
+  purpose: 'photo' | 'avatar' | 'site',
   fields: CompleteFields,
   progress: (fraction: number) => void = () => undefined,
 ): Promise<string> {

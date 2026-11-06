@@ -10,6 +10,7 @@ import {
   reservationSchema,
   type MediaVariant,
 } from '../../contracts/media';
+import type { Features } from '../../contracts/settings';
 import type { Member } from '../auth/membership';
 import { can } from '../auth/permissions';
 import type { AppContext } from '../context';
@@ -37,6 +38,7 @@ const forbidden: AdminFailure = { ok: false, code: 'forbidden' };
 const conflict: AdminFailure = { ok: false, code: 'conflict' };
 const invalid: AdminFailure = { ok: false, code: 'validation' };
 const notFound: AdminFailure = { ok: false, code: 'not_found' };
+const memoriesDisabled: AdminFailure = { ok: false, code: 'feature_disabled' };
 class InvalidImage extends Error {}
 
 /** R-MEM-08: sniff before forwarding any byte, keeping only the signature across chunks. */
@@ -131,12 +133,15 @@ export async function createReservation(
   context: AppContext,
   member: Member,
   input: unknown,
+  features: Features,
   now = Date.now(),
 ): Promise<AdminResult<unknown>> {
   if (!can(member, 'content.create')) return forbidden;
   const parsed = parse(reservationSchema, input);
   if (!parsed.ok) return parsed;
   if (parsed.data.purpose === 'site' && !can(member, 'settings.edit')) return forbidden;
+  // R-NAV-02: this route also takes avatars and site media; only a gallery photo is memories'.
+  if (parsed.data.purpose === 'photo' && !features.memories) return memoriesDisabled;
   const limited = await uploadLimited(context.database, member.id, parsed.data.purpose, now);
   if (limited) return uploadRefusal(context, member, limited, now);
   const row = await reserve(context.database, member.id, parsed.data, now);
@@ -272,12 +277,16 @@ export async function deliverMedia(
   member: Member,
   params: unknown,
   request: Request,
+  features: Features,
 ): Promise<Response | AdminFailure> {
   if (!can(member, 'content.read')) return forbidden;
   const parsed = parse(mediaPathSchema, params);
   if (!parsed.ok) return parsed;
   const row = await findLiveMedia(context.database, parsed.data.id);
   if (!row || !mediaMimeSchema.safeParse(row.mimeType).success) return notFound;
+  // R-NAV-02: avatars and site media are served whatever the flag; a gallery photo is not,
+  // and answers like an unknown id so ids can't be probed.
+  if (row.mediaType === 'photo' && !features.memories) return notFound;
   if (row.mediaType === 'avatar' && !(await avatarShownTo(context, member, row))) return notFound;
   const variant = parsed.data.variant;
   const key = variant === 'image' ? row.objectKey : row.thumbKey;

@@ -59,6 +59,12 @@ describe('AC-UI-04 site configuration', () => {
     ).toThrow(/no light mode/);
   });
 
+  it('refuses a malformed accent as a config error, not a contrast crash', () => {
+    expect(() => validateSiteConfig({ ...siteDefaults, accent: { light: '#12345' } })).toThrow(
+      SiteConfigError,
+    );
+  });
+
   it('refuses a bare string accent and unknown accent keys', () => {
     expect(() => validateSiteConfig({ ...siteDefaults, accent: '#1f4f9c' })).toThrow(
       SiteConfigError,

@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import type { SiteSettings } from '$lib/contracts/settings';
 import type { Locale } from '$lib/i18n';
 import type { Member } from '$lib/server/auth/membership';
 import type { AppContext } from '$lib/server/context';
@@ -10,6 +11,10 @@ declare global {
       theme: ThemeId;
       mode: RenderedMode;
       locale: Locale;
+      /** R-UI-01: the effective site settings, read once per request (Level B until the read). */
+      settings: SiteSettings;
+      /** R-AUTH-12: from the same read; false until it happens. */
+      setupUnlocked: boolean;
       /** R-PLAT-01: set by hooks.server.ts only after identity and an active membership. */
       member: Member | null;
       /** The adapters the guard used; set before identity, so only guarded routes read it. */

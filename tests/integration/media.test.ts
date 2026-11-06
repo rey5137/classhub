@@ -14,6 +14,7 @@ import {
   storageUsage,
   uploadReservations,
   profileContacts,
+  siteSettings,
   users,
 } from '../../src/lib/server/db/schema';
 import { uuidv7 } from '../../src/lib/server/ids';
@@ -733,5 +734,74 @@ describe('R-MEM-18 R2 operation estimate', () => {
     await timed.settleHousekeeping();
     expect((await readOperations(database, month)).classB).toBe(1);
     await database.db.delete(r2Operations).where(eq(r2Operations.month, month));
+  });
+});
+
+describe('R-NAV-02 memories turned off', () => {
+  const memoriesOff = () =>
+    database.db
+      .insert(siteSettings)
+      .values({
+        key: 'features',
+        valueJson: JSON.stringify({ ...siteConfig.features, memories: false }),
+      })
+      .onConflictDoUpdate({
+        target: siteSettings.key,
+        set: { valueJson: JSON.stringify({ ...siteConfig.features, memories: false }) },
+      });
+  afterEach(async () => {
+    await database.db.delete(siteSettings).where(eq(siteSettings.key, 'features'));
+    await database.db
+      .update(users)
+      .set({ avatarMediaId: null })
+      .where(eq(users.id, PEOPLE.active.id));
+  });
+
+  it('AC-NAV-04 refuses a photo upload, hides photo bytes like an unknown id; avatars and site media stay served', async () => {
+    const photo = await uploaded();
+    expect((await finish(photo.id)).status).toBe(201);
+    await memoriesOff();
+
+    const refused = await harness.send(root, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify(input()),
+    });
+    expect(refused.status).toBe(404);
+    expect(errorBodySchema.parse(await refused.json()).error.code).toBe('feature_disabled');
+    // A photo answers like an unknown id, so which ids are photos can't be probed.
+    const bytes = await harness.send(`/api/v1/media/${photo.mediaId}/image`, { headers: auth });
+    const unknown = await harness.send(`/api/v1/media/${uuidv7()}/image`, { headers: auth });
+    expect(errorBodySchema.parse(await bytes.json()).error.code).toBe('not_found');
+    expect(bytes.status).toBe(unknown.status);
+
+    const avatar = await uploaded({
+      purpose: 'avatar',
+      width: 512,
+      height: 512,
+      thumbBytes: 0,
+      thumbSha256: digest(new Uint8Array()),
+    });
+    expect((await finish(avatar.id)).status).toBe(201);
+    await database.db
+      .update(users)
+      .set({ avatarMediaId: avatar.mediaId })
+      .where(eq(users.id, PEOPLE.active.id));
+    expect(
+      (await harness.send(`/api/v1/media/${avatar.mediaId}/image`, { headers: auth })).status,
+    ).toBe(200);
+    const admin = await harness.as(PEOPLE.admin.email);
+    const site = await harness.send(root, {
+      method: 'POST',
+      headers: { ...admin, origin: ORIGIN, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...input(), purpose: 'site' }),
+    });
+    expect(site.status).toBe(201);
+
+    // Turned back on, the same photo is served again.
+    await database.db.delete(siteSettings).where(eq(siteSettings.key, 'features'));
+    expect(
+      (await harness.send(`/api/v1/media/${photo.mediaId}/image`, { headers: auth })).status,
+    ).toBe(200);
   });
 });

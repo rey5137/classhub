@@ -18,6 +18,7 @@ import {
 import { uuidv7 } from '../../src/lib/server/ids';
 import type { Database } from '../../src/lib/server/ports/database';
 import { JobRunner } from '../../src/lib/server/services/job-runner';
+import { defaultSettings } from '../../src/lib/server/services/settings';
 import { load as layoutLoad } from '../../src/routes/+layout.server';
 import {
   actions as photoActions,
@@ -377,7 +378,12 @@ describe('photo page edit form (R-MEM-14)', () => {
   const owner = { id: PEOPLE.active.id, role: 'member' } as Member;
 
   it('AC-MEM-03 a caption-only save keeps an album that sorts past the 200 the select lists', async () => {
-    const locals = { member: owner, context: { database } as unknown as AppContext, locale: 'vi' };
+    const locals = {
+      member: owner,
+      context: { database } as unknown as AppContext,
+      locale: 'vi',
+      settings: defaultSettings,
+    };
     // 200 albums named before it, so the photo's own falls outside the select's list.
     for (let start = 0; start < 200; start += 20) {
       await database.db.insert(albums).values(
@@ -429,7 +435,9 @@ describe('storage banner (R-MEM-15)', () => {
         locale: 'vi',
         theme: 'yearbook',
         mode: 'light',
+        settings: defaultSettings,
       },
+      url: new URL('https://classhub.example.test/'),
     } as unknown as Parameters<typeof layoutLoad>[0]) as Promise<{ storageWarning: boolean }>;
   const asMember = { id: PEOPLE.active.id, role: 'member' } as Member;
   const asAdmin = { id: PEOPLE.admin.id, role: 'admin' } as Member;

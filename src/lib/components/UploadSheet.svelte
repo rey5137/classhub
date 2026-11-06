@@ -13,14 +13,19 @@
 
   // §7.1–7.2: pick, encode in the browser, preview the stored copy, then upload one
   // photo at a time. Each photo gets its own caption; album and year carry over.
+  // R-UI-01: `purpose: 'site'` uploads one banner, logo or favicon picture (no caption,
+  // album or year, kept out of the gallery) and hands its id to `onuploaded`.
 
   interface Props {
     open: boolean;
-    albums: { id: string; name: string }[];
+    albums?: { id: string; name: string }[];
+    purpose?: 'photo' | 'site';
+    title?: string;
+    onuploaded?: (mediaId: string) => void;
     onclose: () => void;
   }
 
-  let { open, albums, onclose }: Props = $props();
+  let { open, albums = [], purpose = 'photo', title, onuploaded, onclose }: Props = $props();
   const i18n = useI18n();
 
   type Phase = 'pick' | 'preparing' | 'ready' | 'uploading' | 'stopped' | 'done';
@@ -92,7 +97,7 @@
       if (mine !== run) return;
       setPreview(result);
       phase = 'ready';
-      void focusOn('upload-caption');
+      void focusOn(purpose === 'site' ? 'upload-submit' : 'upload-caption');
     } catch (error) {
       if (mine !== run) return;
       // R-MEM-01: refused here, before any request leaves the browser.
@@ -129,9 +134,19 @@
     progress = 0;
     problem = null;
     try {
-      await uploadEncoded(encoded, 'photo', fields, (fraction) => {
-        if (mine === run) progress = fraction;
-      });
+      const id = await uploadEncoded(
+        encoded,
+        purpose,
+        purpose === 'site' ? {} : fields,
+        (fraction) => {
+          if (mine === run) progress = fraction;
+        },
+      );
+      if (purpose === 'site') {
+        onuploaded?.(id);
+        if (mine === run) close();
+        return;
+      }
       if (mine !== run) {
         // Stored after the sheet closed: the page still has to show it.
         void invalidateAll();
@@ -167,7 +182,7 @@
 
 <Dialog
   {open}
-  title={i18n.t('mem.upload.title')}
+  title={title ?? i18n.t('mem.upload.title')}
   onclose={close}
   oncancel={(event) => {
     // Close is disabled while a photo uploads; Escape follows it.
@@ -185,7 +200,7 @@
           id="upload-files"
           class="visually-hidden"
           type="file"
-          multiple
+          multiple={purpose === 'photo'}
           accept={IMAGE_ACCEPT}
           tabindex="-1"
           aria-hidden="true"
@@ -244,35 +259,42 @@
           void upload();
         }}
       >
-        <FormField
-          id="upload-caption"
-          label={i18n.t('mem.upload.caption')}
-          multiline
-          maxlength={500}
-          bind:value={caption}
-        />
-        {#if albums.length > 0}
-          <div class="field">
-            <label for="upload-album">{i18n.t('mem.upload.album')}</label>
-            <select id="upload-album" bind:value={albumId}>
-              <option value="">{i18n.t('mem.upload.noAlbum')}</option>
-              {#each albums as album (album.id)}
-                <option value={album.id}>{album.name}</option>
-              {/each}
-            </select>
-          </div>
+        {#if purpose === 'photo'}
+          <FormField
+            id="upload-caption"
+            label={i18n.t('mem.upload.caption')}
+            multiline
+            maxlength={500}
+            bind:value={caption}
+          />
+          {#if albums.length > 0}
+            <div class="field">
+              <label for="upload-album">{i18n.t('mem.upload.album')}</label>
+              <select id="upload-album" bind:value={albumId}>
+                <option value="">{i18n.t('mem.upload.noAlbum')}</option>
+                {#each albums as album (album.id)}
+                  <option value={album.id}>{album.name}</option>
+                {/each}
+              </select>
+            </div>
+          {/if}
+          <FormField
+            id="upload-year"
+            label={i18n.t('mem.upload.year')}
+            hint={i18n.t('mem.upload.yearHint')}
+            error={yearInvalid ? i18n.t('mem.upload.yearInvalid') : undefined}
+            inputmode="numeric"
+            maxlength={4}
+            bind:value={year}
+          />
         {/if}
-        <FormField
-          id="upload-year"
-          label={i18n.t('mem.upload.year')}
-          hint={i18n.t('mem.upload.yearHint')}
-          error={yearInvalid ? i18n.t('mem.upload.yearInvalid') : undefined}
-          inputmode="numeric"
-          maxlength={4}
-          bind:value={year}
-        />
         <div class="actions">
-          <Button type="submit" variant="primary" disabled={phase === 'uploading' || yearInvalid}>
+          <Button
+            type="submit"
+            id="upload-submit"
+            variant="primary"
+            disabled={phase === 'uploading' || yearInvalid}
+          >
             {i18n.t('mem.upload.submit')}
           </Button>
           <Button type="button" variant="ghost" disabled={phase === 'uploading'} onclick={next}>

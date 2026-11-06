@@ -1,15 +1,17 @@
 import type { Handle, HandleServerError, RequestEvent } from '@sveltejs/kit';
 import { normalizeEmail, resolveMember } from './auth/membership';
 import { touchLastSeen } from './repositories/users';
-import { isBootstrapAdmin, readSetupUnlocked } from './repositories/settings';
+import { isBootstrapAdmin } from './repositories/settings';
 import type { AppContext } from './context';
 import { apiError } from './errors';
+import { disabledFeature, routeKey } from './features';
 import { securityHeaders, staticCsp, withStyleNonce } from './headers';
 import { uuidv7 } from './ids';
 import { IdentityError } from './ports/identity';
 import { logLine, redact, resolveLogSalt, saltedHash, type LogFields } from './log';
 import { JobRunner } from './services/job-runner';
 import { meterStorage, recordOperations } from './services/operations';
+import { loadSiteState, type SiteState } from './services/settings';
 
 /** R-AUTH-22: JSON and form bodies; uploads (R-MEM-08) and chat frames have their own bounds. */
 export const JSON_BODY_LIMIT = 64 * 1024;
@@ -32,6 +34,8 @@ export interface PipelineOptions {
   now?: () => number;
   /** Observe background work without delaying the response (also on Node). */
   onHousekeeping?: (work: Promise<void>) => void;
+  /** Called once the request's settings are read, before anything is answered (R-UI-08). */
+  onSettings?: (event: RequestEvent) => void;
 }
 
 function pathOf(event: RequestEvent): string {
@@ -192,6 +196,14 @@ async function guard(
   }
 
   if (PUBLIC_PATHS.has(path) && PUBLIC_METHODS.has(request.method)) {
+    // /locked and /denied wear the admin's theme and language; a failed read keeps the defaults.
+    if (path !== '/health') {
+      await options
+        .getContext(event)
+        .then((context) => loadSiteState(context.database.db))
+        .then((state) => applySiteState(event, state, options))
+        .catch(() => {});
+    }
     const response = await resolve(event);
     // R-AUTH-11: the denial page is a 403 for everyone who lands on it.
     if (path === DENIED_PATH && !event.isDataRequest && response.ok) {
@@ -203,13 +215,17 @@ async function guard(
   const context = await options.getContext(event);
   const salt = resolveLogSalt(context.logHashSalt, options.production);
   event.locals.context = context;
+  const { setupUnlocked: unlocked } = applySiteState(
+    event,
+    await loadSiteState(context.database.db),
+    options,
+  );
 
   // R-AUTH-12: without the Access vars nobody, not even the bootstrap admin, gets further.
   if (!context.accessConfigured) {
     log.denied = 'locked';
     return locked(event);
   }
-  const unlocked = await readSetupUnlocked(context.database.db);
 
   let identity: { email: string; subject: string };
   try {
@@ -267,6 +283,18 @@ async function guard(
     );
   } else await touch;
 
+  // R-NAV-02: after membership, admins included. A page GET renders its 404 in the
+  // feature's own layout (`requireFeature`); an API or a form post is refused here.
+  const route = routeKey(event.route.id, path);
+  const api = route.startsWith('/api/');
+  if (
+    disabledFeature(route, event.locals.settings.features) &&
+    (api || !PUBLIC_METHODS.has(request.method))
+  ) {
+    log.denied = 'feature_disabled';
+    return apiError(api ? 'feature_disabled' : 'not_found', errorContext(event));
+  }
+
   // R-MEM-18: every storage call a route makes is counted, then written after it answers.
   const operations = { classA: 0, classB: 0 };
   event.locals.context = { ...context, storage: meterStorage(context.storage, operations) };
@@ -283,6 +311,18 @@ async function guard(
     if (write && waitUntil) waitUntil(write);
     else if (write) await write;
   }
+}
+
+/** R-UI-01: the request's settings on `locals`, then the appearance hook re-resolves from them. */
+function applySiteState(
+  event: RequestEvent,
+  state: SiteState,
+  options: PipelineOptions,
+): SiteState {
+  event.locals.settings = state.settings;
+  event.locals.setupUnlocked = state.setupUnlocked;
+  options.onSettings?.(event);
+  return state;
 }
 
 /** identity → membership → `locals.member`, with the request id, headers and log line (§6). */

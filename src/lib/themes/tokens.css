@@ -47,6 +47,11 @@
   --color-success: #2f7d4f;
 }
 
+/* R-UI-01: the admin's card density, set on <html> by the server render. */
+:root[data-density='compact'] {
+  --density: 0.75;
+}
+
 @media (min-width: 768px) {
   :root {
     --text-display-size: 2.875rem;

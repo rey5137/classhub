@@ -51,7 +51,8 @@
 | `GET` · `PATCH` | `/api/v1/admin/settings` | site settings (§10.1) |
 | `GET` · `POST` · `DELETE` | `/api/v1/admin/invites` | list with Access sync status · invite · revoke |
 | `PATCH` | `/api/v1/admin/members/:id` | role, suspend, reactivate, complete deletion |
-| `POST` · `PATCH` · `DELETE` | `/api/v1/admin/info` | info pages |
+| `POST` | `/api/v1/admin/info` | create an info page (R-BRD-02) |
+| `PATCH` · `DELETE` | `/api/v1/admin/info/:id` | edit, pin, order · delete an info page |
 | `GET` | `/api/v1/admin/usage` | quota, operations estimate, seats, backup and archive status |
 | `POST` | `/api/v1/admin/exports/metadata` | bounded text/metadata export (posts, comments, media metadata; no contacts, no chat) |
 | `GET` | `/health` | R-API-05 |
