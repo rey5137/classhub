@@ -7,7 +7,7 @@ import { apiError } from './errors';
 import { disabledFeature, routeKey } from './features';
 import { securityHeaders, staticCsp, withStyleNonce } from './headers';
 import { uuidv7 } from './ids';
-import { IdentityError } from './ports/identity';
+import { IdentityError, type VerifiedIdentity } from './ports/identity';
 import { logLine, redact, resolveLogSalt, saltedHash, type LogFields } from './log';
 import { JobRunner } from './services/job-runner';
 import { meterStorage, recordOperations } from './services/operations';
@@ -227,7 +227,7 @@ async function guard(
     return locked(event);
   }
 
-  let identity: { email: string; subject: string };
+  let identity: VerifiedIdentity;
   try {
     identity = await context.identity.requireIdentity(request, {
       clientAddress: clientAddress(event),
@@ -258,6 +258,7 @@ async function guard(
     return deny(event);
   }
   event.locals.member = member;
+  event.locals.authUntil = identity.expiresAt;
   log.member = await saltedHash(salt, member.id);
   // R-AUTH-26: best effort; a failed write never denies or slows the request's answer. Behind the
   // Workers runtime it runs under `waitUntil`; without it the caught promise runs in the background.

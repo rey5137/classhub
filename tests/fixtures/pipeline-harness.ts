@@ -78,8 +78,6 @@ export async function createHarness(
     realtime?: RealtimeHub;
     /** R-AUTH-12: false acts as a deployment whose Access vars are missing. */
     accessConfigured?: boolean;
-    /** R-OPS-16: the probe as `WS_PROBE=1` provides it. */
-    wsProbe?: AppContext['wsProbe'];
     /** The pipeline clock (R-AUTH-26). */
     now?: () => number;
     storage?: ObjectStorage;
@@ -100,7 +98,6 @@ export async function createHarness(
     accessConfigured: options.accessConfigured ?? true,
     realtime: options.realtime ?? recordingHub(),
     ...(options.logHashSalt ? { logHashSalt: options.logHashSalt } : {}),
-    ...(options.wsProbe ? { wsProbe: options.wsProbe } : {}),
   };
   const background: Promise<void>[] = [];
   const security = createSecurityHandle({

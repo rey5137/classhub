@@ -17,11 +17,13 @@ export default defineConfig({
         test: {
           name: 'security',
           include: ['tests/security/**/*.test.ts'],
+          exclude: ['tests/security/**/*.workers.test.ts'],
           environment: 'node',
           setupFiles: ['tests/security/setup-log-capture.ts'],
         },
       },
       './vitest.integration.config.ts',
+      './vitest.security-workers.config.ts',
       './vitest.migrations.config.ts',
     ],
   },

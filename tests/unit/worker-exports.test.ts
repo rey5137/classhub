@@ -140,4 +140,13 @@ describe('scripts/check-worker-exports.mjs', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('createLocalDatabase');
   });
+
+  it('AC-PLAT-09 fails when the bundle contains the local chat hub', () => {
+    const result = run(
+      'export { ChatRoom } from "./chat-room.js";\nconst key = Symbol.for("classhub.chat.pendingUpgrades");\n',
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('classhub.chat.pendingUpgrades');
+  });
 });

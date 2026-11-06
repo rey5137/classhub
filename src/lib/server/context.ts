@@ -14,11 +14,6 @@ export interface AppContext {
   realtime: RealtimeHub;
   /** R-AUTH-23: the `LOG_HASH_SALT` secret; unset in dev and tests (see log.ts). */
   logHashSalt?: string;
-  /**
-   * TEMPORARY (R-OPS-16, remove in slice 4a): the WebSocket echo behind
-   * `/__probe/ws`, present only when the Worker var `WS_PROBE` is `"1"`.
-   */
-  wsProbe?: (request: Request) => Promise<Response>;
 }
 
 let localContext: Promise<AppContext> | undefined;

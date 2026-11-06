@@ -61,17 +61,31 @@ sequenceDiagram
   member whose status changed in the meantime. This call is best effort; R-CHAT-16 is what guarantees delivery stops.
 - **R-CHAT-16** **Sockets never outlive authorization.** Every broadcast is authorized in the same D1 batch as the
   insert (R-CHAT-05): `SELECT id FROM users WHERE status = 'active' AND id IN (<connected member ids>)` (at most 50
-  values, under D1's 100-variable limit), plus `site_settings.setup_state` and the chat feature flag (R-NAV-02). The DO
+  values, under D1's 100-variable limit: the sender first, then other connected members; a member beyond the 50 is
+  neither closed nor sent that message), plus `site_settings.setup_state` and the chat feature flag (R-NAV-02). The DO
   broadcasts only to sockets whose member id was returned and closes the others with 4003; if `setup_state` is not
   `unlocked` (R-OPS-11) or chat is off, it closes every socket with 4003 and broadcasts nothing (the message is still
   saved when the sender was authorized). If the authorization read fails, the message is saved and acked but not
-  broadcast; clients catch up with `after=` (R-CHAT-11). Each socket's `authUntil` is checked on every inbound message
-  and a socket past it is closed with 4001 (the client then reloads through Access); no timers are used (R-CHAT-07).
-  So suspension, lock, chat-off and an expired Access session each stop delivery without relying on
-  `disconnectMember`.
+  broadcast (the batch is atomic, so this is a batch that committed but returned unusable authorization rows; a
+  batch that failed is R-CHAT-06's `not_saved`); clients catch up with `after=` (R-CHAT-11). Each socket's `authUntil`
+  is checked on every inbound message and before any frame is sent to it (`message`, `deleted`, `online`; `hello`
+  follows the context check at accept): a socket past it gets nothing and is closed with 4001 (the client then reloads
+  through Access); no timers are used (R-CHAT-07). So suspension, lock, chat-off and an expired Access session each
+  stop delivery without relying on `disconnectMember`.
 - **R-CHAT-17** **No gap at startup.** `hello` carries `lastId`, the newest persisted message id. The client compares it
   with the newest id from its HTTP history load (R-CHAT-10) and fetches `after=<id>` when they differ, so messages
   sent between the history load and the socket opening are not lost.
+- **Frames** (one Zod module, `src/lib/contracts/chat.ts`, shared by both hub adapters and the client). Client → room:
+  `{type:"send", clientNonce, body}` and nothing else (identity is the socket's attachment, never the frame). Room →
+  client: `{type:"hello", online, lastId}` (`lastId` null in an empty room), `{type:"online", online}` on every connect
+  and disconnect, `{type:"ack", clientNonce, message}`, `{type:"message", message}`, `{type:"deleted", id}` after a
+  tombstone (R-CHAT-03), and `{type:"error", code, clientNonce?}` with `code` one of `validation`,
+  `payload_too_large`, `rate_limited`, `not_saved`. A `message` is `{id, createdAt, sender, deleted, body}`, where
+  `sender` is `{id, displayName, avatarMediaId?}` as the projection shows it to every member (R-PROF-04) and a
+  tombstone has `deleted: true` and no `body`. The body limit counts Unicode code points, so an emoji is one
+  character. History (`GET /api/v1/chat/messages`) returns `{items, nextCursor}` oldest first; `nextCursor` is the id
+  to pass as the same `before=`/`after=` for the next page, or null. Close codes: 4003 not authorized, 4001 session
+  expired.
 
 ## 9.3 Client behaviour
 
@@ -128,7 +142,7 @@ sequenceDiagram
 | AC-CHAT-11 | The DO class writes nothing to DO storage | R-CHAT-08 | unit (storage spy) + review |
 | AC-CHAT-12 | After `setup_state` leaves `unlocked`, the next message closes every socket with 4003 and no broadcast is delivered | R-CHAT-16 | integration |
 | AC-CHAT-13 | With chat turned off, the next message closes every socket with 4003 and nothing is broadcast; messages stay stored | R-CHAT-16, R-NAV-02 | integration |
-| AC-CHAT-14 | A socket whose `authUntil` has passed is closed with 4001 on its next message; with the authorization read failing, the message is saved and not broadcast | R-CHAT-16 | integration (fake clock, failing adapter) |
+| AC-CHAT-14 | A socket whose `authUntil` has passed is closed with 4001 on its next message, and receives no broadcast, deletion or presence frame (it is closed with 4001 instead); with the authorization read failing, the message is saved and not broadcast | R-CHAT-16 | integration (fake clock, failing adapter) |
 | AC-CHAT-15 | A message sent between the HTTP history load and the socket open is fetched via `hello.lastId` and `after=` exactly once | R-CHAT-17 | e2e |
 | AC-CHAT-16 | `export-chat` never overwrites an existing archive, refuses to write without an `age` recipient, and `restore --chat` adds only missing rows, skips deleted members' messages and refuses without a verified backup | R-CHAT-14, 15 | unit + integration |
 | AC-CHAT-17 | `prune-chat` deletes in bounded chunks and resumes after an interruption without losing or double-purging rows | R-CHAT-18 | integration |

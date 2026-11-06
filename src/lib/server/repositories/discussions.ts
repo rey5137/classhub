@@ -54,7 +54,7 @@ export interface CommentCursor {
   id: string;
 }
 
-interface AuthorColumns {
+export interface AuthorColumns {
   authorId: string;
   displayName: string;
   status: ProfileOwner['status'];
@@ -65,7 +65,7 @@ interface AuthorColumns {
 }
 
 /** Folds the joined author columns of a selected row into its `author` owner. */
-function withAuthor<T extends AuthorColumns>(row: T) {
+export function withAuthor<T extends AuthorColumns>(row: T) {
   const {
     displayName,
     status,

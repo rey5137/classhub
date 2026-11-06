@@ -266,7 +266,7 @@ successful independent restore. Deploying is not enough.
 **Read:** spec §9, R-AUTH-03, R-AUTH-17, R-PLAT-02.
 
 #### Slice 4a — ChatRoom, handshake and persistence
-- **Covers:** AC-CHAT-02, 03, 04, 05, 06, 11, AC-PLAT-03 (RealtimeHub on both adapters).
+- **Covers:** AC-CHAT-02, 03, 04, 05, 06, 11, 12, 13, 14, AC-PLAT-03 (RealtimeHub on both adapters).
 - The signed context, WS route, ChatRoom with hibernation, conditional idempotent insert, ack/broadcast, presence,
   `disconnectMember`; local `ws` hub adapter; history routes.
 - **Remove the 1d WebSocket probe** (R-OPS-16): `src/routes/__probe/ws/`, `adapters/cloudflare/ws-probe.ts`,

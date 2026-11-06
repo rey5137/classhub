@@ -1,31 +1,7 @@
-import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
-import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { workersProject } from './vitest.workers';
 
-const migrations = await readD1Migrations('migrations');
-
-export default defineConfig({
-  // Route modules import `$lib/…` as SvelteKit resolves it.
-  resolve: { alias: { $lib: fileURLToPath(new URL('./src/lib', import.meta.url)) } },
-  plugins: [
-    cloudflareTest({
-      main: './tests/fixtures/pool-worker.ts',
-      miniflare: {
-        compatibilityDate: '2025-01-01',
-        compatibilityFlags: ['nodejs_compat'],
-        d1Databases: ['DB'],
-        r2Buckets: ['MEDIA'],
-        durableObjects: { CHAT_ROOM: 'ChatRoom' },
-        bindings: { TEST_MIGRATIONS: migrations },
-      },
-    }),
-  ],
-  test: {
-    name: 'integration',
-    include: [
-      'tests/integration/**/*.test.ts',
-      'tests/contract/run-workers.test.ts',
-      'tests/unit/markdown.test.ts',
-    ],
-  },
-});
+export default await workersProject('integration', [
+  'tests/integration/**/*.test.ts',
+  'tests/contract/run-workers.test.ts',
+  'tests/unit/markdown.test.ts',
+]);

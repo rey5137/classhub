@@ -279,12 +279,12 @@ describe('scripts/setup.mjs (R-OPS-04)', { timeout: 30_000 }, () => {
     await setup(firstRun);
     const path = join(dir, 'wrangler.jsonc');
     const config = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
-    // An owner edit with a comment: a WS_PROBE var, a custom-domain route, a second DO tag.
+    // An owner edit with a comment: an owner var, a custom-domain route, a second DO tag.
     writeFileSync(
       path,
       `// edited by hand\n${JSON.stringify({
         ...config,
-        vars: { ...(config.vars as object), ACCESS_AUD: 'aud-kept', WS_PROBE: '1' },
+        vars: { ...(config.vars as object), ACCESS_AUD: 'aud-kept', OWNER_VAR: '1' },
         routes: [{ pattern: 'class.example.test', custom_domain: true }],
         migrations: [
           { tag: 'v1', new_sqlite_classes: ['ChatRoom'] },
@@ -304,7 +304,7 @@ describe('scripts/setup.mjs (R-OPS-04)', { timeout: 30_000 }, () => {
     );
     expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({
       account_id: ACCOUNT,
-      vars: { ACCESS_TEAM_DOMAIN: 'myteam', ACCESS_AUD: 'aud-kept', WS_PROBE: '1' },
+      vars: { ACCESS_TEAM_DOMAIN: 'myteam', ACCESS_AUD: 'aud-kept', OWNER_VAR: '1' },
       routes: [{ pattern: 'class.example.test', custom_domain: true }],
       migrations: [{ tag: 'v1' }, { tag: 'v2' }],
     });

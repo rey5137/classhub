@@ -21,6 +21,6 @@ export function createLocalContext(options: LocalContextOptions = {}): AppContex
     identity: createDevIdentity(options.devMember),
     // The dev identity stands in for Access on loopback (R-PLAT-10).
     accessConfigured: true,
-    realtime: createLocalHub(),
+    realtime: createLocalHub({ database }),
   };
 }

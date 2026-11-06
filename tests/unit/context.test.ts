@@ -46,7 +46,11 @@ describe('createContext', () => {
       context.identity.requireIdentity(new Request('http://127.0.0.1:5173/'), {
         clientAddress: '127.0.0.1',
       }),
-    ).resolves.toEqual({ email: 'admin@example.com', subject: 'dev:admin@example.com' });
+    ).resolves.toEqual({
+      email: 'admin@example.com',
+      subject: 'dev:admin@example.com',
+      expiresAt: expect.any(Number),
+    });
   });
 
   describe('adapter selection with a platform binding (R-PLAT-10)', () => {

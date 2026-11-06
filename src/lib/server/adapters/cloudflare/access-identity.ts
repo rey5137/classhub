@@ -5,7 +5,7 @@ import {
   type JSONWebKeySet,
   type JWTVerifyGetKey,
 } from 'jose';
-import { IdentityError, type IdentityProvider } from '../../ports/identity';
+import { IdentityError, type IdentityProvider, type VerifiedIdentity } from '../../ports/identity';
 
 const JWKS_MAX_AGE_MS = 10 * 60_000;
 const REFETCH_COOLDOWN_MS = 60_000;
@@ -150,7 +150,7 @@ export class AccessIdentityProvider implements IdentityProvider {
     }
   }
 
-  async requireIdentity(request: Request): Promise<{ email: string; subject: string }> {
+  async requireIdentity(request: Request): Promise<VerifiedIdentity> {
     // R-AUTH-05: a missing team domain or AUD means nobody is verified.
     if (!this.issuer || !this.jwks || !this.options.audience) {
       throw new IdentityError('Access is not configured');
@@ -179,6 +179,7 @@ export class AccessIdentityProvider implements IdentityProvider {
     if (typeof payload.sub !== 'string' || !payload.sub) {
       throw new IdentityError('Access assertion has no subject');
     }
-    return { email, subject: payload.sub };
+    // `requiredClaims` made `exp` present and jose checked it is a number.
+    return { email, subject: payload.sub, expiresAt: payload.exp! * 1000 };
   }
 }

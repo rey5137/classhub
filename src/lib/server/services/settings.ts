@@ -1,4 +1,5 @@
 import {
+  FEATURES_KEY,
   settingKeys,
   settingsPatchSchema,
   settingsShape,
@@ -145,7 +146,7 @@ export async function updateSettings(
     const written = await writeSettings(context.database, entries, member.id, now, {
       retire: [...new Set(retire)],
       requireLive: mediaIds,
-      mergePatch: features ? { features } : {},
+      mergePatch: features ? { [FEATURES_KEY]: features } : {},
     });
     // A picture deleted between the check above and the write: nothing was written.
     if (!written) {

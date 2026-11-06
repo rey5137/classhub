@@ -57,9 +57,10 @@ if (!exportedNames(entrySource).has('ChatRoom')) {
   process.exit(1);
 }
 
-// AC-PLAT-02/09: the Worker bundle must not carry the local adapters or the
-// dev identity. `context.ts` imports them only in the dev/offline branch. The
-// dev identity's error text is matched too: string literals survive minification.
+// AC-PLAT-02/09: the Worker bundle must not carry the local adapters (the chat
+// hub included) or the dev identity. `context.ts` imports them only in the
+// dev/offline branch. The dev identity's error text is matched too: string
+// literals survive minification.
 for (const token of [
   'better-sqlite3',
   'DevIdentityProvider',
@@ -67,6 +68,8 @@ for (const token of [
   'FsObjectStorage',
   'createLocalDatabase',
   'node:fs',
+  // The local chat hub's registry key, which survives minification (R-PLAT-10).
+  'classhub.chat.pendingUpgrades',
 ]) {
   if (source.includes(token)) {
     console.error(`check-worker-exports: ${bundlePath} contains ${token}`);

@@ -525,14 +525,6 @@ describe('preflight admin rule and probe (R-OPS-10, R-AUTH-12)', () => {
       expect((await destructive()).check).toBeUndefined();
     });
   });
-
-  it('N2 warns, without failing, while vars.WS_PROBE is set', async () => {
-    expect((await preflight()).some((check) => check.id === 'ws-probe')).toBe(false);
-    writeConfig({ ...config(), vars: { ...(config().vars as object), WS_PROBE: '1' } });
-    const checks = await preflight();
-    expect(checks.find((check) => check.id === 'ws-probe')).toMatchObject({ status: 'warn' });
-    expect(failing(checks)).toEqual([]);
-  });
 });
 
 describe('unlock and lock (R-OPS-11)', () => {

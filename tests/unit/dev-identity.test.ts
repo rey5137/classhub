@@ -38,7 +38,11 @@ describe('DevIdentityProvider', () => {
       const provider = new DevIdentityProvider(member, true);
       await expect(
         provider.requireIdentity(new Request('http://localhost:5173/'), { clientAddress }),
-      ).resolves.toEqual({ email: member, subject: `dev:${member}` });
+      ).resolves.toEqual({
+        email: member,
+        subject: `dev:${member}`,
+        expiresAt: expect.any(Number),
+      });
     },
   );
 
@@ -48,7 +52,11 @@ describe('DevIdentityProvider', () => {
       const provider = new DevIdentityProvider(member, true);
       await expect(
         provider.requireIdentity(new Request(url), { clientAddress: '::1' }),
-      ).resolves.toEqual({ email: member, subject: `dev:${member}` });
+      ).resolves.toEqual({
+        email: member,
+        subject: `dev:${member}`,
+        expiresAt: expect.any(Number),
+      });
     },
   );
 

@@ -40,6 +40,8 @@ export const settingsShape = {
 
 export type SettingKey = keyof typeof settingsShape;
 export const settingKeys = Object.keys(settingsShape) as SettingKey[];
+/** The row holding the feature toggles (R-NAV-02), merged key by key on write. */
+export const FEATURES_KEY = 'features' satisfies SettingKey;
 
 /** The effective settings, `GET /api/v1/admin/settings`; the accent is checked against the theme. */
 export const siteSettingsSchema = z

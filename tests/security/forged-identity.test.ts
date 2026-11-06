@@ -54,6 +54,7 @@ describe('forged identity at the Access adapter', () => {
     await expect(access().requireIdentity(request)).resolves.toEqual({
       email: 'member@example.test',
       subject: 'sub-member',
+      expiresAt: expect.any(Number),
     });
   });
 

@@ -108,6 +108,16 @@ describe('route sweep', () => {
     );
   });
 
+  it('AC-API-01 sweeps every built chat route', () => {
+    expect(fileRoutes().map(key)).toEqual(
+      expect.arrayContaining([
+        'GET /api/v1/chat/ws',
+        'GET /api/v1/chat/messages',
+        'DELETE /api/v1/chat/messages/[id]',
+      ]),
+    );
+  });
+
   it('AC-API-01 every route except GET /health and /denied refuses a request with no identity', async () => {
     const reached: string[] = [];
     for (const route of unique) {

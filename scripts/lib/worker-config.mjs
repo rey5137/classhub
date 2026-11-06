@@ -6,7 +6,7 @@ import { parseJsonc } from './jsonc.mjs';
 // wrangler.jsonc.example. setup owns the account, the name, the D1 and R2
 // bindings and preview URLs; the example owns the release keys (RELEASE_KEYS) and
 // the Durable Object bindings and migration tags it lists, which a rerun appends
-// when missing. Everything an owner added (vars such as WS_PROBE, routes for a
+// when missing. Everything an owner added (vars of their own, routes for a
 // custom domain, extra entries, `workers_dev: false`) is kept.
 
 /** Keys a release may change, so a rerun after an update takes them from the example. */

@@ -89,8 +89,7 @@ npm run unlock       # opens the site to approved members
   every known hostname without a cookie is redirected to `<team>.cloudflareaccess.com` (R-AUTH-02); preview URLs are
   off; the bucket has no public `r2.dev` access and no custom domain (AC-MEM-08); an admin is active (before the first
   unlock: the bootstrap admin has signed in, R-AUTH-12);
-  seats are under 50; a backup exists or the admin is warned none does; the newest GitHub release (R-OPS-13). It warns while the
-  Worker var `WS_PROBE` is set, since the probe's sockets have no frame cap.
+  seats are under 50; a backup exists or the admin is warned none does; the newest GitHub release (R-OPS-13).
 - **R-OPS-11** **`npm run unlock`** runs preflight and sets `setup_state = "unlocked"` only if it passes; `npm run
   lock` sets it back (an emergency switch).
 - **R-OPS-12** **Updates:** the docs' update workflow is `git pull --ff-only` → `npm ci` → `npm run backup` (must

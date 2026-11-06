@@ -258,17 +258,6 @@ export async function runPreflight(deps) {
       : fail('preview', 'preview URLs are not off in wrangler.jsonc.', setupFix),
   );
 
-  // The WebSocket probe is members-only and echo-only, but its sockets have no frame
-  // cap and survive suspension, so it must not outlive the check (docs/DEPLOY_CLOUDFLARE.md).
-  if (config.vars?.WS_PROBE) {
-    checks.push({
-      id: 'ws-probe',
-      status: 'warn',
-      detail: 'vars.WS_PROBE is set in wrangler.jsonc, so /__probe/ws is live.',
-      fix: 'remove WS_PROBE from vars in wrangler.jsonc and npm run deploy again.',
-    });
-  }
-
   // AC-MEM-08: the bucket is reachable only through the Worker.
   const bucket = String(media?.bucket_name ?? '');
   const managed = /** @type {{ enabled?: boolean } | null} */ (

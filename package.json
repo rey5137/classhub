@@ -20,7 +20,7 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:migrations": "node scripts/test-migrations.mjs",
-    "test:security": "vitest run --project security",
+    "test:security": "vitest run --project security --project security-workers",
     "test:e2e": "playwright test",
     "screenshots": "node scripts/screenshots.mjs",
     "setup": "node scripts/setup.mjs",
@@ -51,6 +51,7 @@
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.19.2",
+    "@types/ws": "^8.18.2",
     "drizzle-kit": "^0.31.11",
     "eslint": "^10.14.0",
     "eslint-config-prettier": "^10.1.8",
@@ -67,7 +68,8 @@
     "typescript-eslint": "^8.72.1",
     "vite": "^8.3.6",
     "vitest": "^4.1.12",
-    "wrangler": "^4.157.0"
+    "wrangler": "^4.157.0",
+    "ws": "^8.22.1"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

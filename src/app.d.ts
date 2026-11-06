@@ -19,6 +19,8 @@ declare global {
       setupUnlocked: boolean;
       /** R-PLAT-01: set by hooks.server.ts only after identity and an active membership. */
       member: Member | null;
+      /** R-CHAT-04: the verified session's end (the Access JWT's `exp`), in ms; set with `member`. */
+      authUntil?: number;
       /** The adapters the guard used; set before identity, so only guarded routes read it. */
       context?: AppContext;
       requestId: string;

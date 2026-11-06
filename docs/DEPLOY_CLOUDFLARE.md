@@ -155,7 +155,6 @@ when anything fails:
 | `seats` | fewer than 50 Zero Trust seats are used |
 | `backup` | a verified backup exists (none yet is a **warning**, never a failure) |
 | `destructive-migration` | shown only while a `*_destructive.sql` migration is pending: fails until a verified backup is newer than the last deploy (INV-7) |
-| `ws-probe` | a **warning** only while `WS_PROBE` is still in `vars` (remove it after the WebSocket check) |
 | `release` | information only: the newest GitHub release compared with your version |
 
 `npm run unlock` runs preflight and sets the site to `unlocked` only if everything passes. While you are the only
@@ -239,8 +238,9 @@ identity. Each archive's `RESTORE.md` names the app version and the restore comm
 ## 10. The WebSocket probe (R-OPS-16)
 
 Chat needs a WebSocket through Access. Cloudflare documents that Worker-level Access answers upgrades with `403`; a
-self-hosted application on `workers.dev` is unverified, so slice 1d proves it with a temporary echo before chat is
-built. Do this after the site is unlocked.
+self-hosted application on `workers.dev` is unverified, so slice 1d proved it with a temporary echo before chat was
+built. Slice 4a removed the probe; the steps below record how the check was run, and chat's own socket is
+`/api/v1/chat/ws`.
 
 1. In `wrangler.jsonc`, add `"WS_PROBE": "1"` to `vars`, then `npm run deploy`. (Without it `/__probe/ws` is a 404.)
 2. Open the site in a browser where you are signed in, open DevTools → Console, and paste:
@@ -269,7 +269,7 @@ built. Do this after the site is unlocked.
    ```
 
    **Expected:** a `302` to `<team>.cloudflareaccess.com` (or a `403`), never `101`.
-4. Remove `WS_PROBE` from `vars` and `npm run deploy` again. The probe code itself is removed in slice 4a.
+4. Remove `WS_PROBE` from `vars` and `npm run deploy` again. The probe code itself was removed in slice 4a.
 5. Record the result here:
 
    | Date | Browser | Signed in | Without session | Result |

@@ -1,4 +1,4 @@
-// The real ChatRoom class, so the pool's CHAT_ROOM binding runs it (R-OPS-16 probe).
+// The real ChatRoom class, so the pool's CHAT_ROOM binding runs it (§9.2).
 export { ChatRoom } from '../../src/lib/server/adapters/cloudflare/chat-room';
 
 export default {

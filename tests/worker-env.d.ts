@@ -9,6 +9,7 @@ declare global {
         import('../src/lib/server/adapters/cloudflare/chat-room').ChatRoom
       >;
       TEST_MIGRATIONS: D1Migration[];
+      INTERNAL_CONTEXT_KEY: string;
       EXPECTED_SCHEMA: string;
     }
   }
