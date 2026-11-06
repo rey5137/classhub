@@ -1,4 +1,5 @@
 import type { AppContext } from '../../context';
+import { offlineTurnstile } from '../../services/turnstile';
 import { createDevIdentity } from './dev-identity';
 import { FsObjectStorage } from './fs-storage';
 import { createLocalHub } from './realtime-hub';
@@ -9,6 +10,9 @@ export interface LocalContextOptions {
   objectsDir?: string;
   migrationsDir?: string;
   devMember?: string;
+  /** Unset: Cloudflare's always-pass test keys, answered offline (R-AUTH-27). */
+  turnstileSiteKey?: string;
+  turnstileSecret?: string;
 }
 
 export function createLocalContext(options: LocalContextOptions = {}): AppContext {
@@ -22,5 +26,9 @@ export function createLocalContext(options: LocalContextOptions = {}): AppContex
     // The dev identity stands in for Access on loopback (R-PLAT-10).
     accessConfigured: true,
     realtime: createLocalHub({ database }),
+    turnstile: offlineTurnstile({
+      siteKey: options.turnstileSiteKey,
+      secret: options.turnstileSecret,
+    }),
   };
 }

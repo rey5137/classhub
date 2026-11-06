@@ -3,6 +3,7 @@
   import { afterNavigate } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
+  import { t as translate } from '$lib/i18n';
   import { useI18n } from '$lib/i18n/context';
   import type { NavArea, NavItem } from '$lib/nav';
 
@@ -10,12 +11,15 @@
     /** `logoMediaId` is set for members only (site media is private, §7). */
     site: { name: string; years: string; logoMediaId?: string | null };
     nav: NavItem[];
+    /** R-AUTH-27: a page outside Access (/join): no nav, account menu or link into the members' site. */
+    publicPage?: boolean;
     children: Snippet;
   }
 
-  let { site, nav, children }: Props = $props();
+  let { site, nav, publicPage = false, children }: Props = $props();
 
   const i18n = useI18n();
+  const otherLocale = $derived(i18n.locale === 'vi' ? 'en' : 'vi');
   const pathname = $derived(page.url.pathname);
 
   let account: HTMLDetailsElement | undefined = $state();
@@ -60,70 +64,93 @@
 
 <a class="skip-link" href="#main">{i18n.t('shell.skip')}</a>
 
+{#snippet mark()}
+  {#if site.logoMediaId}
+    <img class="logo" src="/api/v1/media/{site.logoMediaId}/image" alt="" />
+  {:else}
+    <i class="spine" aria-hidden="true"></i>
+  {/if}
+  <b>{site.name}</b>
+  <span class="tnum">{site.years}</span>
+{/snippet}
+
 <header class="top">
-  <a class="brand" href={resolve('/')}>
-    {#if site.logoMediaId}
-      <img class="logo" src="/api/v1/media/{site.logoMediaId}/image" alt="" />
-    {:else}
-      <i class="spine" aria-hidden="true"></i>
-    {/if}
-    <b>{site.name}</b>
-    <span class="tnum">{site.years}</span>
-  </a>
+  {#if publicPage}
+    <span class="brand">{@render mark()}</span>
+  {:else}
+    <a class="brand" href={resolve('/')}>{@render mark()}</a>
+  {/if}
 
-  <nav class="areas" aria-label={i18n.t('shell.areas')}>
-    {#each nav as item (item.id)}
-      <a href={resolve(item.href)} aria-current={isCurrent(item.href) ? 'page' : undefined}>
-        {i18n.t(`nav.${item.id}`)}
-      </a>
-    {/each}
-  </nav>
+  {#if !publicPage}
+    <nav class="areas" aria-label={i18n.t('shell.areas')}>
+      {#each nav as item (item.id)}
+        <a href={resolve(item.href)} aria-current={isCurrent(item.href) ? 'page' : undefined}>
+          {i18n.t(`nav.${item.id}`)}
+        </a>
+      {/each}
+    </nav>
+  {/if}
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <!-- Esc and focusout bubble from the summary and menu controls inside. -->
-  <details class="account" bind:this={account} onkeydown={onKeydown} onfocusout={onFocusout}>
-    <summary aria-label={i18n.t('shell.account')}>
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="8" r="3.4"></circle>
-        <path d="M5 20c.8-3.6 3.6-5.4 7-5.4s6.2 1.8 7 5.4"></path>
-      </svg>
-    </summary>
-    <div class="menu">
-      <a href={resolve('/profile')}>{i18n.t('shell.profile')}</a>
-      <a href={resolve('/admin')}>{i18n.t('shell.admin')}</a>
-      <button type="button" onclick={switchLanguage}>{i18n.t('shell.switchLanguage')}</button>
-    </div>
-  </details>
+  {#if publicPage}
+    <!-- The other language, named in itself: short enough for a 390 px header. -->
+    <button
+      type="button"
+      class="language"
+      lang={otherLocale}
+      aria-label={i18n.t('shell.switchLanguage')}
+      onclick={() => i18n.toggleLocale()}
+    >
+      {translate(otherLocale, 'shell.language')}
+    </button>
+  {:else}
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <!-- Esc and focusout bubble from the summary and menu controls inside. -->
+    <details class="account" bind:this={account} onkeydown={onKeydown} onfocusout={onFocusout}>
+      <summary aria-label={i18n.t('shell.account')}>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="8" r="3.4"></circle>
+          <path d="M5 20c.8-3.6 3.6-5.4 7-5.4s6.2 1.8 7 5.4"></path>
+        </svg>
+      </summary>
+      <div class="menu">
+        <a href={resolve('/profile')}>{i18n.t('shell.profile')}</a>
+        <a href={resolve('/admin')}>{i18n.t('shell.admin')}</a>
+        <button type="button" onclick={switchLanguage}>{i18n.t('shell.switchLanguage')}</button>
+      </div>
+    </details>
+  {/if}
 </header>
 
 <main id="main" tabindex="-1">
   <div class="content">{@render children()}</div>
 </main>
 
-<nav class="tabs" aria-label={i18n.t('shell.areas')}>
-  {#each nav as item (item.id)}
-    <a href={resolve(item.href)} aria-current={isCurrent(item.href) ? 'page' : undefined}>
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d={iconPaths[item.id]}></path>
-      </svg>
-      {i18n.t(`nav.${item.id}`)}
-    </a>
-  {/each}
-</nav>
+{#if !publicPage}
+  <nav class="tabs" aria-label={i18n.t('shell.areas')}>
+    {#each nav as item (item.id)}
+      <a href={resolve(item.href)} aria-current={isCurrent(item.href) ? 'page' : undefined}>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d={iconPaths[item.id]}></path>
+        </svg>
+        {i18n.t(`nav.${item.id}`)}
+      </a>
+    {/each}
+  </nav>
+{/if}
 
 <style>
   .top {
@@ -209,6 +236,22 @@
       color: var(--color-accent);
       box-shadow: inset 0 -2px 0 var(--color-accent);
     }
+  }
+
+  .language {
+    flex: none;
+    margin-left: auto;
+    white-space: nowrap;
+    min-height: 44px;
+    padding: 0 calc(var(--space-unit) * 3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-surface);
+    color: var(--color-accent);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
   }
 
   .account {

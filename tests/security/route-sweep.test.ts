@@ -6,6 +6,8 @@ import { createHarness, ORIGIN, type Harness } from '../fixtures/pipeline-harnes
 import { fileRoutes, key, specRoutes, unique } from '../fixtures/route-manifest';
 
 const PUBLIC = ['GET /health', 'GET /denied', 'GET /locked'];
+// R-AUTH-27: public only while `join` is on; tests/integration/join-requests.test.ts sweeps it.
+const JOIN = ['GET /join', 'POST /join'];
 
 const database = createLocalDatabase(':memory:', { migrationsDir: 'migrations' });
 let harness: Harness;
@@ -108,6 +110,17 @@ describe('route sweep', () => {
     );
   });
 
+  it('AC-API-01 sweeps the join form and the admin join-request routes', () => {
+    expect(fileRoutes().map(key)).toEqual(
+      expect.arrayContaining([
+        ...JOIN,
+        'GET /api/v1/admin/join-requests',
+        'POST /api/v1/admin/join-requests/[id]',
+        'DELETE /api/v1/admin/join-requests/[id]',
+      ]),
+    );
+  });
+
   it('AC-API-01 sweeps every built chat route', () => {
     expect(fileRoutes().map(key)).toEqual(
       expect.arrayContaining([
@@ -121,7 +134,7 @@ describe('route sweep', () => {
   it('AC-API-01 every route except GET /health and /denied refuses a request with no identity', async () => {
     const reached: string[] = [];
     for (const route of unique) {
-      if (PUBLIC.includes(key(route))) continue;
+      if (PUBLIC.includes(key(route)) || JOIN.includes(key(route))) continue;
       const mutating = route.method !== 'GET';
       const response = await harness.send(route.path, {
         method: route.method,

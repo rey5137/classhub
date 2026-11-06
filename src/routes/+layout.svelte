@@ -57,7 +57,7 @@
   });
 </script>
 
-<AppShell site={data.site} nav={data.nav}>
+<AppShell site={data.site} nav={data.nav} publicPage={data.publicPage}>
   <!-- R-MEM-15: admins only; the layout load never reads usage for anyone else. -->
   {#if data.storageWarning}
     <div class="storage">

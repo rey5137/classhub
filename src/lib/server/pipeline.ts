@@ -5,7 +5,7 @@ import { isBootstrapAdmin } from './repositories/settings';
 import type { AppContext } from './context';
 import { apiError } from './errors';
 import { disabledFeature, routeKey } from './features';
-import { securityHeaders, staticCsp, withStyleNonce } from './headers';
+import { securityHeaders, staticCsp, withStyleNonce, withTurnstile } from './headers';
 import { uuidv7 } from './ids';
 import { IdentityError, type VerifiedIdentity } from './ports/identity';
 import { logLine, redact, resolveLogSalt, saltedHash, type LogFields } from './log';
@@ -18,10 +18,13 @@ export const JSON_BODY_LIMIT = 64 * 1024;
 export const DENIED_PATH = '/denied';
 export const LOCKED_PATH = '/locked';
 export const SETUP_PATH = '/admin/setup';
+export const JOIN_PATH = '/join';
 
 // R-API-01: everything else, and any other method on these, needs a verified identity and an active membership.
 const PUBLIC_PATHS = new Set(['/health', DENIED_PATH, LOCKED_PATH]);
 const PUBLIC_METHODS = new Set(['GET', 'HEAD']);
+// R-AUTH-27: the form page and its post; any other method on /join needs Access.
+const JOIN_METHODS = new Set(['GET', 'HEAD', 'POST']);
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 // R-MEM-08: the streamed upload (PUT only) is bounded by the media limits in its own route.
 const UPLOAD_ROUTE = /^\/api\/v1\/media\/reservations\/[^/]+\/[^/]+$/;
@@ -167,7 +170,8 @@ function finalize(event: RequestEvent, original: Response): Response {
   const { headers } = response;
   for (const [name, value] of Object.entries(securityHeaders)) headers.set(name, value);
   const csp = headers.get('content-security-policy');
-  headers.set('content-security-policy', csp ? withStyleNonce(csp) : staticCsp());
+  const policy = csp ? withStyleNonce(csp) : staticCsp();
+  headers.set('content-security-policy', event.locals.joinOpen ? withTurnstile(policy) : policy);
   // R-MEM-17: only a successful private image response may use its media cache policy.
   const mediaResponse =
     /^\/api\/v1\/media\/[^/]+\/(image|thumb)$/.test(pathOf(event)) &&
@@ -225,6 +229,12 @@ async function guard(
   if (!context.accessConfigured) {
     log.denied = 'locked';
     return locked(event);
+  }
+  // R-AUTH-27: past the lock checks (a locked site answers /join as it does every path),
+  // and before any identity is read.
+  if (unlocked && path === JOIN_PATH && JOIN_METHODS.has(request.method)) {
+    // R-AUTH-29: the IP hash must match across isolates, so production needs `LOG_HASH_SALT`.
+    return joinGate(event, resolve, log, options.production ? context.logHashSalt : salt);
   }
 
   let identity: VerifiedIdentity;
@@ -312,6 +322,26 @@ async function guard(
     if (write && waitUntil) waitUntil(write);
     else if (write) await write;
   }
+}
+
+/**
+ * R-AUTH-27: `/join` sits outside Access, and only while the `join` setting is on;
+ * off, both methods answer 404. No identity is read, even when a JWT is sent, so the
+ * page renders as nobody: the site name and the form, no member data or site media.
+ */
+async function joinGate(
+  event: RequestEvent,
+  resolve: Parameters<Handle>[0]['resolve'],
+  log: LogFields,
+  rateSalt: string | undefined,
+): Promise<Response> {
+  if (!event.locals.settings.features.join) {
+    log.denied = 'feature_disabled';
+    return apiError('not_found', errorContext(event));
+  }
+  event.locals.joinOpen = true;
+  event.locals.joinSalt = rateSalt;
+  return (await boundBody(event)) ?? (await resolve(event));
 }
 
 /** R-UI-01: the request's settings on `locals`, then the appearance hook re-resolves from them. */

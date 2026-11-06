@@ -6,6 +6,7 @@ import { createSecurityHandle } from '../../src/lib/server/pipeline';
 import type { Database } from '../../src/lib/server/ports/database';
 import type { ObjectStorage } from '../../src/lib/server/ports/object-storage';
 import type { RealtimeHub } from '../../src/lib/server/ports/realtime';
+import type { TurnstileVerifier } from '../../src/lib/server/services/turnstile';
 import {
   AUDIENCE,
   createTestKey,
@@ -31,6 +32,8 @@ export interface SendOptions {
   isDataRequest?: boolean;
   params?: Record<string, string>;
   cookies?: Record<string, string>;
+  /** The visitor's address (`getClientAddress`); one fixed address otherwise. */
+  clientAddress?: string;
 }
 
 export interface Harness {
@@ -83,6 +86,10 @@ export async function createHarness(
     storage?: ObjectStorage;
     /** R-UI-08: run hooks.server.ts's appearance handle in front, as the app does. */
     appearance?: boolean;
+    /** R-AUTH-27: the `/join` Turnstile check; absent as in a deployment without its keys. */
+    turnstile?: TurnstileVerifier;
+    /** A production build: `LOG_HASH_SALT` must then be set (R-AUTH-23, R-AUTH-29). */
+    production?: boolean;
   } = {},
 ): Promise<Harness> {
   const teamKey = await createTestKey('team-key');
@@ -98,6 +105,7 @@ export async function createHarness(
     accessConfigured: options.accessConfigured ?? true,
     realtime: options.realtime ?? recordingHub(),
     ...(options.logHashSalt ? { logHashSalt: options.logHashSalt } : {}),
+    ...(options.turnstile ? { turnstile: options.turnstile } : {}),
   };
   const background: Promise<void>[] = [];
   const security = createSecurityHandle({
@@ -105,7 +113,7 @@ export async function createHarness(
       background.push(work);
     },
     getContext: async () => context,
-    production: false,
+    production: options.production ?? false,
     ...(options.now ? { now: options.now } : {}),
     ...(options.appearance ? { onSettings: applyAppearance } : {}),
   });
@@ -144,7 +152,7 @@ export async function createHarness(
         isDataRequest: sendOptions.isDataRequest ?? false,
         isSubRequest: false,
         platform: undefined,
-        getClientAddress: () => '203.0.113.7',
+        getClientAddress: () => sendOptions.clientAddress ?? '203.0.113.7',
         setHeaders: () => {},
         cookies: { get: (name: string) => sendOptions.cookies?.[name] },
       } as unknown as RequestEvent;

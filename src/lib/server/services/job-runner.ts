@@ -3,6 +3,7 @@ import type { Database } from '../ports/database';
 import type { ObjectStorage } from '../ports/object-storage';
 import {
   expiredReservations,
+  expireJoinRequests,
   markPurged,
   protectedStagingKeys,
   purgeableMedia,
@@ -35,6 +36,9 @@ export class JobRunner {
     if (!(await claimHousekeeping(this.context.database.db, now))) return;
     const operations = { classA: 0, classB: 0 };
     try {
+      // Traffic only, and first, so a storage failure below never keeps a request past 30 days.
+      // The CLI's REST allow-list never reaches a table holding emails (R-AUTH-29).
+      await expireJoinRequests(this.context.database, now);
       await this.run(now, operations);
       // Traffic only: the CLI's REST write allow-list has no such statement (R-MEM-13).
       await retireOrphanAvatars(this.context.database, now);

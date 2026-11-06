@@ -30,6 +30,7 @@ export const featuresSchema = z
     memories: z.boolean(),
     discussions: z.boolean(),
     chat: z.boolean(),
+    join: z.boolean(),
   })
   .strict();
 
@@ -108,6 +109,11 @@ const siteConfigSchema = z
       .object({
         retainDays: z.number().int().positive().max(3650),
         maxMessages: z.number().int().positive(),
+      })
+      .strict(),
+    join: z
+      .object({
+        maxPending: z.number().int().min(1).max(50),
       })
       .strict(),
     invite: z

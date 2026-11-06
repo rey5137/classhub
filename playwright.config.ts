@@ -17,6 +17,8 @@ const settingsSpecs = /site-settings\.spec\.ts$/;
 const boardSpecs = /board\.spec\.ts$/;
 // chat.spec.ts starts its own dev server (the local hub) over a scratch database (port 5176).
 const chatSpecs = /chat\.spec\.ts$/;
+// join.spec.ts starts its own dev server over a scratch database (port 5177).
+const joinSpecs = /join\.spec\.ts$/;
 
 // R-PLAT-11: e2e runs against dev:offline (local adapters), so no build step is needed.
 export default defineConfig({
@@ -26,7 +28,7 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { browserName: 'chromium', ...channel },
-      testIgnore: [uploadSpecs, settingsSpecs, boardSpecs, chatSpecs],
+      testIgnore: [uploadSpecs, settingsSpecs, boardSpecs, chatSpecs, joinSpecs],
     },
     // Every worker signs in as the one demo admin, who may hold 2 open uploads (AC-MEM-01),
     // so the specs that upload run in a project limited to one worker.
@@ -58,6 +60,13 @@ export default defineConfig({
       testMatch: chatSpecs,
       workers: 1,
       // A stuck socket or server fails the run instead of hanging it.
+      timeout: 120_000,
+    },
+    {
+      name: 'chromium-join',
+      use: { browserName: 'chromium', ...channel },
+      testMatch: joinSpecs,
+      workers: 1,
       timeout: 120_000,
     },
     // Risk 4: Safari can't encode WebP and decodes differently, so the browser encoder

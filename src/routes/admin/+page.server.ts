@@ -9,6 +9,11 @@ import {
   adminPatchMember,
   adminRevokeInvite,
 } from '$lib/server/services/admin';
+import {
+  adminApproveJoinRequest,
+  adminListJoinRequests,
+  adminRejectJoinRequest,
+} from '$lib/server/services/join';
 import { chatOverRetention } from '$lib/server/repositories/chat-archive';
 import { findAuthEmail } from '$lib/server/repositories/users';
 import { siteConfig } from '$lib/config';
@@ -20,7 +25,7 @@ import { updateSettings } from '$lib/server/services/settings';
 import { siteMediaKeys, type Feature, type Features } from '$lib/contracts/settings';
 import { themes } from '$lib/themes/registry';
 
-const featureKeys: Feature[] = ['memories', 'discussions', 'chat'];
+const featureKeys: Feature[] = ['memories', 'discussions', 'chat', 'join'];
 
 // R-NAV-03: the invite screen loads here, after the membership check; R-NAV-05 refuses
 // everyone but admins before any row is read.
@@ -30,9 +35,15 @@ export const load: PageServerLoad = async ({ locals }) => {
   if (!can(member, 'members.manage')) error(403, t(locals.locale, 'error.forbidden'));
   const list = await adminListInvites(context, member);
   if (!list.ok) error(403, t(locals.locale, 'error.forbidden'));
+  const joinQueue = await adminListJoinRequests(context, member);
   return {
     invites: list.body.items,
     seats: list.body.seats,
+    // R-AUTH-30: the queue card; shown while join is on or requests still wait.
+    join: {
+      enabled: locals.settings.features.join,
+      ...(joinQueue.ok ? joinQueue.body : { items: [], full: false }),
+    },
     soleAdmin: (await countActiveAdmins(context.database.db)) < 2,
     selfId: member.id,
     usage: await usageSummary(context, member),
@@ -110,6 +121,20 @@ export const actions: Actions = {
     const result = await adminRevokeInvite(context, member, { id: formText(form, 'id') });
     if (!result.ok) return formFailure('revoke', locals, result);
     return { action: 'revoke', done: 'revoked' };
+  },
+  joinApprove: async ({ locals, request }) => {
+    const { member, context } = guarded(locals);
+    const id = formText(await request.formData(), 'id') ?? '';
+    const result = await adminApproveJoinRequest(context, member, id);
+    if (!result.ok) return formFailure('joinApprove', locals, result, id);
+    return { action: 'joinApprove', done: 'joinApproved' };
+  },
+  joinReject: async ({ locals, request }) => {
+    const { member, context } = guarded(locals);
+    const id = formText(await request.formData(), 'id') ?? '';
+    const result = await adminRejectJoinRequest(context, member, id);
+    if (!result.ok) return formFailure('joinReject', locals, result, id);
+    return { action: 'joinReject', done: 'joinRejected' };
   },
   member: async ({ locals, request }) => {
     const { member, context } = guarded(locals);

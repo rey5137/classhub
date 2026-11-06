@@ -5,6 +5,7 @@ import { createD1Database } from './d1-database';
 import { createR2Storage } from './r2-storage';
 import { createDurableObjectHub } from './realtime-hub';
 import type { ChatRoom } from './chat-room';
+import { siteverifyTurnstile } from '../../services/turnstile';
 
 function stringVar(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
@@ -18,6 +19,8 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
   if (!media) throw new Error('missing R2 binding: MEDIA');
   const teamDomain = stringVar(env.ACCESS_TEAM_DOMAIN);
   const audience = stringVar(env.ACCESS_AUD);
+  const turnstileSiteKey = stringVar(env.TURNSTILE_SITE_KEY)?.trim();
+  const turnstileSecret = stringVar(env.TURNSTILE_SECRET_KEY)?.trim();
   return {
     database: createD1Database(database),
     storage: createR2Storage(media),
@@ -29,5 +32,9 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
       stringVar(env.INTERNAL_CONTEXT_KEY),
     ),
     logHashSalt: stringVar(env.LOG_HASH_SALT),
+    // R-AUTH-27: the site key is a var, the secret a Worker secret; both or no /join submission passes.
+    ...(turnstileSiteKey && turnstileSecret
+      ? { turnstile: siteverifyTurnstile({ siteKey: turnstileSiteKey, secret: turnstileSecret }) }
+      : {}),
   };
 }

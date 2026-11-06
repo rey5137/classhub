@@ -15,7 +15,7 @@ import {
   users,
 } from '../db/schema';
 import { uuidv7 } from '../ids';
-import type { Database, DatabaseHandle } from '../ports/database';
+import type { Database, DatabaseHandle, DatabaseBatch } from '../ports/database';
 import type { RealtimeHub } from '../ports/realtime';
 import { auditInsertWhere } from '../repositories/audit';
 import { deleteAvatarMedia } from '../repositories/profiles';
@@ -66,8 +66,13 @@ function expiryFrom(now: number): number | null {
   return days === null ? null : now + days * DAY;
 }
 
+/** A pending, unexpired invite for `email` (the column is stored normalised). */
+export function pendingInviteFor(email: string, now: number): SQL {
+  return sql`exists (select 1 from ${invites} where ${invites.email} = ${email} and ${invites.status} = 'pending' and (${invites.expiresAt} is null or ${invites.expiresAt} > ${now}))`;
+}
+
 /** R-AUTH-19: active members plus pending, unexpired invites, as one SQL expression. */
-function seatsUsed(now: number): SQL {
+export function seatsUsed(now: number): SQL {
   return sql`((select count(*) from ${users} where ${users.status} = 'active') + (select count(*) from ${invites} where ${invites.status} = 'pending' and (${invites.expiresAt} is null or ${invites.expiresAt} > ${now})))`;
 }
 
@@ -147,6 +152,12 @@ export async function inviteMember(
   actor: Member,
   input: { email: string; displayName: string; role: Role },
   now: number = Date.now(),
+  /**
+   * R-AUTH-30: `when` must also hold for the invite write itself (in the same statement as
+   * the seat check); `alongside` adds statements to the same batch, given the invite-is-live
+   * condition. The admin invite screen passes neither.
+   */
+  batch: { when?: SQL; alongside?: (nowLive: SQL) => DatabaseBatch[number][] } = {},
 ): Promise<Outcome<{ inviteId: string; created: boolean }>> {
   const { database } = services;
   const { db } = database;
@@ -166,7 +177,7 @@ export async function inviteMember(
   // R-AUTH-19: the seat check above is advisory; the invite write re-checks it in the
   // same statement, so two concurrent invites cannot both take the last seat. The user
   // row and the audit follow only when the invite is now live.
-  const seatFree = sql`${seatsUsed(now)} < ${SEAT_LIMIT}`;
+  const seatFree = and(sql`${seatsUsed(now)} < ${SEAT_LIMIT}`, batch.when)!;
   const inviteWrite = existing
     ? db
         .update(invites)
@@ -208,6 +219,7 @@ export async function inviteMember(
       inviteWrite,
       userWrite,
       auditInsertWhere(db, event, nowLive),
+      ...(batch.alongside?.(nowLive) ?? []),
     ]);
     if ((written?.changes ?? 0) === 0) return { ok: false, refusal: 'seats_full' };
   } catch (error) {

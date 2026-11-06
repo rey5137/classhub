@@ -191,6 +191,36 @@ Rerun `npm run setup` after an update that changes `wrangler.jsonc.example`: it 
 compatibility settings, `assets`) and any new Durable Object binding or migration tag from it, and keeps your own
 values.
 
+## Join requests (optional, R-AUTH-27..30)
+
+`/join` is a public form where someone who isn't invited yet can ask to be. It is off until an admin ticks
+"Let people ask to join" in `/admin` → Site settings; while off it answers 404. Approving a request on `/admin` adds an
+ordinary invite (then add the email to the Access policy as for any invite); nobody gets in from the form alone.
+Before turning it on:
+
+1. **Turnstile widget.** Cloudflare dashboard (the deployment's account) → **Turnstile → Add widget**: name
+   "Class Hub join", hostname = the Worker hostname (and the custom domain, if any), mode **Managed**. Copy the site
+   key and the secret key.
+2. **Keys into the Worker.** Add the site key to `vars` in `wrangler.jsonc`:
+   `"TURNSTILE_SITE_KEY": "<site key>"` (public; setup keeps it on later runs). Store the secret as a Worker secret:
+   `node scripts/cf.mjs secret put TURNSTILE_SECRET_KEY` and paste it when asked (it goes in on stdin, never in a
+   file). Then `npm run deploy`. Without both, every request is refused with "try again" and nothing is stored.
+3. **The `/join` bypass.** Like the `/health` bypass (GOOGLE_ACCESS.md section 4): Zero Trust → **Access →
+   Applications → Add an application → Self-hosted**, name "Class Hub public", domain = the Worker hostname (and the
+   custom domain, if any), with two paths: **`join`** and **`_app`** (the public build assets: the page's styles,
+   scripts and fonts, which hold no member data; without them `/join` loads unstyled for someone who isn't signed
+   in). Policy Action **Bypass**, Include **Everyone**. The installable app's manifest and icons (slice 4e) go in this
+   same application. Every other path stays behind the Class Hub application, and the app still answers `/join` only
+   while the setting is on.
+4. **Check it.** In a private window open `https://<worker-hostname>/join`: the form, with the Turnstile box. Send a
+   request; it shows on `/admin` under "Join requests".
+
+Locally, `npm run dev:offline` uses Cloudflare's documented test keys (site key `1x00000000000000000000AA`, secret
+`1x0000000000000000000000000000000AA`) and answers them without the network; set `TURNSTILE_SITE_KEY` and
+`TURNSTILE_SECRET_KEY` in the environment to try real keys. Requests nobody answers are deleted after 30 days by the
+traffic housekeeping run; at most 20 (`join.maxPending` in `site.config.ts`, 1–50) wait at once, and never more than
+the free seats.
+
 ## Backups (R-BAK-03, R-BAK-04, R-BAK-05)
 
 One-time preparation:

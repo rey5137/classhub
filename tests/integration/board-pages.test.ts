@@ -266,7 +266,7 @@ describe('Home (R-BRD-01)', () => {
     await seedHome();
     const off = {
       ...defaultSettings,
-      features: { memories: false, discussions: false, chat: true },
+      features: { memories: false, discussions: false, chat: true, join: false },
     };
     const data = await home(member, off, recording);
     expect(data.photos).toBeNull();

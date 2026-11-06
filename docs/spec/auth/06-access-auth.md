@@ -20,7 +20,7 @@
 
 ## 6.2 Verifying identity in the app
 
-- **R-AUTH-03** On every request except `/health`, `/manifest.webmanifest` and `/icons/` (R-NAV-07), `/join` (R-AUTH-27) and static assets, the Access identity adapter reads the
+- **R-AUTH-03** On every request except `/health`, `/manifest.webmanifest` and `/icons/` (R-NAV-07), `/join` (R-AUTH-27) and static assets (the public build assets under `/_app/`, served before the Worker), the Access identity adapter reads the
   `Cf-Access-Jwt-Assertion` header (falling back to the `CF_Authorization` cookie only for the WebSocket upgrade, where
   some clients don't forward the header) and verifies it with `jose`: RS256 signature against the team JWKS
   (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`), `iss` equal to the team domain, `aud` containing the
@@ -130,7 +130,8 @@
 ## 6.8 Join requests
 
 - **R-AUTH-27** **Request to join.** `GET` and `POST /join` sit outside the Access policy (a Bypass Access application, like `/health` and
-  the install manifest and icons, R-NAV-07), and only while the `join` site setting is on (§10.1; default off); off, both
+  the install manifest and icons, R-NAV-07, which also covers the public build assets under `/_app/` so the page
+  loads styled; they carry no member data), and only while the `join` site setting is on (§10.1; default off); off, both
   answer 404. The page shows the site name and a form: name (1–80), email, a note (≤ 300, e.g. "class and year"). It
   renders no member data, no site media and no counts. A submission needs a valid Turnstile token, verified on the
   server; the Turnstile script and frame are allowed in the CSP of `/join` only.
@@ -139,13 +140,16 @@
   pending invite and no pending request creates a `join_requests` row; nothing else is written. The app sends no email.
 - **R-AUTH-29** **Limits.** 3 submissions per IP hash per hour, 20 per hour site-wide. At most `join.maxPending`
   pending requests (Level B, default 20, 1–50) and never more than the free seats (R-AUTH-19: 50 − active members −
-  pending invites). While the queue is full, `/join` shows a closed notice instead of the form (site-wide state; it
-  reveals nothing about any email), stores nothing, and `/admin` shows the queue as full. Housekeeping deletes
-  requests older than 30 days; a rejected one is deleted at once.
+  pending invites). While the queue is full, `/join` shows a closed notice instead of the form (site-wide state),
+  stores nothing, and `/admin` shows the queue as full. Accepted residual signal: when the queue sits one below
+  full, a submission followed by a `GET /join` shows whether that email made a row (closed) or not (open); this
+  needs a near-full queue and costs 3 tries per IP per hour, so it is left as is. The IP hash uses `LOG_HASH_SALT`;
+  a production build without it refuses every submission ("try again"), since per-isolate salts would break the
+  per-IP limit. Housekeeping deletes requests older than 30 days; a rejected one is deleted at once.
 - **R-AUTH-30** **Review.** Admins see pending requests (name, email, note, time) on `/admin`. Approve runs the invite
   path (R-AUTH-08, R-AUTH-18: invite row, Access policy sync or the manual step, the seat count of R-AUTH-19) and
   deletes the request in the same batch; reject deletes it. Both write an `audit_events` row without the email, name
-  or note. Approval activates no one: the first verified login does (R-AUTH-08).
+  or note. Approve refuses (and keeps the request) when the email already has a suspended, active or deleted account, and does nothing once the request was rejected. Approval activates no one: the first verified login does (R-AUTH-08).
 
 ## Acceptance criteria
 

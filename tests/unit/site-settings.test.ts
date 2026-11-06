@@ -76,15 +76,30 @@ describe('effective settings (R-UI-01)', () => {
     const settings = effectiveSettings(
       rows({
         name: JSON.stringify('Lớp 12A'),
-        features: JSON.stringify({ memories: true, discussions: false, chat: true }),
+        features: JSON.stringify({ memories: true, discussions: false, chat: true, join: true }),
         setup_state: JSON.stringify('unlocked'),
       }),
     );
     expect(settings).toEqual({
       ...defaultSettings,
       name: 'Lớp 12A',
-      features: { memories: true, discussions: false, chat: true },
+      features: { memories: true, discussions: false, chat: true, join: true },
     });
+  });
+
+  it('R-UI-01 a toggles row stored before `join` existed keeps its flags; join takes its default', () => {
+    const settings = effectiveSettings(
+      rows({ features: JSON.stringify({ memories: true, discussions: false, chat: false }) }),
+    );
+    expect(settings.features).toEqual({
+      memories: true,
+      discussions: false,
+      chat: false,
+      join: false,
+    });
+    expect(effectiveSettings(rows({ features: JSON.stringify({ chat: 'off' }) })).features).toEqual(
+      defaultSettings.features,
+    );
   });
 
   it('ignores a row that is not JSON or no longer parses', () => {
@@ -132,7 +147,7 @@ describe('feature routes (R-NAV-02)', () => {
   });
 
   it('a route is disabled only while its own flag is off', () => {
-    const features = { memories: true, discussions: false, chat: true };
+    const features = { memories: true, discussions: false, chat: true, join: false };
     expect(disabledFeature('/discussions', features)).toBe('discussions');
     expect(disabledFeature('/memories', features)).toBeNull();
     expect(disabledFeature('/members', features)).toBeNull();

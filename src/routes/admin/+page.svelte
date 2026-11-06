@@ -7,6 +7,7 @@
   import FormField from '$lib/components/FormField.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import InfoPagesCard from './InfoPagesCard.svelte';
+  import JoinRequestsCard from './JoinRequestsCard.svelte';
   import SiteSettingsCard from './SiteSettingsCard.svelte';
   import { useI18n } from '$lib/i18n/context';
   import type { MessageKey } from '$lib/i18n';
@@ -126,6 +127,10 @@
     </form>
     <p class="hint">{i18n.t('admin.inviteHint')}</p>
   </Card>
+
+  {#if data.join.enabled || data.join.items.length > 0}
+    <JoinRequestsCard queue={data.join} {formatDate} />
+  {/if}
 
   <Card class="sheet" aria-labelledby="list-head">
     <div class="head">

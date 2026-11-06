@@ -443,6 +443,7 @@ describe('storage banner (R-MEM-15)', () => {
         settings: defaultSettings,
       },
       url: new URL('https://classhub.example.test/'),
+      route: { id: '/' },
     } as unknown as Parameters<typeof layoutLoad>[0]) as Promise<{ storageWarning: boolean }>;
   const asMember = { id: PEOPLE.active.id, role: 'member' } as Member;
   const asAdmin = { id: PEOPLE.admin.id, role: 'admin' } as Member;

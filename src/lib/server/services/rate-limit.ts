@@ -10,6 +10,9 @@ export const RATE_LIMITS = {
   post: { limit: 10, windowMs: MINUTE },
   profile: { limit: 20, windowMs: HOUR },
   invite: { limit: 30, windowMs: HOUR },
+  // R-AUTH-29: `/join` submissions, per salted IP hash and site-wide (one shared subject).
+  joinIp: { limit: 3, windowMs: HOUR },
+  joinSite: { limit: 20, windowMs: HOUR },
 } as const;
 
 export type RateLimitKind = keyof typeof RATE_LIMITS;
@@ -17,9 +20,10 @@ export type RateLimitKind = keyof typeof RATE_LIMITS;
 export type RateLimitResult = { ok: true } | { ok: false; retryAfterSeconds: number };
 
 /**
- * One event for `memberId` in the `kind` bucket, refused past the limit. The count
- * and the insert are one guarded statement, so concurrent requests cannot both take
- * the last slot; the bucket's expired events are pruned in the same batch (§2).
+ * One event for `memberId` (for `/join`, the IP hash or `site`) in the `kind` bucket,
+ * refused past the limit. The count and the insert are one guarded statement, so
+ * concurrent requests cannot both take the last slot; the bucket's expired events are
+ * pruned in the same batch (§2).
  */
 export async function takeRateLimit(
   database: Database,

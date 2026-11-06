@@ -39,7 +39,7 @@ export type AdminFailure = {
 };
 export type AdminResult<T> = { ok: true; status: number; body: T } | AdminFailure;
 
-const forbidden: AdminFailure = { ok: false, code: 'forbidden' };
+export const forbidden: AdminFailure = { ok: false, code: 'forbidden' };
 
 const refusalKey: Record<Refusal, MessageKey> = {
   not_found: 'error.not_found',
@@ -50,7 +50,7 @@ const refusalKey: Record<Refusal, MessageKey> = {
   wrong_status: 'admin.refusal.wrong_status',
 };
 
-function refused(refusal: Refusal): AdminFailure {
+export function refused(refusal: Refusal): AdminFailure {
   return {
     ok: false,
     code: refusal === 'not_found' ? 'not_found' : 'conflict',

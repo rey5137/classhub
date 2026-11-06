@@ -23,6 +23,10 @@ declare global {
       authUntil?: number;
       /** The adapters the guard used; set before identity, so only guarded routes read it. */
       context?: AppContext;
+      /** R-AUTH-20/27: set on `/join` while join requests are on; only then may its CSP admit Turnstile. */
+      joinOpen?: boolean;
+      /** R-AUTH-29: the stable salt for `/join`'s IP hash; unset in a production build without `LOG_HASH_SALT`. */
+      joinSalt?: string;
       requestId: string;
     }
 

@@ -50,6 +50,19 @@ export function withStyleNonce(csp: string): string {
     .join('; ');
 }
 
+// R-AUTH-24: the one third-party origin, Turnstile's script and frame, on `/join` only.
+export const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
+
+/** R-AUTH-27: `/join`'s policy admits Turnstile's script and frame; nothing else changes. */
+export function withTurnstile(csp: string): string {
+  const directives = csp.split(';').map((directive) => directive.trim());
+  const scripts = directives.findIndex((directive) => /^script-src\s/.test(directive));
+  if (scripts >= 0) directives[scripts] = `${directives[scripts]} ${TURNSTILE_ORIGIN}`;
+  else directives.push(`script-src 'self' ${TURNSTILE_ORIGIN}`);
+  directives.push(`frame-src ${TURNSTILE_ORIGIN}`);
+  return directives.filter(Boolean).join('; ');
+}
+
 export const securityHeaders = {
   'referrer-policy': 'same-origin',
   'x-content-type-options': 'nosniff',

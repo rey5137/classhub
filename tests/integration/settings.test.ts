@@ -110,9 +110,10 @@ const locals = (member: Member, settings: SiteSettings) => ({
 
 /** The root layout's nav, with the settings the pipeline would put on `locals`. */
 async function navFor(member: Member, settings: SiteSettings) {
-  const data = (await layoutLoad({ locals: locals(member, settings) } as unknown as Parameters<
-    typeof layoutLoad
-  >[0])) as { nav: { id: string }[] };
+  const event = { locals: locals(member, settings), route: { id: '/' } };
+  const data = (await layoutLoad(event as unknown as Parameters<typeof layoutLoad>[0])) as {
+    nav: { id: string }[];
+  };
   return data.nav.map((item) => item.id);
 }
 
@@ -349,6 +350,7 @@ describe('site settings API (R-UI-01, R-UI-04)', () => {
       discussions: false,
       memories: false,
       chat: false,
+      join: false,
     });
   });
 
@@ -654,7 +656,7 @@ describe('the /admin settings form (R-UI-01, R-AUTH-17)', () => {
       accent: { dark: '#8cc4ef' },
       density: 'compact',
       locale: 'en',
-      features: { memories: true, discussions: false, chat: true },
+      features: { memories: true, discussions: false, chat: true, join: false },
     };
     expect(await stored()).toEqual(expected);
     expect(locals).toMatchObject({
@@ -677,7 +679,12 @@ describe('the /admin settings form (R-UI-01, R-AUTH-17)', () => {
       action: 'settings',
       done: 'settingsSaved',
     });
-    expect((await stored()).features).toEqual({ memories: false, discussions: true, chat: false });
+    expect((await stored()).features).toEqual({
+      memories: false,
+      discussions: true,
+      chat: false,
+      join: false,
+    });
   });
 
   it("R-UI-01 a save with no flag changed leaves every flag; a changed flag applies; a forged was- is only A's own change", async () => {
@@ -686,10 +693,15 @@ describe('the /admin settings form (R-UI-01, R-AUTH-17)', () => {
     await submit('settings', { ...same, name: 'Tên mới' });
     expect(await stored()).toMatchObject({
       name: 'Tên mới',
-      features: { memories: true, discussions: false, chat: true },
+      features: { memories: true, discussions: false, chat: true, join: false },
     });
     await submit('settings', { ...same, discussions: 'on' });
-    expect((await stored()).features).toEqual({ memories: true, discussions: true, chat: true });
+    expect((await stored()).features).toEqual({
+      memories: true,
+      discussions: true,
+      chat: true,
+      join: false,
+    });
     // Forging was-chat as already off while the box is ticked changes nothing.
     await submit('settings', { ...same, discussions: 'on', 'was-chat': '' });
     expect((await stored()).features.chat).toBe(true);

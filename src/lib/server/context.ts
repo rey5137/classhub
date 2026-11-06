@@ -3,6 +3,7 @@ import type { Database } from './ports/database';
 import type { IdentityProvider } from './ports/identity';
 import type { ObjectStorage } from './ports/object-storage';
 import type { RealtimeHub } from './ports/realtime';
+import type { TurnstileVerifier } from './services/turnstile';
 
 export interface AppContext {
   database: Database;
@@ -14,6 +15,8 @@ export interface AppContext {
   realtime: RealtimeHub;
   /** R-AUTH-23: the `LOG_HASH_SALT` secret; unset in dev and tests (see log.ts). */
   logHashSalt?: string;
+  /** R-AUTH-27: absent while the Turnstile keys are unset, and then no `/join` submission passes. */
+  turnstile?: TurnstileVerifier;
 }
 
 let localContext: Promise<AppContext> | undefined;
@@ -25,6 +28,8 @@ function getLocalContext(): Promise<AppContext> {
       dbFile: process.env.CLASSHUB_DB,
       objectsDir: process.env.CLASSHUB_OBJECTS,
       devMember: process.env.CLASSHUB_DEV_MEMBER,
+      turnstileSiteKey: process.env.TURNSTILE_SITE_KEY,
+      turnstileSecret: process.env.TURNSTILE_SECRET_KEY,
     }),
   );
   return localContext;

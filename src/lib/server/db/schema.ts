@@ -321,6 +321,25 @@ export const rateEvents = sqliteTable(
   (table) => [index('rate_events_bucket_idx').on(table.bucket, table.at)],
 );
 
+// R-AUTH-27..30: pending requests only; approve and reject hard-delete, housekeeping drops them after 30 days.
+export const joinRequests = sqliteTable(
+  'join_requests',
+  {
+    id: text('id').primaryKey(),
+    email: text('email').notNull(),
+    name: text('name').notNull(),
+    note: text('note').notNull().default(''),
+    // A salted hash (R-AUTH-29); the raw address is never stored.
+    ipHash: text('ip_hash').notNull(),
+    createdAt: integer('created_at', { mode: 'number' }).notNull().$defaultFn(now),
+  },
+  (table) => [
+    uniqueIndex('join_requests_email_unique').on(table.email),
+    check('join_requests_email_lower_check', sql`${table.email} = lower(${table.email})`),
+    index('join_requests_created_idx').on(table.createdAt),
+  ],
+);
+
 export const backupRuns = sqliteTable('backup_runs', {
   id: text('id').primaryKey(),
   kind: text('kind').notNull(),

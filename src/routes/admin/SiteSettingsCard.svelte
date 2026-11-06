@@ -50,7 +50,7 @@
   }
 
   const featuresError = $derived(
-    ['features', 'features.memories', 'features.discussions', 'features.chat']
+    ['features', 'features.memories', 'features.discussions', 'features.chat', 'features.join']
       .map(fieldError)
       .find(Boolean),
   );
@@ -259,6 +259,21 @@
         <p id="settings-features-error" class="error">{featuresError}</p>
       {/if}
     </fieldset>
+
+    <!-- R-AUTH-27: the public /join form; off by default. -->
+    <div class="field">
+      <label class="choice">
+        <input
+          type="checkbox"
+          name="join"
+          checked={settings.features.join}
+          aria-describedby="settings-join-hint"
+        />
+        <input type="hidden" name="was-join" value={settings.features.join ? 'on' : ''} />
+        {i18n.t('admin.settings.join')}
+      </label>
+      <p id="settings-join-hint" class="hint">{i18n.t('admin.settings.joinHint')}</p>
+    </div>
 
     <div>
       <Button type="submit" variant="primary">{i18n.t('admin.settings.save')}</Button>

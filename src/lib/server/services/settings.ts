@@ -48,7 +48,15 @@ function storedValue(rows: SettingRows, key: SettingKey): unknown {
   const raw = rows.get(key);
   if (raw === undefined) return undefined;
   try {
-    const parsed = settingsShape[key].safeParse(JSON.parse(raw));
+    // A toggles row written before a flag existed (`join`, R-AUTH-27) keeps its other
+    // flags; the missing one takes its Level B default.
+    const parsed =
+      key === FEATURES_KEY
+        ? settingsShape.features
+            .partial()
+            .transform((stored) => ({ ...defaultSettings.features, ...stored }))
+            .safeParse(JSON.parse(raw))
+        : settingsShape[key].safeParse(JSON.parse(raw));
     return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;

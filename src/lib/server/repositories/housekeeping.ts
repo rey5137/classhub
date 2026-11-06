@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, inArray, isNull, lte, notExists, or, sql } from 'drizzle-orm';
-import { media, storageUsage, uploadReservations, users } from '../db/schema';
-import { finalKeys } from './media';
+import { joinRequests, media, storageUsage, uploadReservations, users } from '../db/schema';
+import { DAY, finalKeys } from './media';
 import { notNamedBySiteSetting } from './settings';
 import { uuidv7 } from '../ids';
 import type { Database } from '../ports/database';
@@ -112,6 +112,27 @@ export async function retireOrphanSiteMedia(database: Database, now: number) {
             .orderBy(asc(media.createdAt))
             .limit(20),
         ),
+      ),
+    );
+}
+
+/** R-AUTH-29: a join request nobody answered is deleted after this long. */
+export const JOIN_REQUEST_DAYS = 30;
+
+/** R-AUTH-29: hard-delete up to 20 join requests older than 30 days (oldest first). */
+export async function expireJoinRequests(database: Database, now: number) {
+  const cutoff = now - JOIN_REQUEST_DAYS * DAY;
+  await database.db
+    .delete(joinRequests)
+    .where(
+      inArray(
+        joinRequests.id,
+        database.db
+          .select({ id: joinRequests.id })
+          .from(joinRequests)
+          .where(lte(joinRequests.createdAt, cutoff))
+          .orderBy(asc(joinRequests.createdAt))
+          .limit(20),
       ),
     );
 }
