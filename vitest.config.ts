@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -11,6 +12,8 @@ export default defineConfig({
         },
       },
       {
+        // AC-MEM-07 drives real route modules, which import `$lib/…` as SvelteKit resolves it.
+        resolve: { alias: { $lib: fileURLToPath(new URL('./src/lib', import.meta.url)) } },
         test: {
           name: 'security',
           include: ['tests/security/**/*.test.ts'],

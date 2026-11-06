@@ -11,6 +11,7 @@ import {
 } from '$lib/server/services/admin';
 import { findAuthEmail } from '$lib/server/repositories/users';
 import { countActiveAdmins } from '$lib/server/services/members';
+import { usageSummary } from '$lib/server/services/gallery';
 
 // R-NAV-03: the invite screen loads here, after the membership check; R-NAV-05 refuses
 // everyone but admins before any row is read.
@@ -25,6 +26,7 @@ export const load: PageServerLoad = async ({ locals }) => {
     seats: list.body.seats,
     soleAdmin: (await countActiveAdmins(context.database.db)) < 2,
     selfId: member.id,
+    usage: await usageSummary(context, member),
   };
 };
 

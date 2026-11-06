@@ -1,5 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createLocalDatabase } from '../../src/lib/server/adapters/local/sqlite-database';
+import type { ObjectStorage } from '../../src/lib/server/ports/object-storage';
+import { seedDeletedMedia } from '../fixtures/housekeeping';
+import { resolveMediaRoute } from '../fixtures/media-routes';
 import { PEOPLE, seedMembership } from '../fixtures/membership';
 import { comparable, createHarness, ORIGIN, type Harness } from '../fixtures/pipeline-harness';
 
@@ -79,5 +82,39 @@ describe('uniform denial', () => {
     }
     for (const page of pages.slice(1)) expect(page).toEqual(pages[0]);
     expect(pages[0]!.body).toContain('nonce="__nonce__"');
+  });
+
+  it('AC-MEM-07 a copied media URL without Access or by a suspended member gets the uniform denial', async () => {
+    const photo = await seedDeletedMedia(database, { deletedAt: null });
+    const bytes = new Uint8Array([82, 73, 70, 70]);
+    const storage = {
+      get: vi.fn(async () => ({
+        body: new Blob([bytes]).stream() as ReadableStream<Uint8Array>,
+        size: bytes.length,
+        contentType: 'image/webp',
+      })),
+    } as unknown as ObjectStorage;
+    const media = await createHarness(database, { storage, resolve: resolveMediaRoute });
+    const path = `/api/v1/media/${photo.id}/image`;
+    // The URL is real: the owner's own session streams it.
+    const owner = await media.send(path, { headers: await media.as(PEOPLE.active.email) });
+    expect(owner.status).toBe(200);
+    expect(storage.get).toHaveBeenCalledTimes(1);
+
+    const copies = [
+      await media.send(path),
+      await media.send(path, { headers: await media.as(PEOPLE.suspended.email) }),
+      await media.send(path, { headers: await media.as(PEOPLE.unknown.email) }),
+    ];
+    const answers = [];
+    for (const response of copies) {
+      expect(response.status).toBe(403);
+      expect(response.headers.get('content-type')).toContain('application/json');
+      answers.push(await comparable(response));
+    }
+    for (const answer of answers.slice(1)) expect(answer).toEqual(answers[0]);
+    expect(JSON.stringify(answers[0])).not.toMatch(/suspend|webp|media\/v1/i);
+    expect(storage.get).toHaveBeenCalledTimes(1);
+    expect(media.resolved).toEqual([`GET ${path}`]);
   });
 });

@@ -69,12 +69,13 @@ const MIGRATIONS = readdirSync('migrations')
   .filter((name) => name.endsWith('.sql'))
   .sort();
 
+/** `sql` stands in for 0001_init.sql; the later migrations still apply on top of it. */
 function applyMigrations(client: Database.Database, sql?: string): void {
-  if (sql !== undefined) {
-    client.exec(sql);
-    return;
+  for (const [index, name] of MIGRATIONS.entries()) {
+    client.exec(
+      index === 0 && sql !== undefined ? sql : readFileSync(join('migrations', name), 'utf8'),
+    );
   }
-  for (const name of MIGRATIONS) client.exec(readFileSync(join('migrations', name), 'utf8'));
 }
 
 function migratedClient(sql?: string): Database.Database {

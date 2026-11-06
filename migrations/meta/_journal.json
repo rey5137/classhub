@@ -15,6 +15,13 @@
       "when": 1793917557632,
       "tag": "0002_panoramic_crystal",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793934271593,
+      "tag": "0003_r2_operations",
+      "breakpoints": true
     }
   ]
 }

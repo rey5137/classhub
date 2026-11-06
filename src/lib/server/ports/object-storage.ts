@@ -18,10 +18,15 @@ export function assertMaxBytes(maxBytes: number): void {
 }
 
 export interface ObjectStorage {
+  /**
+   * `onWrite` runs once before each billed write request the put makes (R-MEM-18): one
+   * for a single put; create, each part and complete for a multipart one. An abort is
+   * not billed and not reported.
+   */
   put(
     key: string,
     body: ReadableStream<Uint8Array>,
-    opts: { contentType: string; maxBytes: number },
+    opts: { contentType: string; maxBytes: number; onWrite?: () => void },
   ): Promise<{ size: number; sha256: string }>;
   head(key: string): Promise<{ size: number; contentType: string } | null>;
   /**

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { R2ObjectStorage } from '../../src/lib/server/adapters/cloudflare/r2-storage';
 import { ObjectTooLargeError } from '../../src/lib/server/ports/object-storage';
+import { meterStorage } from '../../src/lib/server/services/operations';
 import { sha256Hex } from '../../src/lib/server/sha256';
 
 type Bucket = ConstructorParameters<typeof R2ObjectStorage>[0];
@@ -85,5 +86,33 @@ describe('R2ObjectStorage streaming put', () => {
 
     expect(calls.puts).toEqual([{ key: 'k', bytes: 30, sha256: sha256Hex(BYTES) }]);
     expect(calls.created).toBe(0);
+  });
+
+  it('R-MEM-18 a multipart put reports create, every part and complete as billed writes; a single put one', async () => {
+    const { bucket, calls } = fakeBucket();
+    const count = { classA: 0, classB: 0 };
+    const metered = meterStorage(new R2ObjectStorage(bucket, 100, 8), count);
+    await metered.put('k', stream(BYTES, 5), { contentType: 'x/y', maxBytes: 30 });
+    // 30 bytes in 8-byte parts: create + 4 parts + complete.
+    expect(calls).toMatchObject({ created: 1, completed: 1 });
+    expect(calls.parts).toHaveLength(4);
+    expect(count.classA).toBe(6);
+
+    const single = meterStorage(new R2ObjectStorage(bucket, 100, 64), count);
+    await single.put('k', stream(BYTES, 7), { contentType: 'x/y', maxBytes: 1000 });
+    expect(count.classA).toBe(7);
+  });
+
+  it('R-MEM-18 a multipart put that passes maxBytes counts what it sent, not its free abort', async () => {
+    const { bucket, calls } = fakeBucket();
+    const count = { classA: 0, classB: 0 };
+    const metered = meterStorage(new R2ObjectStorage(bucket, 100, 8), count);
+    await expect(
+      metered.put('k', stream(BYTES, 5), { contentType: 'x/y', maxBytes: 20 }),
+    ).rejects.toBeInstanceOf(ObjectTooLargeError);
+    // Two whole parts went out before the third crossed the cap; the abort is free.
+    expect(calls).toMatchObject({ created: 1, aborted: 1 });
+    expect(count.classA).toBe(1 + calls.parts.length);
+    expect(calls.parts).toHaveLength(2);
   });
 });

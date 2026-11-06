@@ -8,6 +8,7 @@ import { R2ObjectStorage } from '../../src/lib/server/adapters/cloudflare/r2-sto
 import {
   albums,
   media,
+  r2Operations,
   rateEvents,
   storageUsage,
   uploadReservations,
@@ -15,6 +16,8 @@ import {
 import { uuidv7 } from '../../src/lib/server/ids';
 import type { Database } from '../../src/lib/server/ports/database';
 import { finalKeys, findReservation } from '../../src/lib/server/repositories/media';
+import { readOperations } from '../../src/lib/server/repositories/operations';
+import { CLASS_B_FLUSH_MS, monthKey } from '../../src/lib/server/services/operations';
 import { Sha256 } from '../../src/lib/server/sha256';
 import { resolveMediaRoute } from '../fixtures/media-routes';
 import { PEOPLE, seedMembership } from '../fixtures/membership';
@@ -486,5 +489,65 @@ describe('private media upload protocol on D1/R2', () => {
     expect(read).not.toHaveBeenCalled();
     expect(await usage()).toEqual({ reserved: 0, committed: 32 });
     expect(await keys()).toHaveLength(2);
+  });
+});
+
+describe('R-MEM-18 R2 operation estimate', () => {
+  it('R-MEM-18 an upload counts its four PUTs as Class A, exactly, and its staging deletes as nothing', async () => {
+    const reservation = await reserve();
+    await harness.settleHousekeeping();
+    const month = monthKey(Date.now());
+    const before = await readOperations(database, month);
+    expect((await put(reservation.id, 'image')).status).toBe(200);
+    expect((await put(reservation.id, 'thumb')).status).toBe(200);
+    expect((await finish(reservation.id)).status).toBe(201);
+    await harness.settleHousekeeping();
+    const after = await readOperations(database, month);
+    // Two staging PUTs and two final PUTs; the staging deletes are not billed.
+    expect(after.classA - before.classA).toBe(4);
+  });
+
+  it('R-MEM-18 a refused PUT still counts the PUT but not its cleanup delete', async () => {
+    const reservation = await reserve({ sha256: '0'.repeat(64) });
+    await harness.settleHousekeeping();
+    const month = monthKey(Date.now());
+    const before = await readOperations(database, month);
+    expect((await put(reservation.id, 'image')).status).toBe(400);
+    await harness.settleHousekeeping();
+    expect((await readOperations(database, month)).classA - before.classA).toBe(1);
+  });
+
+  it('R-MEM-18 a media GET counts one Class B read and a 304 counts none, flushed after a minute', async () => {
+    const reservation = await uploaded();
+    expect((await finish(reservation.id)).status).toBe(201);
+    // A month of its own, so only this clock's requests land in it.
+    let clock = 1_900_000_000_000;
+    const timed = await createHarness(database, {
+      storage,
+      resolve: resolveMediaRoute,
+      now: () => clock,
+    });
+    const headers = await timed.as(PEOPLE.active.email);
+    const month = monthKey(clock);
+    // Earlier tests' reads sit in this isolate's tally; a request that reads nothing
+    // flushes them (their minute is long up), so the hold below starts empty.
+    expect((await timed.send(`/api/v1/media/${uuidv7()}/thumb`, { headers })).status).toBe(404);
+    await timed.settleHousekeeping();
+    const path = `/api/v1/media/${reservation.mediaId}/thumb`;
+    const fetched = await timed.send(path, { headers });
+    expect(fetched.status).toBe(200);
+    // Held for a minute: nothing is written yet.
+    await timed.settleHousekeeping();
+    expect((await readOperations(database, month)).classB).toBe(0);
+    const etag = fetched.headers.get('etag')!;
+    clock += 1;
+    const cached = await timed.send(path, { headers: { ...headers, 'if-none-match': etag } });
+    expect(cached.status).toBe(304);
+    clock += CLASS_B_FLUSH_MS + 1;
+    // Any later request carries the isolate's tally once its minute is up.
+    expect((await timed.send(`/api/v1/media/${uuidv7()}/thumb`, { headers })).status).toBe(404);
+    await timed.settleHousekeeping();
+    expect((await readOperations(database, month)).classB).toBe(1);
+    await database.db.delete(r2Operations).where(eq(r2Operations.month, month));
   });
 });

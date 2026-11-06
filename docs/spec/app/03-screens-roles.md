@@ -12,8 +12,8 @@
 | Route | Screen | v1.0 capabilities |
 |---|---|---|
 | `/` | Home | welcome, pinned notices, reunion details, newest memories |
-| `/memories` | Memories | responsive photo wall, album and year filters, caption, uploader, upload |
-| `/memories/[id]` | Photo | full optimized photo, caption, uploader, delete for owner/admin |
+| `/memories` | Memories | responsive photo wall, album and year filters (links, keyset "older photos"), caption, uploader, upload, new album, album edit for its creator or an admin |
+| `/memories/[id]` | Photo | full optimized photo, caption, uploader, album, year, download, caption/album edit and delete (with a confirm step) for owner/admin |
 | `/discussions` | Board | threads by latest activity, pinned first, cursor pagination, new thread |
 | `/discussions/[id]` | Thread | post, one-level comments, edit/delete, admin pin/lock |
 | `/chat` | Live chat | one room, recent history, online count, older messages, reconnect state |

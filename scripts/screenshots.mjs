@@ -131,6 +131,21 @@ async function demoMemberPath() {
   return `/members/${mai.id}`;
 }
 
+/** The same for the photo the seed paints into its first album (seed-demo.ts). */
+async function demoPhotoPath() {
+  /** @param {string} route */
+  const get = async (route) =>
+    (await fetch(`${BASE}${route}`, { signal: AbortSignal.timeout(10_000) })).json();
+  /** @type {{ items: { id: string; name: string }[] }} */
+  const albums = await get('/api/v1/albums');
+  const album = albums.items.find((item) => item.name === 'Dã ngoại Ba Vì');
+  /** @type {{ items: { id: string; caption: string | null }[] }} */
+  const page = album ? await get(`/api/v1/media?album=${album.id}`) : { items: [] };
+  const photo = page.items.find((item) => item.caption === 'Lều xanh bên suối');
+  if (!photo) throw new Error('screenshots: the demo seed has no painted photo');
+  return `/memories/${photo.id}`;
+}
+
 async function run() {
   if (!(await isUp())) {
     server = spawn('npm', ['run', 'dev:offline'], {
@@ -150,7 +165,12 @@ async function run() {
   const page = await browser.newPage();
 
   for (const route of selectedRoutes) {
-    const target = route === '/members/member-demo' ? await demoMemberPath() : route;
+    const target =
+      route === '/members/member-demo'
+        ? await demoMemberPath()
+        : route === '/memories/photo-demo'
+          ? await demoPhotoPath()
+          : route;
     for (const { theme, mode } of combos) {
       for (const { width, height } of sizes) {
         await page.setViewportSize({ width, height });

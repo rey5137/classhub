@@ -9,6 +9,7 @@ import { uuidv7 } from './ids';
 import { IdentityError } from './ports/identity';
 import { logLine, redact, resolveLogSalt, saltedHash, type LogFields } from './log';
 import { JobRunner } from './services/job-runner';
+import { meterStorage, recordOperations } from './services/operations';
 
 /** R-AUTH-22: JSON and form bodies; uploads (R-MEM-08) and chat frames have their own bounds. */
 export const JSON_BODY_LIMIT = 64 * 1024;
@@ -266,7 +267,22 @@ async function guard(
     );
   } else await touch;
 
-  return (await boundBody(event)) ?? (await resolve(event));
+  // R-MEM-18: every storage call a route makes is counted, then written after it answers.
+  const operations = { classA: 0, classB: 0 };
+  event.locals.context = { ...context, storage: meterStorage(context.storage, operations) };
+  try {
+    return (await boundBody(event)) ?? (await resolve(event));
+  } finally {
+    const write = recordOperations(
+      context.database,
+      operations,
+      (options.now ?? Date.now)(),
+    )?.catch(() => {
+      logLine({ requestId: log.requestId, operationsError: 'failed' });
+    });
+    if (write && waitUntil) waitUntil(write);
+    else if (write) await write;
+  }
 }
 
 /** identity → membership → `locals.member`, with the request id, headers and log line (§6). */

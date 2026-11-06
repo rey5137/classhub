@@ -134,6 +134,26 @@ export function objectStorageContract(label: string, create: ObjectStorageFactor
       });
     });
 
+    it('R-MEM-18 put reports one billed write for a one-part body and more for a multipart one', async () => {
+      await withStorage(create, async (storage) => {
+        let small = 0;
+        await storage.put(`${uuidv7()}/one.txt`, stream([new TextEncoder().encode('hello')]), {
+          contentType: 'text/plain',
+          maxBytes: 1024,
+          onWrite: () => (small += 1),
+        });
+        expect(small).toBe(1);
+        let large = 0;
+        await storage.put(`${uuidv7()}/large.bin`, stream(patternChunks(LARGE_BYTES)), {
+          contentType: 'application/octet-stream',
+          maxBytes: LARGE_BYTES,
+          onWrite: () => (large += 1),
+        });
+        // R2: create + 3 parts + complete; the local adapter writes one file.
+        expect([1, 5]).toContain(large);
+      });
+    });
+
     it('AC-API-05 put that crosses maxBytes after a whole part leaves no object behind', async () => {
       await withStorage(create, async (storage) => {
         const key = `${uuidv7()}/large-too-big.bin`;

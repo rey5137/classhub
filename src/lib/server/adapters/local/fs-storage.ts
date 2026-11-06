@@ -35,7 +35,7 @@ export class FsObjectStorage implements ObjectStorage {
   async put(
     key: string,
     body: ReadableStream<Uint8Array>,
-    opts: { contentType: string; maxBytes: number },
+    opts: { contentType: string; maxBytes: number; onWrite?: () => void },
   ): Promise<{ size: number; sha256: string }> {
     assertMaxBytes(opts.maxBytes);
     const objectPath = this.pathFor(key);
@@ -70,6 +70,8 @@ export class FsObjectStorage implements ObjectStorage {
         tempMetaPath,
         JSON.stringify({ size, contentType: opts.contentType, sha256 }),
       );
+      // One local file stands for one billed PutObject (R-MEM-18).
+      opts.onWrite?.();
       await rename(tempPath, objectPath);
       await rename(tempMetaPath, metaPath);
       return { size, sha256 };

@@ -11,6 +11,7 @@ import {
 import { normalizeName } from '../../shared/normalize';
 import type { Member } from '../auth/membership';
 import { can } from '../auth/permissions';
+import { decodeCursor, encodeCursor } from '../cursor';
 import { media, profileContacts, users } from '../db/schema';
 import { auditInsertWhere } from '../repositories/audit';
 import {
@@ -69,31 +70,15 @@ export async function getMemberProfile(
   return { ok: true, status: 200, body: projectProfile(viewer, stored) };
 }
 
-function encodeCursor(norm: string, id: string): string {
-  const bytes = new TextEncoder().encode(JSON.stringify([norm, id]));
-  return btoa(String.fromCharCode(...bytes))
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replace(/=+$/, '');
+function encodeDirectoryCursor(norm: string, id: string): string {
+  return encodeCursor([norm, id]);
 }
 
-function decodeCursor(cursor: string): { norm: string; id: string } | null {
-  try {
-    const binary = atob(cursor.replaceAll('-', '+').replaceAll('_', '/'));
-    const text = new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
-    const value: unknown = JSON.parse(text);
-    if (
-      Array.isArray(value) &&
-      value.length === 2 &&
-      typeof value[0] === 'string' &&
-      typeof value[1] === 'string'
-    ) {
-      return { norm: value[0], id: value[1] };
-    }
-  } catch {
-    // Falls through: a cursor the server did not write is a validation error.
-  }
-  return null;
+function decodeDirectoryCursor(cursor: string): { norm: string; id: string } | null {
+  const value = decodeCursor(cursor);
+  return value?.length === 2 && typeof value[0] === 'string' && typeof value[1] === 'string'
+    ? { norm: value[0], id: value[1] }
+    : null;
 }
 
 /** The SQL search in `listActiveProfiles`, on a value the viewer is shown. */
@@ -112,7 +97,7 @@ export async function listMembers(
   if (!can(viewer, 'content.read')) return forbidden;
   const parsed = parse(directoryQuerySchema, input);
   if (!parsed.ok) return parsed;
-  const after = parsed.data.cursor ? decodeCursor(parsed.data.cursor) : null;
+  const after = parsed.data.cursor ? decodeDirectoryCursor(parsed.data.cursor) : null;
   if (parsed.data.cursor && !after)
     return { ok: false, code: 'validation', fields: { cursor: 'custom' } };
   const term = normalizeName(parsed.data.q ?? '') || null;
@@ -140,7 +125,10 @@ export async function listMembers(
   return {
     ok: true,
     status: 200,
-    body: { items, nextCursor: more && last ? encodeCursor(last.displayNameNorm, last.id) : null },
+    body: {
+      items,
+      nextCursor: more && last ? encodeDirectoryCursor(last.displayNameNorm, last.id) : null,
+    },
   };
 }
 

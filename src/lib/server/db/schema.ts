@@ -261,6 +261,14 @@ export const storageUsage = sqliteTable(
   (table) => [check('storage_usage_singleton_id_check', sql`${table.singletonId} = 1`)],
 );
 
+/** R-MEM-18: the app's own count of R2 operations, one row per UTC month ('YYYY-MM'). */
+export const r2Operations = sqliteTable('r2_operations', {
+  month: text('month').primaryKey(),
+  classA: integer('class_a', { mode: 'number' }).notNull().default(0),
+  classB: integer('class_b', { mode: 'number' }).notNull().default(0),
+  updatedAt: integer('updated_at', { mode: 'number' }).notNull().$defaultFn(now),
+});
+
 export const uploadReservations = sqliteTable(
   'upload_reservations',
   {

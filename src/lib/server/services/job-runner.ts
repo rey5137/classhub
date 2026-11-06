@@ -10,6 +10,7 @@ import {
 } from '../repositories/housekeeping';
 import { DAY, mediaKeys, reservationKeys } from '../repositories/media';
 import { claimHousekeeping } from '../repositories/settings';
+import { recordOperations } from './operations';
 
 export interface JobContext {
   database: Database;
@@ -28,11 +29,27 @@ export class JobRunner {
   ) {}
 
   async trigger(now = Date.now()): Promise<void> {
-    if (await claimHousekeeping(this.context.database.db, now)) await this.run(now);
+    if (!(await claimHousekeeping(this.context.database.db, now))) return;
+    const operations = { classA: 0, classB: 0 };
+    try {
+      await this.run(now, operations);
+    } finally {
+      // R-MEM-18: the traffic run's lists (deletes are not billed), counted even when a
+      // step failed; best effort, so a failed count never hides the run's own error. The CLI calls
+      // `run` alone: it writes through the REST allow-list, which has no counter table.
+      await recordOperations(this.context.database, operations, now)?.catch(() => undefined);
+    }
   }
 
-  async run(now = Date.now()): Promise<void> {
-    const { database, storage } = this.context;
+  async run(now = Date.now(), operations = { classA: 0, classB: 0 }): Promise<void> {
+    const { database } = this.context;
+    const storage: JobContext['storage'] = {
+      list: (prefix, cursor) => {
+        operations.classA += 1;
+        return this.context.storage.list(prefix, cursor);
+      },
+      delete: (keys) => this.context.storage.delete(keys),
+    };
     const expired = await expiredReservations(database, now);
     await this.writes.releaseExpired(
       database,

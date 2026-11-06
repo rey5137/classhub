@@ -15,7 +15,9 @@ import {
   finalKeys,
   findReservation,
 } from '../../src/lib/server/repositories/media';
+import { readOperations } from '../../src/lib/server/repositories/operations';
 import { JobRunner } from '../../src/lib/server/services/job-runner';
+import { monthKey } from '../../src/lib/server/services/operations';
 import {
   HOUSEKEEPING_NOW as now,
   seedDeletedMedia,
@@ -62,6 +64,19 @@ beforeEach(async () => {
 });
 
 describe('housekeeping on D1/R2', () => {
+  it('R-MEM-18 a traffic run counts its listing as Class A and its deletes as nothing; a CLI run counts nothing', async () => {
+    await write('staging/v1/orphan-a/image.webp', 4);
+    await write('staging/v1/orphan-b/image.webp', 4);
+    const before = await readOperations(database, monthKey(now));
+    await runner().trigger(now);
+    const after = await readOperations(database, monthKey(now));
+    // One listing page; deleting the two orphans is not billed.
+    expect(after.classA - before.classA).toBe(1);
+    await write('staging/v1/orphan-c/image.webp', 4);
+    await runner().run(now);
+    expect(await readOperations(database, monthKey(now))).toEqual(after);
+  });
+
   it('AC-MEM-09 expiry releases only open rows once and sweeps orphan staging without touching live objects', async () => {
     const expired = await seedReservation(database);
     const live = await seedReservation(database, { expiresAt: now + 60_000 });

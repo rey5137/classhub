@@ -223,12 +223,18 @@ export async function releaseReservation(database: Database, row: Reservation, n
   ]);
 }
 
-/** Bounded: the upload sheet's album select lists at most this many, by name. */
+/** Bounded: the upload sheet, the album filter and `GET /api/v1/albums` list at most this many, by name. */
 export const ALBUM_CHOICES = 200;
 
 export async function listAlbumChoices(database: Database) {
   return database.db
-    .select({ id: albums.id, name: albums.name, yearTag: albums.yearTag })
+    .select({
+      id: albums.id,
+      name: albums.name,
+      yearTag: albums.yearTag,
+      description: albums.description,
+      createdBy: albums.createdBy,
+    })
     .from(albums)
     .orderBy(asc(albums.name), asc(albums.id))
     .limit(ALBUM_CHOICES);
@@ -246,4 +252,14 @@ export async function findLiveMedia(database: Database, id: string) {
       .where(and(eq(media.id, id), isNull(media.deletedAt)))
       .limit(1)
   )[0];
+}
+
+/** R-MEM-15, 18: the one `storage_usage` row the migration seeds. */
+export async function readStorageUsage(database: Database) {
+  const [row] = await database.db
+    .select()
+    .from(storageUsage)
+    .where(eq(storageUsage.singletonId, 1))
+    .limit(1);
+  return row ?? { committedBytes: 0, reservedBytes: 0, lastReconciledAt: null };
 }

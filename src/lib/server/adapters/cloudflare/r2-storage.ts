@@ -23,7 +23,7 @@ export class R2ObjectStorage implements ObjectStorage {
   async put(
     key: string,
     body: ReadableStream<Uint8Array>,
-    opts: { contentType: string; maxBytes: number },
+    opts: { contentType: string; maxBytes: number; onWrite?: () => void },
   ): Promise<{ size: number; sha256: string }> {
     // The binding needs a known length, so a body of unknown length streams as
     // fixed-size multipart parts: at most one part is held in memory whatever
@@ -54,7 +54,11 @@ export class R2ObjectStorage implements ObjectStorage {
           filled += take;
           offset += take;
           if (filled === this.partBytes) {
-            upload ??= await this.bucket.createMultipartUpload(key, { httpMetadata });
+            if (!upload) {
+              opts.onWrite?.();
+              upload = await this.bucket.createMultipartUpload(key, { httpMetadata });
+            }
+            opts.onWrite?.();
             parts.push(await upload.uploadPart(parts.length + 1, part));
             part = new Uint8Array(this.partBytes);
             filled = 0;
@@ -64,15 +68,19 @@ export class R2ObjectStorage implements ObjectStorage {
 
       const sha256 = hash.digestHex();
       if (!upload) {
+        opts.onWrite?.();
         await this.bucket.put(key, part.subarray(0, filled), {
           httpMetadata,
           customMetadata: { sha256 },
         });
       } else {
-        if (filled > 0)
+        if (filled > 0) {
+          opts.onWrite?.();
           parts.push(await upload.uploadPart(parts.length + 1, part.subarray(0, filled)));
+        }
         // A multipart upload's metadata is fixed when it starts, before the hash
         // is known, so these objects carry no stored validator (see `get`).
+        opts.onWrite?.();
         await upload.complete(parts);
       }
       return { size, sha256 };

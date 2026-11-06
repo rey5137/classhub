@@ -1,11 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { MEMBER_DEMO, demoMemberPath, routePath } from './demo';
+import { MEMBER_DEMO, PHOTO_DEMO, demoMemberPath, routePath } from './demo';
 
 const routes = [
   '/',
   '/memories',
-  '/memories/photo-demo',
+  PHOTO_DEMO,
   '/discussions',
   '/discussions/thread-demo',
   '/chat',
@@ -106,17 +106,17 @@ test('R-UI-10 every route has its own translated document title (WCAG 2.4.2)', a
 
 test('R-UI-12 touch targets are at least 44 px on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/memories');
-  for (const selector of [
-    '.account summary',
-    '.chip >> nth=0',
-    '.seg button >> nth=0',
-    '.rowhead a >> nth=0',
-  ]) {
-    const box = await page.locator(selector).boundingBox();
-    expect(box, selector).not.toBeNull();
-    expect(box!.height, selector).toBeGreaterThanOrEqual(44);
-    expect(box!.width, selector).toBeGreaterThanOrEqual(44);
+  for (const [route, selectors] of [
+    ['/memories', ['.account summary', '.chip >> nth=0', '.manage summary >> nth=0']],
+    ['/', ['.rowhead a >> nth=0']],
+  ] as const) {
+    await page.goto(route);
+    for (const selector of selectors) {
+      const box = await page.locator(selector).boundingBox();
+      expect(box, selector).not.toBeNull();
+      expect(box!.height, selector).toBeGreaterThanOrEqual(44);
+      expect(box!.width, selector).toBeGreaterThanOrEqual(44);
+    }
   }
 });
 

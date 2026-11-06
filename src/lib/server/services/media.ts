@@ -21,7 +21,6 @@ import {
   findLiveMedia,
   findMedia,
   findReservation,
-  listAlbumChoices,
   releaseReservation,
   reservationKeys,
   reserve,
@@ -95,11 +94,6 @@ function reservationAccess(
 ): AdminFailure | null {
   if (!row || row.ownerId !== member.id) return forbidden;
   return row.state !== 'open' || row.expiresAt <= now ? conflict : null;
-}
-
-/** The upload sheet's album field; albums are created and edited through their own API. */
-export async function albumChoices(context: AppContext, member: Member) {
-  return can(member, 'content.create') ? listAlbumChoices(context.database) : [];
 }
 
 export async function createReservation(

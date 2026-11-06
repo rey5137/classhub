@@ -12,6 +12,24 @@ export async function demoMemberPath(request: APIRequestContext): Promise<string
   return `/members/${mai.id}`;
 }
 
+/** `/memories/photo-demo` stands for a photo seed-demo.ts paints into its first album. */
+export const PHOTO_DEMO = '/memories/photo-demo';
+
+export async function demoPhotoPath(request: APIRequestContext): Promise<string> {
+  const albums = (await (await request.get('/api/v1/albums')).json()) as {
+    items: { id: string; name: string }[];
+  };
+  const album = albums.items.find((item) => item.name === 'Dã ngoại Ba Vì');
+  if (!album) throw new Error('the demo seed has no Ba Vi album');
+  const page = (await (await request.get(`/api/v1/media?album=${album.id}`)).json()) as {
+    items: { id: string; caption: string | null }[];
+  };
+  const photo = page.items.find((item) => item.caption === 'Lều xanh bên suối');
+  if (!photo) throw new Error('the demo seed has no painted photo');
+  return `/memories/${photo.id}`;
+}
+
 export async function routePath(request: APIRequestContext, route: string): Promise<string> {
-  return route === MEMBER_DEMO ? demoMemberPath(request) : route;
+  if (route === MEMBER_DEMO) return demoMemberPath(request);
+  return route === PHOTO_DEMO ? demoPhotoPath(request) : route;
 }

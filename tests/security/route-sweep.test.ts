@@ -47,7 +47,7 @@ describe('route sweep', () => {
     );
   });
 
-  it('AC-API-01 sweeps every built media upload and delivery route', () => {
+  it('AC-API-01 sweeps every built media, gallery and album route', () => {
     expect(fileRoutes().map(key)).toEqual(
       expect.arrayContaining([
         'POST /api/v1/media/reservations',
@@ -55,6 +55,12 @@ describe('route sweep', () => {
         'POST /api/v1/media/reservations/[id]/complete',
         'DELETE /api/v1/media/reservations/[id]',
         'GET /api/v1/media/[id]/[variant]',
+        'GET /api/v1/media',
+        'PATCH /api/v1/media/[id]',
+        'DELETE /api/v1/media/[id]',
+        'GET /api/v1/albums',
+        'POST /api/v1/albums',
+        'PATCH /api/v1/albums/[id]',
       ]),
     );
   });

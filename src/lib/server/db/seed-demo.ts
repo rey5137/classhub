@@ -3,7 +3,17 @@ import { normalizeName } from '../../shared/normalize';
 import { uuidv7 } from '../ids';
 import type { Database } from '../ports/database';
 import type { ObjectStorage } from '../ports/object-storage';
-import { invites, profileContacts, siteSettings, users } from './schema';
+import { eq, sql } from 'drizzle-orm';
+import {
+  albums,
+  invites,
+  media,
+  profileContacts,
+  siteSettings,
+  storageUsage,
+  users,
+} from './schema';
+import { demoPhoto } from './demo-photos';
 
 interface DemoMember {
   email: string;
@@ -71,6 +81,104 @@ const DEMO_CONTACTS: Record<string, { city: string; bio: string; phone?: string;
     'chi.le@example.com': { city: 'TP. Hồ Chí Minh', bio: 'Photos from every trip.' },
   };
 
+// Invented albums and painted photos (INV-6) so the wall, its filters and a photo page
+// have something to show. Each photo names its album by index, or none.
+const DEMO_ALBUMS = [
+  { name: 'Dã ngoại Ba Vì', yearTag: 2005, description: 'Hai ngày cắm trại cuối năm lớp 11.' },
+  { name: 'Chia tay 12A', yearTag: 2007, description: null },
+  { name: 'Hội khoẻ Phù Đổng', yearTag: null, description: null },
+];
+type Rgb = [number, number, number];
+const DEMO_PHOTOS: {
+  owner: string;
+  album: number | null;
+  takenYear: number | null;
+  caption: string | null;
+  sky: Rgb;
+  ground: Rgb;
+}[] = [
+  {
+    owner: 'mai.nguyen@example.com',
+    album: 0,
+    takenYear: null,
+    caption: 'Lều xanh bên suối',
+    sky: [118, 170, 214],
+    ground: [86, 140, 92],
+  },
+  {
+    owner: 'chi.le@example.com',
+    album: 0,
+    takenYear: null,
+    caption: 'Đốt lửa trại',
+    sky: [44, 52, 96],
+    ground: [190, 96, 54],
+  },
+  {
+    owner: 'bao.pham@example.com',
+    album: 0,
+    takenYear: null,
+    caption: null,
+    sky: [150, 196, 230],
+    ground: [120, 150, 80],
+  },
+  {
+    owner: 'linh.tran@example.com',
+    album: 1,
+    takenYear: null,
+    caption: 'Ảnh cả lớp trước cổng trường',
+    sky: [220, 180, 150],
+    ground: [140, 110, 100],
+  },
+  {
+    owner: 'admin@example.com',
+    album: 1,
+    takenYear: null,
+    caption: 'Lưu bút',
+    sky: [236, 220, 196],
+    ground: [170, 140, 120],
+  },
+  {
+    owner: 'chi.le@example.com',
+    album: 1,
+    takenYear: null,
+    caption: 'Buổi chiều cuối cùng',
+    sky: [240, 160, 110],
+    ground: [96, 70, 90],
+  },
+  {
+    owner: 'duc.vo@example.com',
+    album: 2,
+    takenYear: 2006,
+    caption: 'Chạy tiếp sức',
+    sky: [130, 190, 240],
+    ground: [196, 120, 80],
+  },
+  {
+    owner: 'hanh.dang@example.com',
+    album: 2,
+    takenYear: 2006,
+    caption: null,
+    sky: [160, 200, 236],
+    ground: [96, 150, 96],
+  },
+  {
+    owner: 'minh.vu@example.com',
+    album: null,
+    takenYear: 2004,
+    caption: 'Ngày khai giảng lớp 10',
+    sky: [200, 220, 240],
+    ground: [150, 130, 110],
+  },
+  {
+    owner: 'mai.nguyen@example.com',
+    album: null,
+    takenYear: null,
+    caption: 'Hồ Tây',
+    sky: [110, 150, 200],
+    ground: [70, 110, 150],
+  },
+];
+
 // D1 caps a statement at 100 bound variables (7 user rows x 13 columns = 91).
 const INSERT_CHUNK = 7;
 
@@ -91,15 +199,13 @@ async function insertChunked<T>(
 
 /**
  * R-PLAT-10: synthetic classmates and their invites. Idempotent: emails are
- * unique, so a second run inserts nothing. Posts, albums and images arrive with
- * their features (§7/§8); accepting storage now keeps this signature stable.
+ * unique, so a second run inserts nothing. Albums and photos are seeded once, while
+ * the first demo album is missing.
  */
 export async function seedDemo(
   database: Database,
   storage: ObjectStorage,
-): Promise<{ members: number; invites: number }> {
-  void storage;
-
+): Promise<{ members: number; invites: number; photos: number }> {
   const now = Date.now();
   const memberRows = DEMO_MEMBERS.map((member) => ({
     id: uuidv7(),
@@ -167,5 +273,82 @@ export async function seedDemo(
     .values({ key: 'setup_state', valueJson: JSON.stringify('unlocked'), updatedAt: now })
     .onConflictDoNothing();
 
-  return { members: insertedMembers, invites: insertedInvites };
+  const photos = await seedPhotos(database, storage, idByEmail, now);
+  return { members: insertedMembers, invites: insertedInvites, photos };
+}
+
+async function seedPhotos(
+  database: Database,
+  storage: ObjectStorage,
+  idByEmail: Map<string, string>,
+  now: number,
+): Promise<number> {
+  const [seeded] = await database.db
+    .select({ id: albums.id })
+    .from(albums)
+    .where(eq(albums.name, DEMO_ALBUMS[0]!.name))
+    .limit(1);
+  if (seeded) return 0;
+  const adminId = idByEmail.get(ADMIN_EMAIL)!;
+  const albumRows = DEMO_ALBUMS.map((album, index) => ({
+    id: uuidv7(),
+    ...album,
+    createdBy: adminId,
+    createdAt: now - (DEMO_ALBUMS.length - index) * 86_400_000,
+  }));
+  // Objects first, then albums, photos and ledger in one batch: a run that fails
+  // part-way writes no rows and removes its objects, so the next run starts clean.
+  const written: string[] = [];
+  const put = (key: string, bytes: Uint8Array<ArrayBuffer>) => {
+    written.push(key);
+    return storage.put(key, new Response(bytes).body!, {
+      contentType: 'image/jpeg',
+      maxBytes: bytes.length,
+    });
+  };
+  const rows = [];
+  try {
+    for (const [index, photo] of DEMO_PHOTOS.entries()) {
+      const id = uuidv7();
+      const objectKey = `media/v1/${id}/image.jpg`;
+      const thumbKey = `media/v1/${id}/thumb.jpg`;
+      const image = await put(objectKey, demoPhoto(1024, 768, photo.sky, photo.ground));
+      const thumb = await put(thumbKey, demoPhoto(320, 240, photo.sky, photo.ground));
+      const album = photo.album === null ? null : albumRows[photo.album]!;
+      rows.push({
+        id,
+        ownerId: idByEmail.get(photo.owner)!,
+        albumId: album?.id ?? null,
+        mediaType: 'photo' as const,
+        objectKey,
+        thumbKey,
+        mimeType: 'image/jpeg',
+        width: 1024,
+        height: 768,
+        sizeBytes: image.size,
+        thumbSizeBytes: thumb.size,
+        sha256: image.sha256,
+        thumbSha256: thumb.sha256,
+        caption: photo.caption,
+        takenYear: photo.takenYear,
+        effectiveYear: album?.yearTag ?? photo.takenYear,
+        // Oldest first, an hour apart, so the wall's order is stable.
+        createdAt: now - (DEMO_PHOTOS.length - index) * 3_600_000,
+      });
+    }
+    const bytes = rows.reduce((sum, row) => sum + row.sizeBytes + row.thumbSizeBytes, 0);
+    // R-MEM-15: the ledger counts the seeded bytes like any completed upload.
+    await database.batch([
+      database.db.insert(albums).values(albumRows),
+      database.db
+        .update(storageUsage)
+        .set({ committedBytes: sql`${storageUsage.committedBytes} + ${bytes}`, updatedAt: now })
+        .where(eq(storageUsage.singletonId, 1)),
+      ...rows.map((row) => database.db.insert(media).values(row)),
+    ]);
+  } catch (error) {
+    await storage.delete(written).catch(() => undefined);
+    throw error;
+  }
+  return rows.length;
 }

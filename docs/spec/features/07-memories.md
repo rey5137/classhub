@@ -79,7 +79,10 @@
 - **R-MEM-14** Albums have a name (1–80), an optional year tag (four digits) and description (≤ 500). The gallery
   filters by album and by year, newest first, 30 per page, keyset paged. The year is the stored
   `media.effective_year` (album year tag, else the photo's `taken_year`), set when the photo is completed or moved to
-  another album and rewritten for the album's photos in one batch when an album's year tag changes (R-DB-06).
+  another album and rewritten for the album's photos when an album's year tag changes (R-DB-06): the album row and
+  the first ≤ 500 stale photos in one batch, then further chunks of ≤ 500 in the same request until none remain,
+  capped at 20,000 rows per request (R-BUD-08). Each chunk selects only stale rows (`album_id = ? AND deleted_at IS
+  NULL AND effective_year IS NOT <new value>`), so a retry or the next PATCH finishes an interrupted rewrite.
   Captions are plain text ≤ 500 characters.
 - **R-MEM-20** Deleting a photo (owner or admin) sets `deleted_at`, removes it from every view and from
   `/api/v1/media/:id/*` at once, and **keeps its objects for a grace period**: `deletedMediaGraceDays` in
@@ -107,7 +110,10 @@
   `mediaStopBytes` (default 9 GB) new reservations are refused and members see *uploads are paused*; browsing keeps
   working. Both thresholds are in `site.config.ts`, may only be lowered from `/admin`, and can never exceed 9.5 GB.
 - **R-MEM-18** `/admin` usage shows committed and reserved bytes, photo count, last reconcile, the R2 operation
-  estimate (writes and reads counted by the app per month) and a link to the account's R2 dashboard, and states that
+  estimate (Class A puts and lists written per request, a multipart put counted as its create, each part and its
+  complete, exact unless that write fails; Class B reads tallied per isolate and written at most once a minute, so a
+  lost isolate undercounts; deletes and multipart aborts are not billed and not counted)
+  and a link to the account's R2 dashboard, and states that
   the app's cap is not a billing cap (§14).
 - **R-MEM-19** Concurrent reservations can't overshoot, in a form a D1 batch can run (a batch cannot branch on an
   earlier statement's result): `INSERT INTO upload_reservations (…) SELECT … WHERE (SELECT committed_bytes +
