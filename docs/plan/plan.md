@@ -279,8 +279,10 @@ successful independent restore. Deploying is not enough.
   confirms) and test through Access on desktop and iOS Safari.
 
 #### Slice 4c — retention, archive and pruning
-- **Covers:** AC-CHAT-09, 10.
-- `export-chat`, `prune-chat`, `chat_archives`, the over-retention admin banner.
+- **Covers:** AC-CHAT-09, 10, 16 (the `export-chat` half; the `restore --chat` half is 5b's, with `restore.mjs`), 17.
+- `export-chat` (age-encrypted, never overwrites), `prune-chat` (chunked, resumable), `chat_archives` rows, both
+  taking the backup lock; a local target for both (the checklist's item 4); the over-retention admin banner.
+- Model: Opus · high (INV-7: archive before prune).
 
 #### Slice 4d — join requests
 - **Covers:** AC-AUTH-16, 17, 18, 19.
@@ -325,7 +327,7 @@ successful independent restore. Deploying is not enough.
   full INV-7 gate (chat pruning and restores) (AC-OPS-06, AC-DB-05).
 
 #### Slice 5b — restore
-- **Covers:** AC-BAK-01, 04, 05.
+- **Covers:** AC-BAK-01, 04, 05, AC-CHAT-16 (the `restore --chat` half, R-CHAT-15).
 - `restore --target new|local` (new: refuses non-empty DB or bucket and live ids, restores `setup_state='locked'`;
   same schema version only), integrity checks; `docs/BACKUP_RESTORE.md`, `docs/MIGRATION.md`. The Node server, OIDC
   adapter and `SELF_HOST_NODE.md` are deferred (spec §D).
