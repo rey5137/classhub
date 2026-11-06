@@ -65,10 +65,18 @@ export function compareKeys(a: ChatKey, b: ChatKey): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-function afterKey(key: ChatKey): SQL {
+export function afterKey(key: ChatKey): SQL {
   return or(
     gt(chatMessages.createdAt, key.createdAt),
     and(eq(chatMessages.createdAt, key.createdAt), gt(chatMessages.id, key.id)),
+  )!;
+}
+
+/** Rows strictly before `key` in `(created_at, id)` order. */
+export function beforeKey(key: ChatKey): SQL {
+  return or(
+    lt(chatMessages.createdAt, key.createdAt),
+    and(eq(chatMessages.createdAt, key.createdAt), lt(chatMessages.id, key.id)),
   )!;
 }
 

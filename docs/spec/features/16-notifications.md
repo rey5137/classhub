@@ -55,7 +55,15 @@ on its own.
   caps devices so 50 members fit). All batches leave at once, highest priority first (the event's direct audience:
   for `reply` the thread's author, then other followers; for `join` admins), with no delay between them: the limit
   counts subrequests per invocation, not per second, so a delay would not raise it, and a Worker can't wait between
-  invocations without a timer (R-BUD-02, R-CHAT-07). The local adapter sends in-process. A test adapter records
+  invocations without a timer (R-BUD-02, R-CHAT-07). The port carries the plaintext payload, the subscription keys
+  and the headers: RFC 8291 encryption runs inside `PushDelivery`, so each batch of 40 pays its own CPU against Workers
+  Free's 10 ms per invocation, and the triggering request or Durable Object invocation only builds the deliveries.
+  The VAPID key is imported once per event and its JWT signed once per push-service origin. An event's item pushes
+  and its due quiet-mode summaries (R-NTF-13) leave in one `send`, items first; a summary is claimed only while the
+  event holds fewer than 280 deliveries, so one that cannot leave stays due. A batch whose RPC fails is logged by
+  error class only and loses only its own results; the other batches' statuses still count (R-NTF-06). A production
+  build without the `PUSH` binding sends nothing and logs one `config` line, as for missing VAPID keys (R-NTF-01);
+  there is no in-invocation fallback. The local adapter sends in-process. A test adapter records
   deliveries.
 - **R-NTF-06** **Failures.** Per delivery: `201`/`2xx` writes nothing; `404` or `410` deletes the subscription; `400`,
   `403` (VAPID mismatch) and `413` are logged by status only and delete the subscription after the 5th consecutive
@@ -74,7 +82,9 @@ on its own.
     newest message; the device merges them (R-NTF-12). Selection is one conditional `UPDATE notification_prefs SET
     last_chat_push_at = :now, unseen_pushes = unseen_pushes + 1 … WHERE last_chat_push_at < :now - :window AND …
     RETURNING user_id`, so concurrent sends can't double-push and a write happens only for a push actually sent.
-    Reads at most 50 prefs rows per message.
+    Reads at most 50 prefs rows per message. Every statement on the push path binds at most 100 parameters (D1's
+    cap, R-CHAT-16): there is no bulk insert of prefs rows (`POST /subscriptions` creates the member's row), and the
+    `NOT IN` exclude lists stay under it.
   - `thread`: a new thread, to every recipient.
   - `reply`: a new comment, to the members who follow the thread (`thread_followers`): its author and everyone who
     commented on it, recorded with `INSERT OR IGNORE` in the same batch as the post or comment. Deleting a comment
@@ -94,11 +104,15 @@ on its own.
   item pushes stop, and instead the next event that would have pushed them sends one `summary` (R-NTF-03) if the last
   push was at least the summary interval ago, else nothing. The interval starts at `push.summaryHours` (default 6) and
   doubles with each summary sent since the member was last seen (6 → 12 → 24 h, then daily). Counts are read at
-  summary time, only for the member's kinds that are on, since `quiet_since`, each with `LIMIT 100` on an indexed
+  summary time, only for the member's kinds that are on, since `quiet_since` (replies: only comments on threads the
+  member follows), each with `LIMIT 100` on an indexed
   `created_at`. Opening the app (the first page load or chat socket of the member while `unseen_pushes > 0`; the
   membership read joins the prefs row, so this is a write only then) resets `unseen_pushes`, `quiet_since` and the
   summary count, and normal pushes resume. `join` is never quieted. `/notifications` shows "Paused: you'll get a summary
   now and then until you open the app" while quiet. No job runs for this: summaries ride on events (R-BUD-02).
+  The counters (`unseen_pushes`, `last_chat_push_at`) and a summary claim are written before sending, so a push lost
+  to a failed delivery batch or a VAPID signing failure still counts toward quiet mode and the chat coalesce window,
+  and a lost summary waits for the next interval.
 
 ## 16.3 Device and screen
 
@@ -132,13 +146,13 @@ on its own.
 | AC-NTF-02 | Endpoints over `http:`, with a port, credentials, an IP literal, a look-alike host (`fcm.googleapis.com.evil.test`) or an unlisted host are refused with `invalid`, as are malformed keys; no log line, response or export carries an endpoint or key | R-NTF-02 | unit + integration (log spy) |
 | AC-NTF-03 | Each kind's payload, in vi and en, carries the sender's display name and the stripped text cut at 120 characters on a word boundary (Markdown, links and a 4 KB message as input), never an email, contact field or a pending-deletion member's `preferred_name`, and stays under 1 KB | R-NTF-03 | unit |
 | AC-NTF-04 | Chat: the sender, members with an authorized open socket, muted members, members with `chat` off, suspended members and members inside the 60-s coalesce window get nothing; two concurrent messages push each other member at most once; after the window the next message pushes again | R-NTF-07 | integration (recording transport, fake clock) |
-| AC-NTF-05 | A new thread pushes every recipient but the author; a comment pushes the thread's author and earlier commenters but not the commenter or non-followers; a join request pushes admins with `join` on and no member | R-NTF-07 | integration |
+| AC-NTF-05 | A new thread pushes every recipient but the author; a comment pushes the thread's author and earlier commenters but not the commenter or non-followers; a join request pushes admins with `join` on and no member | R-NTF-07 | integration (also: no push-path statement binds more than 100 parameters with 50 subscribed members) |
 | AC-NTF-06 | The mute choices give the right instants (morning across midnight and in two time zones); pushes stop while muted and resume after `mute_until` passes with no write; *Unmute* resumes at once | R-NTF-09 | unit + integration (fake clock) |
 | AC-NTF-07 | `404`/`410` delete the subscription; five consecutive `429`/`5xx`/network failures delete it; a success in between resets the count; a failing push never fails the write or the chat ack | R-NTF-04, 06 | integration (scripted transport) |
-| AC-NTF-08 | 120 deliveries reach `PushDelivery` as 3 batches of ≤ 40, and no batch makes more than 40 fetches | R-NTF-05 | unit (stubbed binding) |
+| AC-NTF-08 | 120 deliveries reach `PushDelivery` as 3 batches of ≤ 40, and no batch makes more than 40 fetches | R-NTF-05 | unit (stubbed binding); integration (one event's items and summaries in at most 7 `deliver` calls, a throwing batch loses only its own results) |
 | AC-NTF-09 | A 6th subscription replaces the oldest; re-posting an endpoint under another member moves it; a member can't list or delete another member's subscription (`not_found`); completing a deletion removes subscriptions, prefs and follower rows | R-NTF-08 | integration |
 | AC-NTF-10 | With `notifications` off, without VAPID keys, with the site locked or with the kind's feature off, nothing is sent; the API answers `feature_disabled` when the setting is off; subscriptions are kept | R-NTF-01, 07 | integration |
 | AC-NTF-11 | The `push` handler shows one notification from a payload and the fallback for garbage; three chat pushes merge into one "3 new messages" notification with the last three lines; a click on a cross-origin `url` opens `/` | R-NTF-12 | unit (service worker handlers) |
 | AC-NTF-12 | `/notifications` at 390 px: the button asks permission only on tap (stubbed `pushManager`), kinds and mute persist across reloads, *Remove* drops a device, an iPhone UA outside standalone shows the `/install` link, an unlisted browser subscription is posted again once | R-NTF-10, 11 | e2e |
 | AC-NTF-13 | On the live site: the installed Android app and the installed iPhone app each get a chat push while closed and none while `/chat` is open; a 1-hour mute holds; tapping a reply push opens the thread | R-NTF-01, 07, 09, 12 | manual (plan 4f/4g checklist) |
-| AC-NTF-14 | After 10 unseen pushes a member gets no item push; the next event sends one `summary` with the right capped counts for their kinds only; the next comes no sooner than 6 h, then 12 h, then 24 h; `join` still arrives; one page load resets it and item pushes resume; an active member's page loads write nothing | R-NTF-13 | integration (fake clock, row counter) |
+| AC-NTF-14 | After 10 unseen pushes a member gets no item push; the next event sends one `summary` with the right capped counts for their kinds only; the next comes no sooner than 6 h, then 12 h, then 24 h; `join` still arrives; one page load resets it and item pushes resume; an active member's page loads write nothing | R-NTF-13 | integration (fake clock, row counter; a summary beyond the event ceiling stays unclaimed; the reply count covers followed threads only) |

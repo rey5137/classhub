@@ -37,6 +37,8 @@ export interface VapidSignOptions {
   keys: VapidKeys;
   nowMs?: number;
   ttlSeconds?: number;
+  /** A key from `importVapidSigningKey`, so one event pays one import for all its audiences. */
+  signingKey?: CryptoKey;
 }
 
 const MAX_VAPID_TTL_SECONDS = 24 * 60 * 60;
@@ -63,6 +65,19 @@ export function normalizeOriginSub(sub: string): string {
   return url.origin;
 }
 
+/** R-NTF-05: imports the VAPID private key once, to be reused through `VapidSignOptions.signingKey`. */
+export async function importVapidSigningKey(privateKey: string): Promise<CryptoKey> {
+  const pkcs8 = fromBase64Url(privateKey);
+  if (!pkcs8) throw new Error('Invalid VAPID private key encoding');
+  return globalThis.crypto.subtle.importKey(
+    'pkcs8',
+    pkcs8 as BufferSource,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign'],
+  );
+}
+
 /** R-NTF-01: signs an ES256 VAPID JWT (`aud` = endpoint origin, `exp` <= 24 h, `sub` = site origin). */
 export async function createVapidJwt(options: VapidSignOptions): Promise<string> {
   const aud = new URL(options.endpoint).origin;
@@ -74,16 +89,7 @@ export async function createVapidJwt(options: VapidSignOptions): Promise<string>
   );
   const exp = nowSec + ttl;
 
-  const pkcs8 = fromBase64Url(options.keys.privateKey);
-  if (!pkcs8) throw new Error('Invalid VAPID private key encoding');
-
-  const cryptoKey = await globalThis.crypto.subtle.importKey(
-    'pkcs8',
-    pkcs8 as BufferSource,
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    false,
-    ['sign'],
-  );
+  const cryptoKey = options.signingKey ?? (await importVapidSigningKey(options.keys.privateKey));
 
   const headerPart = toBase64Url(encoder.encode(JSON.stringify({ typ: 'JWT', alg: 'ES256' })));
   const payloadPart = toBase64Url(encoder.encode(JSON.stringify({ aud, exp, sub })));

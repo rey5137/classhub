@@ -106,7 +106,11 @@ beforeEach(async () => {
     ACCESS_AUD: 'aud-1',
   };
   const current = config();
-  writeConfig({ ...current, vars: { ACCESS_TEAM_DOMAIN: 'myteam', ACCESS_AUD: 'aud-1' } });
+  const vapid = (current.vars as Record<string, string>).VAPID_PUBLIC_KEY;
+  writeConfig({
+    ...current,
+    vars: { ACCESS_TEAM_DOMAIN: 'myteam', ACCESS_AUD: 'aud-1', VAPID_PUBLIC_KEY: vapid },
+  });
   sql(`update users set status = 'active' where auth_email = '${ADMIN}'`);
   // As the first verified sign-in leaves it (R-AUTH-08).
   sql(`update invites set status = 'accepted' where email = '${ADMIN}'`);
@@ -215,6 +219,22 @@ describe('preflight (R-OPS-10)', () => {
       fails: ['bindings'],
       reason: 'CHAT_ROOM',
       breakIt: () => writeConfig({ ...config(), durable_objects: { bindings: [] } }),
+    },
+    {
+      name: 'R-OPS-10 the PUSH service binding is missing',
+      fails: ['bindings'],
+      reason: 'PUSH',
+      breakIt: () => writeConfig({ ...config(), services: [] }),
+    },
+    {
+      name: 'R-OPS-10 the PUSH service binding points at another Worker or entrypoint',
+      fails: ['bindings'],
+      reason: 'PUSH',
+      breakIt: () =>
+        writeConfig({
+          ...config(),
+          services: [{ binding: 'PUSH', service: 'someone-else', entrypoint: 'PushDelivery' }],
+        }),
     },
     {
       name: 'a migration is pending',
@@ -560,6 +580,42 @@ describe('unlock and lock (R-OPS-11)', () => {
     expect(await unlock(lines)).toBe(1);
     expect(lines).toContain('Unlock refused: the site stays locked until every check passes.');
     expect(state()).toEqual({ value: '"locked"', audit: [] });
+  });
+
+  it('R-OPS-10 warns when VAPID_PUBLIC_KEY is set but the VAPID_PRIVATE_KEY secret is missing', async () => {
+    expect((await preflight()).find((c) => c.id === 'vapid')).toBeUndefined();
+    tamper = (args, result) =>
+      args[0] === 'secret' && args[1] === 'list'
+        ? {
+            ...result,
+            stdout: JSON.stringify(
+              (JSON.parse(result.stdout) as { name: string }[]).filter(
+                (s) => s.name !== 'VAPID_PRIVATE_KEY',
+              ),
+            ),
+          }
+        : result;
+    const checks = await preflight();
+    const warning = checks.find((c) => c.id === 'vapid');
+    expect(warning?.status).toBe('warn');
+    expect(warning?.detail).toContain('VAPID_PRIVATE_KEY');
+    expect(failing(checks)).toEqual([]);
+  });
+
+  it('R-OPS-10 warns when the VAPID secret exists but the public var is empty', async () => {
+    const current = config();
+    writeConfig({ ...current, vars: { ...(current.vars as object), VAPID_PUBLIC_KEY: '' } });
+    expect((await preflight()).find((c) => c.id === 'vapid')?.status).toBe('warn');
+  });
+
+  it('R-OPS-10 warns that the VAPID pair could not be verified when the secret list is unreadable', async () => {
+    tamper = (args, result) =>
+      args[0] === 'secret' && args[1] === 'list'
+        ? { status: 0, stdout: 'not json', stderr: '' }
+        : result;
+    const warning = (await preflight()).find((c) => c.id === 'vapid');
+    expect(warning?.status).toBe('warn');
+    expect(warning?.detail).toContain('could not verify');
   });
 
   it('AC-OPS-05 unlock opens the site once preflight passes, and recommends a second admin (R-AUTH-14)', async () => {

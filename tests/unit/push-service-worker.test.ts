@@ -3,6 +3,7 @@ import {
   FALLBACK_NOTIFICATION_BODY,
   FALLBACK_NOTIFICATION_TITLE,
   handleNotificationClick,
+  resolveNotificationClickPath,
   handlePush,
   handlePushSubscriptionChange,
   PUSH_ICON_URL,
@@ -204,5 +205,29 @@ describe('service worker push handlers (R-NTF-12)', () => {
       ),
     ).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-NTF-11 titles the merged chat notification from the payload template in either locale, and falls back for an older payload', async () => {
+    const chat = (extra: Record<string, unknown>, body: string) =>
+      JSON.stringify({ kind: 'chat', title: 'An', body, url: '/chat', tag: 'chat', ...extra });
+    for (const [merge, expected] of [
+      ['Chat lớp · {n} tin nhắn mới', 'Chat lớp · 2 tin nhắn mới'],
+      ['Class chat · {n} new messages', 'Class chat · 2 new messages'],
+      [undefined, 'Class chat · 2 new messages'],
+      ['no placeholder', 'Class chat · 2 new messages'],
+    ] as const) {
+      const { registration, shown } = createMockRegistration();
+      await handlePush(chat({ merge }, 'one'), registration);
+      await handlePush(chat({ merge }, 'two'), registration);
+      expect(shown).toHaveLength(1);
+      expect(shown[0]?.title).toBe(expected);
+    }
+  });
+
+  it('AC-NTF-11 sends a path that still starts with // or /\\ after URL parsing to `/`', () => {
+    const origin = 'https://class.example.test';
+    expect(resolveNotificationClickPath(`${origin}//evil.example/x`, origin)).toBe('/');
+    expect(resolveNotificationClickPath(`${origin}/\\evil.example/x`, origin)).toBe('/');
+    expect(resolveNotificationClickPath('/chat?x=1#top', origin)).toBe('/chat?x=1#top');
   });
 });

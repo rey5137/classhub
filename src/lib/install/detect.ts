@@ -21,7 +21,7 @@ export function detectInstall(env: InstallEnv): InstallKind {
   if (IN_APP.test(ua)) return 'in-app';
   if (env.promptCaptured) return 'prompt';
   // iPadOS asks for the desktop site: a Mac user agent that has a touch screen.
-  if (IOS.test(ua) || (/Macintosh/.test(ua) && env.maxTouchPoints > 1)) return 'ios';
+  if (isIosAgent(env)) return 'ios';
   if (/Android/.test(ua)) return 'android-menu';
   const chromium = /(Chrome|Chromium|Edg|OPR)\//.test(ua);
   const safari = /Safari\//.test(ua) && /Macintosh/.test(ua) && !chromium && !/Firefox\//.test(ua);

@@ -135,6 +135,13 @@ export async function setMute(
   return getPrefs(db, userId);
 }
 
+/** The `quiet_since` a counted push sets: the moment `unseen_pushes` reaches `quietAfter`. */
+const quietSinceAfterPush = (now: number, quietAfter: number) =>
+  sql`CASE WHEN ${notificationPrefs.unseenPushes} + 1 >= ${quietAfter} AND ${notificationPrefs.quietSince} IS NULL THEN ${now} ELSE ${notificationPrefs.quietSince} END`;
+
+const isActiveMember = sql`exists (select 1 from ${users} where ${users.id} = ${notificationPrefs.userId} and ${users.status} = 'active')`;
+const hasSubscription = sql`exists (select 1 from ${pushSubscriptions} where ${pushSubscriptions.userId} = ${notificationPrefs.userId})`;
+
 /**
  * R-NTF-07: single conditional `UPDATE notification_prefs ... RETURNING user_id` for chat pushes.
  * Excludes the sender and connected members, requires active status, at least one subscription,
@@ -152,7 +159,8 @@ export async function getChatPushRecipients(
   const { excludeUserIds, now, coalesceMs, quietAfter } = options;
   const windowCutoff = now - coalesceMs;
 
-  // Ensure every subscribed active user has a prefs row so the single conditional UPDATE covers them.
+  // `upsertSubscription` creates the prefs row of every subscribing member, so the single
+  // conditional UPDATE covers them. No bulk insert: it would bind 7 parameters per row (D1 cap 100).
   const subscribedUsers = await db
     .selectDistinct({ userId: pushSubscriptions.userId })
     .from(pushSubscriptions)
@@ -173,18 +181,13 @@ export async function getChatPushRecipients(
   if (subscribedUsers.length === 0) return [];
   const candidateIds = subscribedUsers.map((r) => r.userId);
 
-  await db
-    .insert(notificationPrefs)
-    .values(candidateIds.map((userId) => ({ userId, updatedAt: now })))
-    .onConflictDoNothing();
-
   const updated = await db
     .update(notificationPrefs)
     .set({
       lastChatPushAt: now,
       lastPushAt: now,
       unseenPushes: sql`${notificationPrefs.unseenPushes} + 1`,
-      quietSince: sql`CASE WHEN ${notificationPrefs.unseenPushes} + 1 >= ${quietAfter} AND ${notificationPrefs.quietSince} IS NULL THEN ${now} ELSE ${notificationPrefs.quietSince} END`,
+      quietSince: quietSinceAfterPush(now, quietAfter),
       updatedAt: now,
     })
     .where(
@@ -197,8 +200,8 @@ export async function getChatPushRecipients(
           eq(notificationPrefs.lastChatPushAt, 0),
           lte(notificationPrefs.lastChatPushAt, windowCutoff),
         ),
-        sql`exists (select 1 from ${users} where ${users.id} = ${notificationPrefs.userId} and ${users.status} = 'active')`,
-        sql`exists (select 1 from ${pushSubscriptions} where ${pushSubscriptions.userId} = ${notificationPrefs.userId})`,
+        isActiveMember,
+        hasSubscription,
       ),
     )
     .returning({ userId: notificationPrefs.userId });
@@ -240,17 +243,12 @@ export async function getItemPushRecipients(
   if (subscribedUsers.length === 0) return [];
   const candidateIds = subscribedUsers.map((r) => r.userId);
 
-  await db
-    .insert(notificationPrefs)
-    .values(candidateIds.map((userId) => ({ userId, updatedAt: now })))
-    .onConflictDoNothing();
-
   const updated = await db
     .update(notificationPrefs)
     .set({
       lastPushAt: now,
       unseenPushes: sql`${notificationPrefs.unseenPushes} + 1`,
-      quietSince: sql`CASE WHEN ${notificationPrefs.unseenPushes} + 1 >= ${quietAfter} AND ${notificationPrefs.quietSince} IS NULL THEN ${now} ELSE ${notificationPrefs.quietSince} END`,
+      quietSince: quietSinceAfterPush(now, quietAfter),
       updatedAt: now,
     })
     .where(
@@ -259,8 +257,8 @@ export async function getItemPushRecipients(
         or(isNull(notificationPrefs.muteUntil), lte(notificationPrefs.muteUntil, now)),
         sql`coalesce(json_extract(${notificationPrefs.kindsJson}, ${`$.${kind}`}), 1) = 1`,
         sql`${notificationPrefs.unseenPushes} < ${quietAfter}`,
-        sql`exists (select 1 from ${users} where ${users.id} = ${notificationPrefs.userId} and ${users.status} = 'active')`,
-        sql`exists (select 1 from ${pushSubscriptions} where ${pushSubscriptions.userId} = ${notificationPrefs.userId})`,
+        isActiveMember,
+        hasSubscription,
       ),
     )
     .returning({ userId: notificationPrefs.userId });
@@ -296,7 +294,7 @@ export async function getQuietModeRecipients(
         or(isNull(notificationPrefs.muteUntil), lte(notificationPrefs.muteUntil, now)),
         sql`coalesce(json_extract(${notificationPrefs.kindsJson}, ${`$.${kind}`}), 1) = 1`,
         sql`${notificationPrefs.unseenPushes} >= ${quietAfter}`,
-        sql`exists (select 1 from ${pushSubscriptions} where ${pushSubscriptions.userId} = ${notificationPrefs.userId})`,
+        hasSubscription,
         followersOfPostId === undefined
           ? undefined
           : sql`exists (select 1 from ${threadFollowers} where ${threadFollowers.postId} = ${followersOfPostId} and ${threadFollowers.userId} = ${notificationPrefs.userId})`,
@@ -404,6 +402,10 @@ export async function readSummaryCounts(
     const rows = await db
       .select({ id: comments.id })
       .from(comments)
+      .innerJoin(
+        threadFollowers,
+        and(eq(threadFollowers.postId, comments.postId), eq(threadFollowers.userId, userId)),
+      )
       .where(
         and(
           sql`${comments.createdAt} >= ${sinceMs}`,

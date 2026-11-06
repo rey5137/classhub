@@ -543,6 +543,7 @@ export const vi = {
   'profile.notificationsLink': 'Cài đặt thông báo',
   'push.payload.threadTitle': '{name} · Thảo luận mới',
   'push.payload.replyTitle': '{name} · {thread}',
+  'push.payload.chatMerged': 'Chat lớp · {n} tin nhắn mới',
   'push.payload.joinTitle': 'Yêu cầu tham gia',
   'push.payload.joinBody': '{name} muốn tham gia',
   'push.payload.summaryChat.one': '{count} tin nhắn chat',

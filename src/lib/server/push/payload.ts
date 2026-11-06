@@ -11,6 +11,8 @@ export interface PushPayload {
   body: string;
   url: string;
   tag: string;
+  /** Chat only: the merged-title template in the subscription's locale; the worker fills `{n}`. */
+  merge?: string;
 }
 
 export interface PushAuthorInput {
@@ -93,7 +95,7 @@ export function stripAndCut(input: string, maxChars = MAX_BODY_CHARS): string {
     .replace(/<https?:\/\/[^>]+>/gi, '')
     .replace(/\bhttps?:\/\/\S+/gi, '')
     // Blockquote and heading markers at line start
-    .replace(/^[ \t]*(?:>+ into|#{1,6}[ \t]+|>+[ \t]*|[-*+][ \t]+)/gm, '')
+    .replace(/^[ \t]*(?:#{1,6}[ \t]+|>+[ \t]*|[-*+][ \t]+)/gm, '')
     // Bold, italic, strikethrough markers
     .replace(/(\*\*|__|~~|\*|_)/g, '')
     // Collapse all line breaks and whitespace runs
@@ -120,26 +122,15 @@ function renderSummaryBody(
   counts: { chat?: number; thread?: number; reply?: number },
 ): string {
   const parts: string[] = [];
-  if (counts.chat && counts.chat > 0) {
-    parts.push(
-      t(locale, pluralKey(locale, 'push.payload.summaryChat', counts.chat), {
-        count: capCountLabel(counts.chat),
-      }),
-    );
-  }
-  if (counts.thread && counts.thread > 0) {
-    parts.push(
-      t(locale, pluralKey(locale, 'push.payload.summaryThread', counts.thread), {
-        count: capCountLabel(counts.thread),
-      }),
-    );
-  }
-  if (counts.reply && counts.reply > 0) {
-    parts.push(
-      t(locale, pluralKey(locale, 'push.payload.summaryReply', counts.reply), {
-        count: capCountLabel(counts.reply),
-      }),
-    );
+  for (const [kind, base] of [
+    ['chat', 'push.payload.summaryChat'],
+    ['thread', 'push.payload.summaryThread'],
+    ['reply', 'push.payload.summaryReply'],
+  ] as const) {
+    const count = counts[kind];
+    if (count && count > 0) {
+      parts.push(t(locale, pluralKey(locale, base, count), { count: capCountLabel(count) }));
+    }
   }
   return parts.length > 0 ? parts.join(' · ') : t(locale, 'push.payload.summaryFallback');
 }
@@ -156,6 +147,7 @@ export function renderPushPayload(input: PushPayloadInput): PushPayload {
         body: stripAndCut(input.message, MAX_BODY_CHARS),
         url: '/chat',
         tag: 'chat',
+        merge: t(input.locale, 'push.payload.chatMerged'),
       };
       break;
     }

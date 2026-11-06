@@ -50,7 +50,9 @@ npm run unlock       # opens the site to approved members
   5. generates and stores `INTERNAL_CONTEXT_KEY` (R-CHAT-04) and `LOG_HASH_SALT` (R-AUTH-23) as Worker secrets if
      missing, and a VAPID P-256 key pair when `VAPID_PUBLIC_KEY` is empty: the private key as the secret
      `VAPID_PRIVATE_KEY`, the public key as the var (R-NTF-01); a rerun never replaces an existing pair (that would
-     silence every subscribed device);
+     silence every subscribed device). An existing `VAPID_PRIVATE_KEY` secret with an empty var stops setup before any
+     `secret put`, telling the owner to put the deployed public key back into `vars` (dashboard, or
+     `GET /api/v1/notifications`); a var with no secret prints a warning instead of "exists, kept" and changes nothing;
   6. applies remote migrations and seeds only `site_settings` defaults and the bootstrap admin invite, never demo
      content and never over existing members. A rerun offers to correct the bootstrap admin email while that admin is
      still `invited` with no Access subject: `users.auth_email` and `invites.email` change in one batch guarded on
@@ -84,14 +86,14 @@ npm run unlock       # opens the site to approved members
 ## 12.5 Preflight, unlock and deploy
 
 - **R-OPS-08** **`npm run deploy`** = `npm run build` then `cf.mjs deploy`. It refuses to run when `wrangler.jsonc`'s
-  `account_id` differs from `.env.cloudflare`, or when the deployed schema version is ahead of the code.
+  `account_id` differs from `.env.cloudflare`, when the `PUSH` service binding (this Worker, `entrypoint: PushDelivery`, R-OPS-10) is missing from `wrangler.jsonc`, or when the deployed schema version is ahead of the code.
 - **R-OPS-09** **`npm run smoke:test`** loads `/health` and confirms the hostname redirects to Access.
 - **R-OPS-10** **`npm run preflight`** checks, each reported pass/fail with the fix:
-  account id matches; D1, R2 and DO bindings exist; remote migrations are current (and none destructive is pending
+  account id matches; D1, R2 and DO bindings exist, and the `PUSH` service binding points at this Worker with `entrypoint: PushDelivery`; remote migrations are current (and none destructive is pending
   without a newer verified backup, R-DB-11); `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are set and the team JWKS loads;
   every known hostname without a cookie is redirected to `<team>.cloudflareaccess.com` (R-AUTH-02); preview URLs are
   off; the bucket has no public `r2.dev` access and no custom domain (AC-MEM-08); an admin is active (before the first
-  unlock: the bootstrap admin has signed in, R-AUTH-12);
+  unlock: the bootstrap admin has signed in, R-AUTH-12); a warning (not a failure) when the `VAPID_PUBLIC_KEY` var and the `VAPID_PRIVATE_KEY` secret disagree, or when the secret list cannot be read to check;
   seats are under 50; a backup exists or the admin is warned none does; the newest GitHub release (R-OPS-13).
 - **R-OPS-11** **`npm run unlock`** runs preflight and sets `setup_state = "unlocked"` only if it passes; `npm run
   lock` sets it back (an emergency switch).

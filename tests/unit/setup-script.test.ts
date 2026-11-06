@@ -112,6 +112,44 @@ describe('scripts/setup.mjs (R-OPS-04)', { timeout: 30_000 }, () => {
     after.close();
   });
 
+  it('R-OPS-04 refuses when the VAPID secret exists but the public var is empty, before any secret put or config write', async () => {
+    await setup(firstRun);
+    const configPath = join(dir, 'wrangler.jsonc');
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
+      vars: Record<string, string>;
+    };
+    config.vars.VAPID_PUBLIC_KEY = '';
+    writeFileSync(configPath, JSON.stringify(config));
+    // A lost INTERNAL_CONTEXT_KEY would otherwise be put before the VAPID step.
+    const statePath = join(box.stateDir, 'state.json');
+    const state = readState();
+    const privateKey = state.secrets.VAPID_PRIVATE_KEY;
+    delete state.secrets.INTERNAL_CONTEXT_KEY;
+    writeFileSync(statePath, JSON.stringify(state));
+
+    const rerun = await setup();
+    expect(rerun.status).not.toBe(0);
+    expect(rerun.stderr).toContain('VAPID_PUBLIC_KEY');
+    expect(rerun.stderr).toContain('/api/v1/notifications');
+    expect(rerun.calls.some((call) => call[0] === 'secret' && call[1] === 'put')).toBe(false);
+    expect(readState().secrets.VAPID_PRIVATE_KEY).toBe(privateKey);
+    expect(wranglerVars().VAPID_PUBLIC_KEY).toBe('');
+  });
+
+  it('R-OPS-04 warns instead of "exists, kept" when the public var is set but the secret is missing', async () => {
+    await setup(firstRun);
+    const state = readState();
+    delete state.secrets.VAPID_PRIVATE_KEY;
+    writeFileSync(join(box.stateDir, 'state.json'), JSON.stringify(state));
+    const rerun = await setup();
+    expect(rerun.status).toBe(0);
+    expect(rerun.stdout).not.toContain('VAPID key pair: exists, kept.');
+    expect(rerun.stdout).toContain('WARNING');
+    expect(
+      rerun.calls.some((call) => call[0] === 'secret' && call[2] === 'VAPID_PRIVATE_KEY'),
+    ).toBe(false);
+  });
+
   it('AC-OPS-01 prints the values the owner needs and never a secret or the token', async () => {
     const result = await setup(firstRun);
     const [database] = readState().databases;

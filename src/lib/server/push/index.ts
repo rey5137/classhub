@@ -6,6 +6,7 @@ export {
   validatePushSubscriptionInput,
   type PushSubscriptionKeysInput,
 } from './allow-list';
+export { deliverPushRequest } from './deliver';
 export {
   encryptPushPayload,
   type EncryptPushOptions,
@@ -25,6 +26,7 @@ export {
 export {
   createVapidAuthorization,
   createVapidJwt,
+  importVapidSigningKey,
   fromBase64Url,
   normalizeOriginSub,
   toBase64Url,

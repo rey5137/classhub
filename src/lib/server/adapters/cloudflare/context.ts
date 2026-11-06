@@ -3,7 +3,7 @@ import type { AppContext } from '../../context';
 import { logLine } from '../../log';
 import { AccessIdentityProvider } from './access-identity';
 import { createD1Database } from './d1-database';
-import { createCloudflarePushTransport, type PushServiceBinding } from './push-transport';
+import { resolvePushTransport, type PushServiceBinding } from './push-transport';
 import { createR2Storage } from './r2-storage';
 import { createDurableObjectHub } from './realtime-hub';
 import type { ChatRoom } from './chat-room';
@@ -33,6 +33,10 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
     // R-NTF-01: log one config warning without any value when VAPID keys are absent in production.
     logLine({ config: 'vapid_unavailable' });
   }
+  const pushTransport = resolvePushTransport(
+    env.PUSH as PushServiceBinding | undefined,
+    import.meta.env.DEV,
+  );
   return {
     database: createD1Database(database),
     storage: createR2Storage(media),
@@ -43,7 +47,7 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
       env.CHAT_ROOM as DurableObjectNamespace<ChatRoom> | undefined,
       stringVar(env.INTERNAL_CONTEXT_KEY),
     ),
-    push: createCloudflarePushTransport(env.PUSH as PushServiceBinding | undefined),
+    ...(pushTransport ? { push: pushTransport } : {}),
     ...(hasVapid && vapidPublicKey && vapidPrivateKey
       ? { vapid: { publicKey: vapidPublicKey, privateKey: vapidPrivateKey } }
       : {}),

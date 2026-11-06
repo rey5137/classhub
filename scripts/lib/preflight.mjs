@@ -10,10 +10,13 @@ import { SEAT_LIMIT, seatsUsedSql } from './invite.mjs';
 import { compareMigrations, localMigrations } from './migrations.mjs';
 import {
   ACCESS_VARS,
+  hasPushBinding,
   hostOf,
   knownHostnames,
+  PUSH_BINDING_MISSING,
   readWorkerConfig,
   teamHost,
+  vapidPairState,
 } from './worker-config.mjs';
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -100,6 +103,8 @@ export async function runPreflight(deps) {
   const sqliteRoom = (config.migrations ?? []).some((/** @type {any} */ tag) =>
     tag?.new_sqlite_classes?.includes('ChatRoom'),
   );
+  // R-NTF-05: push batches run in their own invocations through a service binding to this Worker.
+  const pushBound = hasPushBinding(config);
   const listed = run(['d1', 'list', '--json']);
   const databases = listed.status === 0 ? parseList(listed.stdout) : null;
   const bucketLookup = media?.bucket_name
@@ -120,15 +125,52 @@ export async function runPreflight(deps) {
         ? `R2 bucket ${media.bucket_name} in the account`
         : `a readable R2 bucket ${media.bucket_name} (${bucketLookup.reason})`),
     (!room || !sqliteRoom) && 'Durable Object CHAT_ROOM (SQLite ChatRoom) in wrangler.jsonc',
+    !pushBound && PUSH_BINDING_MISSING,
   ].filter(Boolean);
   checks.push(
     missing.length === 0
       ? pass(
           'bindings',
-          `DB → ${db.database_name}, MEDIA → ${media.bucket_name}, CHAT_ROOM → ChatRoom.`,
+          `DB → ${db.database_name}, MEDIA → ${media.bucket_name}, CHAT_ROOM → ChatRoom, PUSH → PushDelivery.`,
         )
       : fail('bindings', `missing: ${missing.join('; ')}.`, setupFix),
   );
+
+  // R-OPS-10 / R-NTF-01: the VAPID public var and private secret must agree, or push stays off.
+  const secretList = run(['secret', 'list', '--format', 'json']);
+  let secretNames = null;
+  if (secretList.status === 0) {
+    try {
+      const parsed = JSON.parse(secretList.stdout);
+      secretNames = new Set((Array.isArray(parsed) ? parsed : []).map((e) => String(e?.name)));
+    } catch {
+      secretNames = null;
+    }
+  }
+  if (!secretNames) {
+    checks.push({
+      id: 'vapid',
+      status: 'warn',
+      detail: 'could not verify the VAPID key pair: the Worker secret list is unreadable.',
+      fix: 'rerun npm run preflight; check the token can read Worker secrets.',
+    });
+  } else {
+    const state = vapidPairState(config, secretNames.has('VAPID_PRIVATE_KEY'));
+    if (state === 'secret-missing' || state === 'var-missing') {
+      checks.push({
+        id: 'vapid',
+        status: 'warn',
+        detail:
+          state === 'secret-missing'
+            ? 'VAPID_PUBLIC_KEY is set but the VAPID_PRIVATE_KEY secret is missing: push stays off.'
+            : 'the VAPID_PRIVATE_KEY secret exists but VAPID_PUBLIC_KEY is empty in wrangler.jsonc: push stays off.',
+        fix:
+          state === 'secret-missing'
+            ? 'restore the secret (node scripts/cf.mjs secret put VAPID_PRIVATE_KEY), or empty the var and run npm run setup for a new pair.'
+            : 'put the deployed public key back into vars (dashboard, or GET /api/v1/notifications).',
+      });
+    }
+  }
 
   // One D1 round trip for the database-side items.
   // R-OPS-10: any active admin passes; the bootstrap admin (R-AUTH-12) is required only

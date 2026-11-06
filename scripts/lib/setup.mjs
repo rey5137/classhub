@@ -17,6 +17,7 @@ import {
   renderWorkerConfig,
   serializeConfig,
   teamHost,
+  vapidPairState,
 } from './worker-config.mjs';
 
 /** Worker name rules, short enough that `<slug>-media` is a valid bucket name. */
@@ -329,7 +330,15 @@ export async function runSetup(deps) {
   } else out('wrangler.jsonc: unchanged.');
 
   // 5. Secrets, only when missing; the value goes in on stdin and is never shown.
+  // `secret list` needs the written config, so the VAPID refusal comes right after it and
+  // before any put: a new pair would silence every subscribed device.
   const present = listSecrets(run);
+  const vapidState = vapidPairState(config, present.has('VAPID_PRIVATE_KEY'));
+  if (vapidState === 'var-missing') {
+    throw new SetupError(
+      'the VAPID_PRIVATE_KEY secret exists but VAPID_PUBLIC_KEY is empty in wrangler.jsonc. A new pair would silence every subscribed device. Put the deployed public key back into vars (Worker settings in the dashboard, or GET /api/v1/notifications) and rerun setup.',
+    );
+  }
   for (const name of SETUP_SECRETS) {
     if (present.has(name)) {
       out(`Secret ${name}: exists, kept.`);
@@ -343,10 +352,12 @@ export async function runSetup(deps) {
 
   // R-OPS-04 step 5 / R-NTF-01: generate a VAPID P-256 key pair when VAPID_PUBLIC_KEY is empty.
   // A rerun never replaces an existing pair.
-  const existingVapidPublic =
-    typeof config.vars?.VAPID_PUBLIC_KEY === 'string' ? config.vars.VAPID_PUBLIC_KEY.trim() : '';
-  if (existingVapidPublic) {
+  if (vapidState === 'both') {
     out('VAPID key pair: exists, kept.');
+  } else if (vapidState === 'secret-missing') {
+    out(
+      'VAPID key pair: WARNING VAPID_PUBLIC_KEY is set but the VAPID_PRIVATE_KEY secret is missing; push stays off. Restore the secret, or empty the var to generate a new pair (existing devices must then subscribe again).',
+    );
   } else {
     const vapid = await (deps.vapidKeyPair ?? generateVapidKeyPair)();
     const secretRes = run(['secret', 'put', 'VAPID_PRIVATE_KEY'], { input: vapid.privateKey });

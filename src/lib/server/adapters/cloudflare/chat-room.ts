@@ -8,7 +8,7 @@ import {
   type SocketAttachment,
 } from '../../services/chat-room';
 import { createD1Database } from './d1-database';
-import { createCloudflarePushTransport, type PushServiceBinding } from './push-transport';
+import { resolvePushTransport, type PushServiceBinding } from './push-transport';
 import { ORIGIN_PARAM } from './realtime-hub';
 
 export type ChatRoomEnv = Record<string, unknown>;
@@ -37,11 +37,13 @@ export class ChatRoom extends DurableObject<ChatRoomEnv> {
       typeof env.VAPID_PUBLIC_KEY === 'string' ? env.VAPID_PUBLIC_KEY.trim() : '';
     const vapidPrivateKey =
       typeof env.VAPID_PRIVATE_KEY === 'string' ? env.VAPID_PRIVATE_KEY.trim() : '';
+    // The DO only runs in a deployed Worker (dev uses the local hub), and the Worker bundle has no `import.meta.env`.
+    const pushTransport = resolvePushTransport(env.PUSH as PushServiceBinding | undefined, false);
     // Rebuilt on every wake from hibernation, so buckets and presence may reset (R-CHAT-08).
     this.room = new ChatRoomCore({
       database: createD1Database(env.DB as D1Database),
       sockets: () => this.ctx.getWebSockets().map((socket) => this.wrap(socket)),
-      push: createCloudflarePushTransport(env.PUSH as PushServiceBinding | undefined),
+      ...(pushTransport ? { push: pushTransport } : {}),
       ...(vapidPublicKey && vapidPrivateKey
         ? { vapid: { publicKey: vapidPublicKey, privateKey: vapidPrivateKey } }
         : {}),

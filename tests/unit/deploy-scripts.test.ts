@@ -60,6 +60,29 @@ describe('deploy schema guard (R-OPS-08)', () => {
     expect(writes).toEqual([]);
   });
 
+  it('R-OPS-10 refuses when the PUSH service binding is missing or points elsewhere', async () => {
+    const path = join(box.dir, 'wrangler.jsonc');
+    const original = readFileSync(path, 'utf8');
+    const config = JSON.parse(original);
+    expect(config.services).toContainEqual(expect.objectContaining({ binding: 'PUSH' }));
+
+    for (const services of [
+      [],
+      [{ binding: 'PUSH', service: 'someone-else', entrypoint: 'PushDelivery' }],
+      [{ binding: 'PUSH', service: config.name }],
+    ]) {
+      writeFileSync(path, JSON.stringify({ ...config, services }));
+      const { code, lines, writes } = await deploy({ ACCESS_AUD: 'aud-1' });
+      expect(code).toBe(1);
+      expect(lines.join('\n')).toContain(
+        'Deploy refused: missing service binding PUSH to this Worker (entrypoint PushDelivery) in wrangler.jsonc',
+      );
+      expect(writes).toEqual([]);
+    }
+    writeFileSync(path, original);
+    expect((await deploy()).code).toBe(0);
+  });
+
   it('R-OPS-08 refuses when the remote schema version cannot be read', async () => {
     box.writeState({ ...box.readState(), failures: { 'd1 execute': 'Authentication error' } });
     const { code, lines } = await deploy();

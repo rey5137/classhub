@@ -539,6 +539,7 @@ export const en: Record<keyof typeof vi, string> = {
   'profile.notificationsLink': 'Notification settings',
   'push.payload.threadTitle': '{name} · New discussion',
   'push.payload.replyTitle': '{name} · {thread}',
+  'push.payload.chatMerged': 'Class chat · {n} new messages',
   'push.payload.joinTitle': 'Join request',
   'push.payload.joinBody': '{name} wants to join',
   'push.payload.summaryChat.one': '{count} chat message',

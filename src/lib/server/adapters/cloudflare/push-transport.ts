@@ -1,44 +1,28 @@
-import type {
-  PushDeliveryRequest,
-  PushDeliveryResult,
-  PushTransport,
+import {
+  MAX_PUSH_BATCHES,
+  PUSH_BATCH_SIZE,
+  type PushDeliveryRequest,
+  type PushDeliveryResult,
+  type PushTransport,
 } from '../../ports/push-transport';
-import { isAllowedPushEndpoint } from '../../push/allow-list';
+import { deliverPushRequest } from '../../push/deliver';
+import { logLine } from '../../log';
 
 // R-NTF-05: Workers Free caps external subrequests at 50 per invocation.
 // Each batch of <= 40 runs in its own `PushDelivery` invocation via the `PUSH` binding.
-export const PUSH_BATCH_SIZE = 40;
-export const MAX_PUSH_BATCHES = 7;
-const PUSH_FETCH_TIMEOUT_MS = 10_000;
+export { MAX_PUSH_BATCHES, PUSH_BATCH_SIZE };
 
 export interface PushServiceBinding {
   deliver(batch: PushDeliveryRequest[]): Promise<PushDeliveryResult[]>;
 }
 
-/** Executes a single batch of <= 40 encrypted Web Push deliveries. */
+/** Encrypts and sends a single batch of <= 40 Web Push deliveries (one invocation's CPU and subrequests). */
 export async function deliverPushBatch(
   batch: PushDeliveryRequest[],
   fetchFn: typeof fetch = globalThis.fetch,
 ): Promise<PushDeliveryResult[]> {
-  const capped = batch.slice(0, PUSH_BATCH_SIZE);
   return Promise.all(
-    capped.map(async (item): Promise<PushDeliveryResult> => {
-      if (!isAllowedPushEndpoint(item.endpoint)) {
-        return { subscriptionId: item.subscriptionId, status: 400 };
-      }
-      try {
-        const response = await fetchFn(item.endpoint, {
-          method: 'POST',
-          headers: item.headers,
-          body: item.body as BodyInit,
-          redirect: 'manual',
-          signal: AbortSignal.timeout(PUSH_FETCH_TIMEOUT_MS),
-        });
-        return { subscriptionId: item.subscriptionId, status: response.status };
-      } catch {
-        return { subscriptionId: item.subscriptionId, status: 'network_error' };
-      }
-    }),
+    batch.slice(0, PUSH_BATCH_SIZE).map((item) => deliverPushRequest(item, fetchFn)),
   );
 }
 
@@ -52,20 +36,50 @@ export function splitPushBatches(deliveries: PushDeliveryRequest[]): PushDeliver
   return batches;
 }
 
-export function createCloudflarePushTransport(
-  binding: PushServiceBinding | undefined,
-): PushTransport {
+export function createCloudflarePushTransport(binding: PushServiceBinding): PushTransport {
   return {
     async send(deliveries) {
       if (deliveries.length === 0) return [];
       const batches = splitPushBatches(deliveries);
-      if (!binding) {
-        // Fallback when no PUSH self-binding is configured (local dev or test environments).
-        const results = await Promise.all(batches.map((batch) => deliverPushBatch(batch)));
-        return results.flat();
-      }
-      const results = await Promise.all(batches.map((batch) => binding.deliver(batch)));
-      return results.flat();
+      // A batch whose RPC fails loses only its own results; the other batches still count (R-NTF-06).
+      const settled = await Promise.allSettled(batches.map((batch) => binding.deliver(batch)));
+      return settled.flatMap((result) => {
+        if (result.status === 'fulfilled') return result.value;
+        const reason: unknown = result.reason;
+        logLine({
+          pushError: 'deliver',
+          errorClass: reason instanceof Error ? reason.name : 'unknown',
+        });
+        return [];
+      });
     },
   };
+}
+
+let loggedMissingPushBinding = false;
+
+/**
+ * R-NTF-05, R-OPS-10: the transport for a Worker or Durable Object env. Without the `PUSH`
+ * self-binding a production build has no transport (push unavailable, one `config` line): a
+ * single invocation cannot deliver past the subrequest cap. Dev builds deliver in-process.
+ * `isDev` has no default: the ChatRoom is bundled for Workers by esbuild, where `import.meta.env` is not replaced.
+ */
+export function resolvePushTransport(
+  binding: PushServiceBinding | undefined,
+  isDev: boolean,
+): PushTransport | undefined {
+  if (binding) return createCloudflarePushTransport(binding);
+  if (isDev) {
+    return {
+      async send(deliveries) {
+        const batches = splitPushBatches(deliveries);
+        return (await Promise.all(batches.map((batch) => deliverPushBatch(batch)))).flat();
+      },
+    };
+  }
+  if (!loggedMissingPushBinding) {
+    loggedMissingPushBinding = true;
+    logLine({ config: 'push_binding_unavailable' });
+  }
+  return undefined;
 }

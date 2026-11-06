@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { CHAT_ROOM_ID } from '../../contracts/chat';
 import { FEATURES_KEY } from '../../contracts/settings';
@@ -7,6 +7,7 @@ import { chatMessages, profileContacts, siteSettings, users } from '../db/schema
 import type { Database } from '../ports/database';
 import type { ProfileOwner } from '../services/projection';
 import { auditInsertWhere } from './audit';
+import { afterKey, beforeKey } from './chat-archive';
 import { withAuthor } from './discussions';
 import { SETUP_STATE_KEY, type SettingRows } from './settings';
 
@@ -193,31 +194,13 @@ export async function listMessages(
   const room = eq(chatMessages.roomId, CHAT_ROOM_ID);
   if (after) {
     const rows = await selectMessages(database)
-      .where(
-        and(
-          room,
-          or(
-            gt(chatMessages.createdAt, after.createdAt),
-            and(eq(chatMessages.createdAt, after.createdAt), gt(chatMessages.id, after.id)),
-          ),
-        ),
-      )
+      .where(and(room, afterKey(after)))
       .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id))
       .limit(limit + 1);
     return rows.map(toChatRow);
   }
   const rows = await selectMessages(database)
-    .where(
-      before
-        ? and(
-            room,
-            or(
-              lt(chatMessages.createdAt, before.createdAt),
-              and(eq(chatMessages.createdAt, before.createdAt), lt(chatMessages.id, before.id)),
-            ),
-          )
-        : room,
-    )
+    .where(before ? and(room, beforeKey(before)) : room)
     .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
     .limit(limit + 1);
   return rows.map(toChatRow).reverse();

@@ -13,6 +13,8 @@ export const RATE_LIMITS = {
   // R-AUTH-29: `/join` submissions, per salted IP hash and site-wide (one shared subject).
   joinIp: { limit: 3, windowMs: HOUR },
   joinSite: { limit: 20, windowMs: HOUR },
+  // R-AUTH-21 / R-NTF-10: notification settings and subscription writes.
+  notifications: { limit: 30, windowMs: HOUR },
 } as const;
 
 export type RateLimitKind = keyof typeof RATE_LIMITS;

@@ -65,7 +65,9 @@ sequenceDiagram
   insert (R-CHAT-05): `SELECT id FROM users WHERE status = 'active' AND id IN (<connected member ids>)` (at most 50
   values, under D1's 100-variable limit: the sender first, then other connected members; a member beyond the 50 is
   neither closed nor sent that message), plus `site_settings.setup_state` and the chat feature flag (R-NAV-02). The DO
-  broadcasts only to sockets whose member id was returned and closes the others with 4003; if `setup_state` is not
+  broadcasts only to sockets whose member id was returned and closes the others with 4003 (a socket that opens
+  while the batch runs is not in the returned set; it is broadcast to on its own signed context, at most 30 s old, and
+  counts as reached for R-NTF-07); if `setup_state` is not
   `unlocked` (R-OPS-11) or chat is off, it closes every socket with 4003 and broadcasts nothing (the message is still
   saved when the sender was authorized). If the authorization read fails, the message is saved and acked but not
   broadcast (the batch is atomic, so this is a batch that committed but returned unusable authorization rows; a

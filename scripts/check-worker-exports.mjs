@@ -80,4 +80,11 @@ for (const token of [
   }
 }
 
+// the Worker bundler's esbuild does not replace `import.meta.env`, so any use left in the bundle throws in
+// workerd when it runs (the ChatRoom constructor did). Code reachable from src/worker.ts must not read it.
+if (source.includes('import.meta.env')) {
+  console.error(`check-worker-exports: ${bundlePath} contains import.meta.env`);
+  process.exit(1);
+}
+
 console.log(`check-worker-exports: ${bundlePath} exports ChatRoom and PushDelivery`);

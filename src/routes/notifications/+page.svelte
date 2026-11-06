@@ -15,6 +15,7 @@
   } from '$lib/contracts/notifications';
   import { useI18n } from '$lib/i18n/context';
   import { installState } from '$lib/install/state.svelte';
+  import { extractSubscriptionKeys } from '$lib/install/sw-core';
   import { fullTime, mediumDate } from '$lib/shared/time';
   import type { PageProps } from './$types';
 
@@ -59,33 +60,6 @@
       output[i] = raw.charCodeAt(i);
     }
     return output;
-  }
-
-  function bufferToBase64Url(buf: ArrayBuffer | null): string {
-    if (!buf) return '';
-    const bytes = new Uint8Array(buf);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]!);
-    }
-    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  }
-
-  function extractSubscriptionKeys(sub: PushSubscription): {
-    endpoint: string;
-    p256dh: string;
-    auth: string;
-  } | null {
-    const endpoint = sub.endpoint;
-    const json = typeof sub.toJSON === 'function' ? sub.toJSON() : undefined;
-    const p256dh =
-      json?.keys?.p256dh ??
-      (typeof sub.getKey === 'function' ? bufferToBase64Url(sub.getKey('p256dh')) : '');
-    const auth =
-      json?.keys?.auth ??
-      (typeof sub.getKey === 'function' ? bufferToBase64Url(sub.getKey('auth')) : '');
-    if (!endpoint || !p256dh || !auth) return null;
-    return { endpoint, p256dh, auth };
   }
 
   async function getPushManager(): Promise<PushManager | null> {

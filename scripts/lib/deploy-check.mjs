@@ -1,11 +1,17 @@
 // `npm run deploy`, between the account guard and the build: refuse when the
-// remote schema is ahead of this checkout (R-OPS-08), since older code against a
+// PUSH service binding is missing (R-OPS-10) or the remote schema is ahead of this checkout (R-OPS-08), since older code against a
 // newer schema could misread or overwrite data; then write the Access vars from
 // .env.cloudflare into wrangler.jsonc (R-AUTH-05, R-OPS-06 step 7).
 
 import { join } from 'node:path';
 import { compareMigrations, localMigrations, remoteMigrations } from './migrations.mjs';
-import { readWorkerConfig, serializeConfig, withAccessVars } from './worker-config.mjs';
+import {
+  hasPushBinding,
+  PUSH_BINDING_MISSING,
+  readWorkerConfig,
+  serializeConfig,
+  withAccessVars,
+} from './worker-config.mjs';
 
 /**
  * @param {{
@@ -20,6 +26,12 @@ import { readWorkerConfig, serializeConfig, withAccessVars } from './worker-conf
 export async function checkDeploy(deps) {
   const config = readWorkerConfig(deps.root);
   if (!config) throw new Error('wrangler.jsonc does not exist; run npm run setup.');
+
+  // R-NTF-05, R-OPS-10: without the PUSH self-binding a production Worker cannot deliver push.
+  if (!hasPushBinding(config)) {
+    deps.out(`Deploy refused: missing ${PUSH_BINDING_MISSING}. Run npm run setup.`);
+    return 1;
+  }
 
   let remote;
   try {

@@ -151,6 +151,20 @@ export function teamHost(/** @type {string | undefined} */ value) {
   return host.includes('.') ? host : `${host}.cloudflareaccess.com`;
 }
 
+/**
+ * R-OPS-04 step 5 / R-OPS-10: how the VAPID public var and private secret relate.
+ * `none` (generate a pair), `both` (kept), `var-missing` (secret only: refuse, a new pair
+ * would silence every device), `secret-missing` (var only: push stays off).
+ * @param {unknown} config @param {boolean} hasSecret
+ * @returns {'none' | 'both' | 'var-missing' | 'secret-missing'}
+ */
+export function vapidPairState(config, hasSecret) {
+  const vars = /** @type {{ vars?: Record<string, unknown> }} */ (config).vars;
+  const hasVar = typeof vars?.VAPID_PUBLIC_KEY === 'string' && vars.VAPID_PUBLIC_KEY.trim() !== '';
+  if (hasVar) return hasSecret ? 'both' : 'secret-missing';
+  return hasSecret ? 'var-missing' : 'none';
+}
+
 /** The hostname of a redirect target, or '' when it is not an absolute URL. */
 export function hostOf(/** @type {string} */ location) {
   try {
@@ -158,4 +172,15 @@ export function hostOf(/** @type {string} */ location) {
   } catch {
     return '';
   }
+}
+
+/** R-NTF-05: the `PUSH` service binding must point at this Worker's `PushDelivery` entrypoint. */
+export const PUSH_BINDING_MISSING =
+  'service binding PUSH to this Worker (entrypoint PushDelivery) in wrangler.jsonc';
+
+export function hasPushBinding(/** @type {any} */ config) {
+  const pushService = (config.services ?? []).find(
+    (/** @type {any} */ entry) => entry?.binding === 'PUSH',
+  );
+  return pushService?.service === config.name && pushService?.entrypoint === 'PushDelivery';
 }

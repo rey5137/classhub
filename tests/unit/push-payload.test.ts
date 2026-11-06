@@ -32,6 +32,9 @@ describe('Web Push payload renderer and headers (R-NTF-03)', () => {
       expect(chat.title).toBe('Nguyễn Văn An');
       expect(chat.url).toBe('/chat');
       expect(chat.tag).toBe('chat');
+      expect(chat.merge).toBe(
+        locale === 'vi' ? 'Chat lớp · {n} tin nhắn mới' : 'Class chat · {n} new messages',
+      );
       expect(chat.body.length).toBeLessThanOrEqual(120);
       expect(chat.body.endsWith('…')).toBe(true);
       expect(chat.body).not.toContain('**');
@@ -108,6 +111,16 @@ describe('Web Push payload renderer and headers (R-NTF-03)', () => {
         expect(json).not.toContain('+84901234567');
       }
     }
+  });
+
+  it('AC-NTF-03 strips blockquote markers without dropping the words after them', () => {
+    const chat = renderPushPayload({
+      kind: 'chat',
+      locale: 'en',
+      sender: pendingDeletionSender,
+      message: '> into the woods\n>> into the night',
+    });
+    expect(chat.body).toBe('into the woods into the night');
   });
 
   it('AC-NTF-03 sets TTL, Urgency and <= 32-char URL-safe Topic headers per kind', () => {

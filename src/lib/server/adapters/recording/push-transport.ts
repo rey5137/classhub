@@ -8,34 +8,22 @@ export interface RecordedPushDelivery extends PushDeliveryRequest {
   status: number | 'network_error';
 }
 
+type PushStatus = number | 'network_error';
+type PushStatusHandler = (delivery: PushDeliveryRequest) => PushStatus | Promise<PushStatus>;
+
 export interface RecordingPushTransport extends PushTransport {
   readonly deliveries: RecordedPushDelivery[];
   clear(): void;
-  setNextStatus(
-    statusOrHandler:
-      | number
-      | 'network_error'
-      | ((
-          delivery: PushDeliveryRequest,
-        ) => number | 'network_error' | Promise<number | 'network_error'>),
-  ): void;
+  setNextStatus(statusOrHandler: PushStatus | PushStatusHandler): void;
 }
 
 /** R-NTF-05: test adapter that records deliveries and returns scripted statuses. */
 export function createRecordingPushTransport(
-  defaultStatusOrHandler:
-    | number
-    | 'network_error'
-    | ((
-        delivery: PushDeliveryRequest,
-      ) => number | 'network_error' | Promise<number | 'network_error'>) = 201,
+  defaultStatusOrHandler: PushStatus | PushStatusHandler = 201,
 ): RecordingPushTransport {
   const deliveries: RecordedPushDelivery[] = [];
-  let handler:
-    | ((
-        delivery: PushDeliveryRequest,
-      ) => number | 'network_error' | Promise<number | 'network_error'>)
-    | undefined = typeof defaultStatusOrHandler === 'function' ? defaultStatusOrHandler : undefined;
+  let handler: PushStatusHandler | undefined =
+    typeof defaultStatusOrHandler === 'function' ? defaultStatusOrHandler : undefined;
   const fallbackStatus =
     typeof defaultStatusOrHandler === 'function' ? 201 : defaultStatusOrHandler;
 

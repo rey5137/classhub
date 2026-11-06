@@ -318,7 +318,10 @@ successful independent restore. Deploying is not enough.
   Screens: `/notifications` (on, off, blocked, muted, iPhone outside the Home Screen app).
 - Risk: whether service-binding calls count against the 50 external subrequests on Workers Free is not stated
   clearly in Cloudflare's docs; the batching keeps each batch's fetches ≤ 40 either way, and the 32-invocation cap
-  allows the ≤ 7 batches. Confirm on the live site at checklist item 8 with all devices subscribed.
+  allows the ≤ 7 batches. CPU is the second limit: encryption runs inside `PushDelivery` (one batch of ≤ 40 per
+  invocation), the VAPID JWT is signed once per push service per event, and summaries share the event's `send`
+  (R-NTF-05). Confirm on the live site at checklist item 8 with all devices subscribed, reading Workers metrics
+  "CPU time p99" as well.
 - Model: Opus · high (a member-supplied URL the Worker fetches, crypto, privacy of the payload).
 
 #### Slice 4g — discussion and join pushes
@@ -365,6 +368,8 @@ successful independent restore. Deploying is not enough.
 - `restore --target new|local` (new: refuses non-empty DB or bucket and live ids, restores `setup_state='locked'`;
   same schema version only), integrity checks; `docs/BACKUP_RESTORE.md`, `docs/MIGRATION.md`. The Node server, OIDC
   adapter and `SELF_HOST_NODE.md` are deferred (spec §D).
+- `restore.mjs` runs `RESTORE_CLEAR_PUSH_SUBSCRIPTIONS` (`scripts/lib/backup-sql.mjs:13`) so a restored site holds no
+  push subscriptions, and 5b's tests prove it (R-BAK-06; R-NTF-11 re-posts them on the next visit).
 - **Owner step:** back up the live site and restore it into a new D1 + bucket in the second account, side by side,
   then run `preflight` and `unlock` there.
 

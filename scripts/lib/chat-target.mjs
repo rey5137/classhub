@@ -70,3 +70,23 @@ export function parseChatArgs(args, allowed) {
   }
   return { local, values };
 }
+
+/**
+ * Opens the database for a command's entry script; on a refusal prints it under the command's
+ * name, sets a failing exit code and returns undefined.
+ * @param {string} command @param {string} root @param {{ local: boolean }} options
+ */
+export function openChatDatabase(command, root, options) {
+  try {
+    return chatDatabase(root, { local: options.local });
+  } catch (error) {
+    // Zod and parse errors can echo .env.cloudflare values; say what to check instead.
+    console.error(
+      error instanceof ChatTargetError
+        ? `${command}: ${error.message}`
+        : `${command}: needs wrangler.jsonc (npm run setup) and CLOUDFLARE_ACCOUNT_ID in .env.cloudflare matching it, or --local.`,
+    );
+    process.exitCode = 1;
+    return undefined;
+  }
+}

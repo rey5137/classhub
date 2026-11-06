@@ -12,14 +12,16 @@ import {
 
 // §16.3 / R-NTF-10, 11: per-device push consent, member kind toggles, mute and device list.
 
+const patchOptions = (locals: App.Locals) => ({
+  featureEnabled: locals.settings.features.notifications,
+  timeZone: locals.timeZone,
+  defaultLocale: locals.locale,
+});
+
 export const load: PageServerLoad = async ({ locals }) => {
   requireFeature(locals, 'notifications');
   const { member, context } = guarded(locals);
-  const result = await getNotifications(context, member, {
-    featureEnabled: locals.settings.features.notifications,
-    timeZone: locals.timeZone,
-    defaultLocale: locals.locale,
-  });
+  const result = await getNotifications(context, member, patchOptions(locals));
   if (!result.ok) error(404, t(locals.locale, 'error.not_found'));
   return {
     notifications: result.body,
@@ -38,16 +40,7 @@ export const actions: Actions = {
       reply: form.get('reply') === 'on',
       ...(member.role === 'admin' ? { join: form.get('join') === 'on' } : {}),
     };
-    const result = await patchNotifications(
-      context,
-      member,
-      { kinds },
-      {
-        featureEnabled: locals.settings.features.notifications,
-        timeZone: locals.timeZone,
-        defaultLocale: locals.locale,
-      },
-    );
+    const result = await patchNotifications(context, member, { kinds }, patchOptions(locals));
     if (!result.ok) return formFailure('kinds', locals, result);
     return { action: 'kinds', ok: true, notifications: result.body };
   },
@@ -61,16 +54,7 @@ export const actions: Actions = {
       rawChoice === 'unmute' || !rawChoice
         ? null
         : (muteChoiceSchema.safeParse(rawChoice).data ?? null);
-    const result = await patchNotifications(
-      context,
-      member,
-      { mute },
-      {
-        featureEnabled: locals.settings.features.notifications,
-        timeZone: locals.timeZone,
-        defaultLocale: locals.locale,
-      },
-    );
+    const result = await patchNotifications(context, member, { mute }, patchOptions(locals));
     if (!result.ok) return formFailure('mute', locals, result);
     return { action: 'mute', ok: true, notifications: result.body };
   },

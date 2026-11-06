@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import type { NotificationDeviceView } from '../../contracts/notifications';
 import type { Locale } from '../../i18n';
 import { notificationPrefs, pushSubscriptions } from '../db/schema';
@@ -58,31 +58,12 @@ export async function upsertSubscription(
     .values({ userId: input.userId, updatedAt: input.now })
     .onConflictDoNothing();
 
-  const existingByEndpoint = await database.db
-    .select({ id: pushSubscriptions.id, userId: pushSubscriptions.userId })
-    .from(pushSubscriptions)
-    .where(eq(pushSubscriptions.endpoint, input.endpoint))
-    .limit(1);
-
-  let targetId: string;
-  if (existingByEndpoint[0]) {
-    targetId = existingByEndpoint[0].id;
-    await database.db
-      .update(pushSubscriptions)
-      .set({
-        userId: input.userId,
-        p256dh: input.p256dh,
-        auth: input.auth,
-        locale: input.locale,
-        deviceLabel: input.deviceLabel,
-        failureCount: 0,
-        updatedAt: input.now,
-      })
-      .where(eq(pushSubscriptions.id, targetId));
-  } else {
-    targetId = uuidv7(input.now);
-    await database.db.insert(pushSubscriptions).values({
-      id: targetId,
+  // One statement, so two concurrent POSTs of the same endpoint cannot collide (the second updates).
+  // `id` stays with the existing row; a re-post by another member moves it and restarts its `createdAt`.
+  const [saved] = await database.db
+    .insert(pushSubscriptions)
+    .values({
+      id: uuidv7(input.now),
       userId: input.userId,
       endpoint: input.endpoint,
       p256dh: input.p256dh,
@@ -92,8 +73,23 @@ export async function upsertSubscription(
       failureCount: 0,
       createdAt: input.now,
       updatedAt: input.now,
-    });
-  }
+    })
+    .onConflictDoUpdate({
+      target: pushSubscriptions.endpoint,
+      set: {
+        userId: input.userId,
+        p256dh: input.p256dh,
+        auth: input.auth,
+        locale: input.locale,
+        deviceLabel: input.deviceLabel,
+        failureCount: 0,
+        // A moved endpoint is a new device for its new member, so the cap below never trims it first.
+        createdAt: sql`CASE WHEN ${pushSubscriptions.userId} <> excluded.user_id THEN excluded.created_at ELSE ${pushSubscriptions.createdAt} END`,
+        updatedAt: input.now,
+      },
+    })
+    .returning({ id: pushSubscriptions.id });
+  const targetId = saved!.id;
 
   // R-NTF-08: a member has at most 5 subscriptions; a 6th replaces their oldest.
   const memberSubs = await database.db
@@ -102,9 +98,11 @@ export async function upsertSubscription(
     .where(eq(pushSubscriptions.userId, input.userId))
     .orderBy(asc(pushSubscriptions.createdAt), asc(pushSubscriptions.id));
 
-  if (memberSubs.length > MAX_SUBSCRIPTIONS_PER_MEMBER) {
-    const excessIds = memberSubs
-      .slice(0, memberSubs.length - MAX_SUBSCRIPTIONS_PER_MEMBER)
+  // The row just written is never the one trimmed.
+  const others = memberSubs.filter((row) => row.id !== targetId);
+  if (others.length > MAX_SUBSCRIPTIONS_PER_MEMBER - 1) {
+    const excessIds = others
+      .slice(0, others.length - (MAX_SUBSCRIPTIONS_PER_MEMBER - 1))
       .map((row) => row.id);
     await database.db.delete(pushSubscriptions).where(inArray(pushSubscriptions.id, excessIds));
   }

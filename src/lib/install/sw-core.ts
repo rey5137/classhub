@@ -102,6 +102,12 @@ interface ParsedSwPushPayload {
   body: string;
   url: string;
   tag: string;
+  /** R-UI-10: localized merge title with `{n}`; absent on payloads from older servers. */
+  merge?: string;
+}
+
+function mergedChatTitle(template: string | undefined, count: number): string {
+  return template ? template.replace('{n}', String(count)) : `Class chat · ${count} new messages`;
 }
 
 function parseSwPushPayload(rawText: string | null | undefined): ParsedSwPushPayload | null {
@@ -125,6 +131,8 @@ function parseSwPushPayload(rawText: string | null | undefined): ParsedSwPushPay
       body: parsed.body,
       url: parsed.url,
       tag: parsed.tag,
+      merge:
+        typeof parsed.merge === 'string' && parsed.merge.includes('{n}') ? parsed.merge : undefined,
     };
   } catch {
     return null;
@@ -141,13 +149,18 @@ export async function handlePush(
   registration: SwPushRegistration,
 ): Promise<void> {
   const payload = parseSwPushPayload(rawText);
+  const show = (
+    title: string,
+    body: string,
+    tag: string,
+    data: Record<string, unknown>,
+  ): Promise<void> =>
+    registration.showNotification(title, { body, tag, icon: PUSH_ICON_URL, renotify: true, data });
   if (!payload) {
-    await registration.showNotification(FALLBACK_NOTIFICATION_TITLE, {
-      body: FALLBACK_NOTIFICATION_BODY,
-      tag: 'fallback',
-      icon: PUSH_ICON_URL,
-      renotify: true,
-      data: { url: '/', count: 1, lines: [] },
+    await show(FALLBACK_NOTIFICATION_TITLE, FALLBACK_NOTIFICATION_BODY, 'fallback', {
+      url: '/',
+      count: 1,
+      lines: [],
     });
     return;
   }
@@ -155,89 +168,55 @@ export async function handlePush(
   const isChat = payload.kind === 'chat' || payload.tag === 'chat';
   const isReply = payload.kind === 'reply' || payload.tag.startsWith('reply-');
 
-  if (isChat) {
-    const existing = await registration.getNotifications({ tag: payload.tag });
-    const prev = existing[0];
-    const line = `${payload.title}: ${payload.body}`;
-    if (!prev) {
-      await registration.showNotification(payload.title, {
-        body: payload.body,
-        tag: payload.tag,
-        icon: PUSH_ICON_URL,
-        renotify: true,
-        data: { url: payload.url, count: 1, lines: [line], kind: 'chat' },
-      });
-      return;
-    }
-    const prevCount = typeof prev.data?.count === 'number' ? prev.data.count : 1;
-    const prevLines = Array.isArray(prev.data?.lines)
-      ? (prev.data.lines as string[])
-      : [`${prev.title}: ${prev.body ?? ''}`];
-    const nextCount = prevCount + 1;
-    const nextLines = [...prevLines, line].slice(-3);
-    for (const item of existing) item.close?.();
-    await registration.showNotification(`Class chat · ${nextCount} new messages`, {
-      body: nextLines.join('\n'),
-      tag: payload.tag,
-      icon: PUSH_ICON_URL,
-      renotify: true,
-      data: { url: payload.url, count: nextCount, lines: nextLines, kind: 'chat' },
-    });
-    return;
-  }
-
-  if (isReply) {
+  if (isChat || isReply) {
     const existing = await registration.getNotifications({ tag: payload.tag });
     const prev = existing[0];
     const sepIndex = payload.title.indexOf(' · ');
     const senderName = sepIndex > 0 ? payload.title.slice(0, sepIndex) : payload.title;
     const threadTitle = sepIndex > 0 ? payload.title.slice(sepIndex + 3) : payload.title;
-    const line = `${senderName}: ${payload.body}`;
+    const line = isChat ? `${payload.title}: ${payload.body}` : `${senderName}: ${payload.body}`;
+    const kind = isChat ? 'chat' : 'reply';
+    // A reply carries its thread title so a merged notification keeps it.
+    const extra = isChat ? {} : { threadTitle };
     if (!prev) {
-      await registration.showNotification(payload.title, {
-        body: payload.body,
-        tag: payload.tag,
-        icon: PUSH_ICON_URL,
-        renotify: true,
-        data: {
-          url: payload.url,
-          count: 1,
-          lines: [line],
-          threadTitle,
-          kind: 'reply',
-        },
+      await show(payload.title, payload.body, payload.tag, {
+        url: payload.url,
+        count: 1,
+        lines: [line],
+        ...extra,
+        kind,
       });
       return;
     }
     const prevCount = typeof prev.data?.count === 'number' ? prev.data.count : 1;
-    const prevLines = Array.isArray(prev.data?.lines) ? (prev.data.lines as string[]) : [line];
+    const fallbackLines = isChat ? [`${prev.title}: ${prev.body ?? ''}`] : [line];
+    const prevLines = Array.isArray(prev.data?.lines)
+      ? (prev.data.lines as string[])
+      : fallbackLines;
     const nextCount = prevCount + 1;
     const nextLines = [...prevLines, line].slice(-3);
-    const mergedTitle =
+    const mergedThread =
       typeof prev.data?.threadTitle === 'string' ? prev.data.threadTitle : threadTitle;
     for (const item of existing) item.close?.();
-    await registration.showNotification(mergedTitle, {
-      body: nextLines.join('\n'),
-      tag: payload.tag,
-      icon: PUSH_ICON_URL,
-      renotify: true,
-      data: {
+    await show(
+      isChat ? mergedChatTitle(payload.merge, nextCount) : mergedThread,
+      nextLines.join('\n'),
+      payload.tag,
+      {
         url: payload.url,
         count: nextCount,
         lines: nextLines,
-        threadTitle: mergedTitle,
-        kind: 'reply',
+        ...(isChat ? {} : { threadTitle: mergedThread }),
+        kind,
       },
-    });
+    );
     return;
   }
 
-  await registration.showNotification(payload.title, {
-    body: payload.body,
-    tag: payload.tag,
-    icon: PUSH_ICON_URL,
-    renotify: true,
-    data: { url: payload.url, count: 1, kind: payload.kind },
+  await show(payload.title, payload.body, payload.tag, {
+    url: payload.url,
+    count: 1,
+    kind: payload.kind,
   });
 }
 
@@ -249,6 +228,8 @@ export function resolveNotificationClickPath(rawUrl: unknown, origin: string): s
   try {
     const parsed = new URL(trimmed, origin);
     if (parsed.origin !== origin) return '/';
+    // A pathname such as `//host` or `/\host` would resolve off-site as a protocol-relative URL.
+    if (/^\/[\\/]/.test(parsed.pathname)) return '/';
     return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
   } catch {
     return '/';
@@ -305,6 +286,21 @@ function bufferToBase64Url(buf: ArrayBuffer | null): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/** The endpoint and key pair a subscription POST carries, or null when the browser withholds any. */
+export function extractSubscriptionKeys(
+  sub: PushSubscription,
+): { endpoint: string; p256dh: string; auth: string } | null {
+  const json = typeof sub.toJSON === 'function' ? sub.toJSON() : undefined;
+  const p256dh =
+    json?.keys?.p256dh ??
+    (typeof sub.getKey === 'function' ? bufferToBase64Url(sub.getKey('p256dh')) : '');
+  const auth =
+    json?.keys?.auth ??
+    (typeof sub.getKey === 'function' ? bufferToBase64Url(sub.getKey('auth')) : '');
+  if (!sub.endpoint || !p256dh || !auth) return null;
+  return { endpoint: sub.endpoint, p256dh, auth };
+}
+
 /** R-NTF-12: best-effort re-subscribe and POST on `pushsubscriptionchange`. */
 export async function handlePushSubscriptionChange(
   event: {
@@ -324,23 +320,13 @@ export async function handlePushSubscriptionChange(
           })
         : null);
     if (!sub) return;
-    const json = typeof sub.toJSON === 'function' ? sub.toJSON() : undefined;
-    const p256dh =
-      json?.keys?.p256dh ??
-      (typeof sub.getKey === 'function' ? bufferToBase64Url(sub.getKey('p256dh')) : '');
-    const auth =
-      json?.keys?.auth ??
-      (typeof sub.getKey === 'function' ? bufferToBase64Url(sub.getKey('auth')) : '');
-    if (!sub.endpoint || !p256dh || !auth) return;
+    const keys = extractSubscriptionKeys(sub);
+    if (!keys) return;
 
     await fetchFn('/api/v1/notifications/subscriptions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        endpoint: sub.endpoint,
-        p256dh,
-        auth,
-      }),
+      body: JSON.stringify(keys),
     });
   } catch {
     // R-NTF-12: fails silently without a live Access session; R-NTF-11 heals on next visit.

@@ -594,6 +594,67 @@ describe('notifications integration (§16)', () => {
     expect(JSON.parse(frames[0]!)).toMatchObject({ type: 'ack', clientNonce: ackNonce });
   });
 
+  it('AC-NTF-09 keeps a moved endpoint under the cap, trims the member’s oldest other device, and keeps createdAt on a same-member re-POST', async () => {
+    const alice = await createActiveUser('Alice');
+    const bob = await createActiveUser('Bob');
+    const post = (member: typeof alice, name: string, now: number, label = name) =>
+      subscribeDevice(
+        { database },
+        member,
+        {
+          endpoint: `https://fcm.googleapis.com/fcm/send/${name}`,
+          p256dh: VALID_P256DH,
+          auth: VALID_AUTH,
+          locale: 'vi',
+          deviceLabel: label,
+        },
+        { featureEnabled: true, now },
+      );
+    const ids = async (userId: string) =>
+      (await listSubscriptions(database.db, userId)).map((d) => d.id);
+
+    // Distinct timestamps: the moved row restarts as the newest, so Bob's oldest other device goes.
+    const base = clock + 10_000;
+    const moving = await post(alice, 'moving', base);
+    for (let i = 1; i <= 5; i++) await post(bob, `bob-${i}`, base + i * 1000, `Bob ${i}`);
+    const moved = await post(bob, 'moving', base + 6000, 'Moved');
+    if (!moved.ok || !moving.ok) throw new Error('expected ok');
+    expect(moved.body.id).toBe(moving.body.id);
+    const bobDevices = await listSubscriptions(database.db, bob.id);
+    expect(bobDevices).toHaveLength(5);
+    expect(bobDevices.map((d) => d.deviceLabel)).toEqual([
+      'Moved',
+      'Bob 5',
+      'Bob 4',
+      'Bob 3',
+      'Bob 2',
+    ]);
+    expect(bobDevices[0]!.createdAt).toBe(base + 6000);
+    expect(await ids(alice.id)).toEqual([]);
+    expect(await ids(bob.id)).toContain(moved.body.id);
+
+    // Same timestamp for the moved row and every other device: the moved row still survives.
+    const tied = base + 20_000;
+    const carol = await createActiveUser('Carol');
+    const dave = await createActiveUser('Dave');
+    await post(carol, 'tied-moving', base + 15_000);
+    for (let i = 1; i <= 5; i++) await post(dave, `dave-${i}`, tied);
+    const movedTied = await post(dave, 'tied-moving', tied);
+    if (!movedTied.ok) throw new Error('expected ok');
+    const daveIds = await ids(dave.id);
+    expect(daveIds).toHaveLength(5);
+    expect(daveIds).toContain(movedTied.body.id);
+
+    // A same-member re-POST keeps createdAt (and the id).
+    const again = await post(dave, 'tied-moving', tied + 5000, 'Renamed');
+    if (!again.ok) throw new Error('expected ok');
+    expect(again.body.id).toBe(movedTied.body.id);
+    const row = (await listSubscriptions(database.db, dave.id)).find(
+      (d) => d.id === movedTied.body.id,
+    );
+    expect(row).toMatchObject({ deviceLabel: 'Renamed', createdAt: tied });
+  });
+
   it('AC-NTF-09 caps subscriptions at 5 (replacing oldest), moves endpoint across members, forbids deleting another member’s sub, and deletes all push rows on member deletion', async () => {
     const alice = await createActiveUser('Alice');
     const bob = await createActiveUser('Bob');
@@ -1024,6 +1085,16 @@ describe('notifications integration (§16)', () => {
       } as unknown as AppContext;
     }
 
+    // R-AUTH-28: the join push only runs under `waitUntil`, never inline in the /join reply.
+    const pendingJoinPush: Promise<unknown>[] = [];
+    const withWaitUntil = (ctx: AppContext): AppContext => ({
+      ...ctx,
+      waitUntil: (work) => void pendingJoinPush.push(work),
+    });
+    const settleJoinPush = async () => {
+      await Promise.all(pendingJoinPush.splice(0));
+    };
+
     const endpointsOf = (t: ReturnType<typeof createRecordingPushTransport>) =>
       t.deliveries.map((d) => d.endpoint).sort();
 
@@ -1154,12 +1225,18 @@ describe('notifications integration (§16)', () => {
         token: 'ok',
       };
       const client = { address: '198.51.100.7', salt: 'salt' };
-      expect((await submitJoinRequest(ctx, input, client, clock)).kind).toBe('accepted');
+      expect((await submitJoinRequest(withWaitUntil(ctx), input, client, clock)).kind).toBe(
+        'accepted',
+      );
+      await settleJoinPush();
       expect(endpointsOf(transport)).toEqual([adminOn.endpoint]);
       expect(transport.deliveries[0]?.headers.Topic).toBe('join');
 
       transport.clear();
-      expect((await submitJoinRequest(ctx, input, client, clock + 1)).kind).toBe('accepted');
+      expect((await submitJoinRequest(withWaitUntil(ctx), input, client, clock + 1)).kind).toBe(
+        'accepted',
+      );
+      await settleJoinPush();
       expect(transport.deliveries).toHaveLength(0);
     });
 
@@ -1197,12 +1274,13 @@ describe('notifications integration (§16)', () => {
       expect(sends.filter((t) => t.startsWith('reply-'))).toHaveLength(1);
       await database.db.delete(joinRequests);
       const joined = await submitJoinRequest(
-        ctx,
+        withWaitUntil(ctx),
         { name: 'N', email: 'fail.join@example.test', note: 'x', token: 'ok' },
         { address: '198.51.100.8', salt: 'salt' },
         clock + 2,
       );
       expect(joined.kind).toBe('accepted');
+      await settleJoinPush();
       expect(sends.filter((t) => t === 'join')).toHaveLength(1);
     });
 
@@ -1386,11 +1464,12 @@ describe('notifications integration (§16)', () => {
       await database.db.delete(joinRequests);
       transport.clear();
       await submitJoinRequest(
-        ctx,
+        withWaitUntil(ctx),
         { name: 'N', email: 'quiet.join@example.test', note: 'x', token: 'ok' },
         { address: '198.51.100.9', salt: 'salt' },
         clock + 2,
       );
+      await settleJoinPush();
       expect(transport.deliveries.map((d) => d.endpoint)).toEqual([admin.endpoint]);
       expect(await unseenOf(admin.id)).toBe(before);
     });
@@ -1426,5 +1505,100 @@ describe('notifications integration (§16)', () => {
       const rows = await database.db.select().from(threadFollowers);
       expect(rows.map((r) => r.userId).sort()).toEqual([a.id, b.id].sort());
     });
+  });
+
+  it('R-AUTH-21 the 31st notification write in an hour gets rate_limited with a retry time, over PATCH, POST and DELETE alike, and a refused write changes nothing', async () => {
+    const dana = await createActiveUser('Dana');
+    const options = { featureEnabled: true, now: clock };
+    const device = (n: number) => ({
+      endpoint: `https://fcm.googleapis.com/fcm/send/rate-${n}`,
+      p256dh: VALID_P256DH,
+      auth: VALID_AUTH,
+      locale: 'en',
+    });
+    for (let i = 1; i <= 29; i++) {
+      expect((await subscribeDevice({ database }, dana, device(i % 3), options)).ok).toBe(true);
+    }
+    const [row] = await listSubscriptions(database.db, dana.id);
+    expect((await unsubscribeDevice({ database }, dana, 'missing-id', options)).ok).toBe(false);
+    // The 30th write was the DELETE above; the next of each kind is refused.
+    const refusedPatch = await patchNotifications(
+      { database, vapid },
+      dana,
+      { kinds: { chat: false } },
+      options,
+    );
+    expect(refusedPatch).toMatchObject({ ok: false, code: 'rate_limited' });
+    expect((refusedPatch as { retryAfterSeconds: number }).retryAfterSeconds).toBeGreaterThan(0);
+    expect(await subscribeDevice({ database }, dana, device(9), options)).toMatchObject({
+      ok: false,
+      code: 'rate_limited',
+    });
+    expect(await unsubscribeDevice({ database }, dana, row!.id, options)).toMatchObject({
+      ok: false,
+      code: 'rate_limited',
+    });
+    expect(await listSubscriptions(database.db, dana.id)).toHaveLength(3);
+    expect((await getPrefs(database.db, dana.id)).kinds.chat).toBe(true);
+    // The window moves on: an hour later writes work again.
+    const later = { ...options, now: clock + 3_600_001 };
+    expect((await subscribeDevice({ database }, dana, device(9), later)).ok).toBe(true);
+  });
+
+  it('R-AUTH-21 the route answers 429 with Retry-After once the member is past 30 writes', async () => {
+    const harness = await createHarness(database, {
+      now: () => clock,
+      push: createRecordingPushTransport(201),
+      vapid,
+      resolve: async (event) =>
+        event.request.method === 'PATCH'
+          ? patchNotifRoute(event as never)
+          : postSubRoute(event as never),
+    });
+    const headers = {
+      ...(await harness.as(PEOPLE.active.email)),
+      'content-type': 'application/json',
+      origin: ORIGIN,
+    };
+    let refused: Response | null = null;
+    for (let i = 0; i < 31 && !refused; i++) {
+      const res = await harness.send('/api/v1/notifications', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ kinds: { chat: i % 2 === 0 } }),
+        routeId: '/api/v1/notifications',
+      });
+      if (res.status === 429) refused = res;
+      else expect(res.status).toBe(200);
+    }
+    expect(refused?.status).toBe(429);
+    expect(Number(refused?.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect((await refused!.json()) as { error?: { code?: string } }).toMatchObject({
+      error: { code: 'rate_limited' },
+    });
+  });
+
+  it('R-NTF-02 two concurrent POSTs of the same new endpoint both succeed and leave one row; a repeat keeps the row id', async () => {
+    const eve = await createActiveUser('Eve');
+    const body = {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/concurrent-endpoint',
+      p256dh: VALID_P256DH,
+      auth: VALID_AUTH,
+      locale: 'vi' as const,
+      deviceLabel: 'Two tabs',
+    };
+    const [a, b] = await Promise.all([
+      subscribeDevice({ database }, eve, body, { featureEnabled: true, now: clock }),
+      subscribeDevice({ database }, eve, body, { featureEnabled: true, now: clock + 1 }),
+    ]);
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    const rows = await listSubscriptions(database.db, eve.id);
+    expect(rows).toHaveLength(1);
+    const again = await subscribeDevice({ database }, eve, body, {
+      featureEnabled: true,
+      now: clock + 2,
+    });
+    expect(again.ok && again.body.id).toBe(rows[0]!.id);
   });
 });

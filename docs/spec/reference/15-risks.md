@@ -21,6 +21,7 @@
 | Photos resized, originals lost | the upload screen says Class Hub stores optimized copies (R-MEM-05) |
 | A member over-shares contact data | private by default, per-field consent, one projection function (§4) |
 | Cloudflare lock-in | ports, SQL schema, no chat in the DO, local adapters pass the same contract suites (R-PLAT-06); a production Node target is deferred (§D) |
+| Push CPU and fan-out on Workers Free (10 ms CPU and 50 subrequests per invocation; a 30-device event cannot be encrypted and sent in one) | encryption runs inside `PushDelivery`, one batch of ≤ 40 per invocation, the VAPID JWT signed once per push service per event, items and summaries in one ≤ 7-batch `send`, no `PUSH` binding means no push (R-NTF-05); confirm "CPU time p99" on the live site at checklist item 8 |
 | Theme changes break upgrades | tokens only, no forked pages, screenshot and axe checks (§10) |
 | The only admin leaves | second-admin prompt, documented credential and backup handover (R-AUTH-14) |
 | Backups keep deleted personal data | mandatory `age` encryption, documented retention, deletions age out (R-BAK-11) |

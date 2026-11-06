@@ -15,7 +15,8 @@ import {
   listSubscriptions,
   upsertSubscription,
 } from '../repositories/push-subscriptions';
-import type { AdminResult } from './admin';
+import type { AdminFailure, AdminResult } from './admin';
+import { takeRateLimit } from './rate-limit';
 
 // §16.3: service backing `/api/v1/notifications` and `/notifications`.
 
@@ -25,6 +26,18 @@ export interface NotificationsRequestOptions {
   defaultLocale?: Locale;
   userAgent?: string | null;
   now?: number;
+}
+
+/** R-AUTH-21: 30 notification writes per hour per member; a refusal carries `Retry-After`. */
+async function limited(
+  context: Pick<AppContext, 'database'>,
+  member: Member,
+  now: number,
+): Promise<AdminFailure | null> {
+  const taken = await takeRateLimit(context.database, 'notifications', member.id, now);
+  return taken.ok
+    ? null
+    : { ok: false, code: 'rate_limited', retryAfterSeconds: taken.retryAfterSeconds };
 }
 
 function hasVapidKeys(context: Pick<AppContext, 'vapid'>): boolean {
@@ -82,6 +95,8 @@ export async function patchNotifications(
   if (!parsed.success) return { ok: false, code: 'validation' };
   const now = options.now ?? Date.now();
   const timeZone = options.timeZone ?? siteConfig.timeZone;
+  const refused = await limited(context, member, now);
+  if (refused) return refused;
 
   if (parsed.data.kinds) {
     const kindsPatch = { ...parsed.data.kinds };
@@ -111,6 +126,8 @@ export async function subscribeDevice(
   const now = options.now ?? Date.now();
   const locale = parsed.data.locale ?? options.defaultLocale ?? siteConfig.locale;
   const deviceLabel = parsed.data.deviceLabel ?? deriveDeviceLabel(options.userAgent);
+  const refused = await limited(context, member, now);
+  if (refused) return refused;
 
   const saved = await upsertSubscription(context.database, {
     userId: member.id,
@@ -135,6 +152,8 @@ export async function unsubscribeDevice(
 ): Promise<AdminResult<{ ok: true }>> {
   if (!options.featureEnabled) return { ok: false, code: 'feature_disabled' };
   if (!subscriptionId) return { ok: false, code: 'not_found' };
+  const refused = await limited(context, member, options.now ?? Date.now());
+  if (refused) return refused;
   const removed = await deleteSubscription(context.database.db, member.id, subscriptionId);
   if (!removed) return { ok: false, code: 'not_found' };
   return { ok: true, status: 200, body: { ok: true } };

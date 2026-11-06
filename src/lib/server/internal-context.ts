@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { toBase64Url } from './push/vapid';
 
 // R-CHAT-04: the member context the Worker hands the ChatRoom on a fresh internal
 // request. The room trusts nothing else about who is on the socket, so the token is
@@ -21,13 +22,6 @@ export const memberContextSchema = z
 export type MemberContext = z.infer<typeof memberContextSchema>;
 
 const encoder = new TextEncoder();
-
-function toBase64Url(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes))
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replace(/=+$/, '');
-}
 
 function fromBase64Url(text: string): Uint8Array<ArrayBuffer> | null {
   if (!/^[A-Za-z0-9_-]+$/.test(text)) return null;

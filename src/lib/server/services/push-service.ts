@@ -6,11 +6,15 @@ import type { SiteSettings } from '../../contracts/settings';
 import type { Locale } from '../../i18n';
 import { notificationPrefs, pushSubscriptions, users } from '../db/schema';
 import type { Database } from '../ports/database';
-import type { PushDeliveryRequest, PushTransport } from '../ports/push-transport';
+import {
+  MAX_PUSH_DELIVERIES_PER_EVENT,
+  type PushDeliveryRequest,
+  type PushTransport,
+} from '../ports/push-transport';
 import {
   buildPushHeaders,
   createVapidAuthorization,
-  encryptPushPayload,
+  importVapidSigningKey,
   isAllowedPushEndpoint,
   renderPushPayload,
   type PushKind,
@@ -35,7 +39,6 @@ import { effectiveSettings } from './settings';
 // §16.1–16.2: Web Push orchestration, coalesced chat trigger, quiet mode and summaries.
 
 const DEFAULT_SITE_ORIGIN = 'https://classhub.local';
-const encoder = new TextEncoder();
 
 export interface PushServiceContext {
   database: Database;
@@ -43,6 +46,8 @@ export interface PushServiceContext {
   vapid?: VapidKeys;
   siteOrigin?: string;
   now?: () => number;
+  /** Test seam: the per-event delivery ceiling (default 7 batches of 40). */
+  maxDeliveriesPerEvent?: number;
 }
 
 function hasVapidAndTransport(
@@ -66,72 +71,120 @@ async function resolvePushSiteState(
   };
 }
 
-/**
- * R-NTF-01, 03, 05, 06: encrypts and VAPID-signs each subscription's localized payload,
- * sends through `PushTransport`, and updates `failure_count` / deletes expired rows.
- */
-export async function buildAndSend(
-  ctx: PushServiceContext,
-  subscriptions: readonly StoredPushSubscription[],
-  payloadForLocale: (locale: Locale) => PushPayload,
-  kind: PushKind,
-  now = (ctx.now ?? Date.now)(),
-): Promise<void> {
-  if (!hasVapidAndTransport(ctx) || subscriptions.length === 0) return;
-  const sub = ctx.siteOrigin ?? DEFAULT_SITE_ORIGIN;
+type ReadyPushContext = PushServiceContext & { push: PushTransport; vapid: VapidKeys };
 
+/**
+ * The start every push shares: a transport and keys, the clock, and the site unlocked with
+ * notifications and the event's own feature on. Null means send nothing.
+ */
+async function openPush(
+  ctx: PushServiceContext,
+  nowInput: number | undefined,
+  feature: 'chat' | 'join' | 'discussions',
+): Promise<{ ctx: ReadyPushContext; now: number; settings: SiteSettings } | null> {
+  if (!hasVapidAndTransport(ctx)) return null;
+  const now = nowInput ?? (ctx.now ?? Date.now)();
+  const { unlocked, settings } = await resolvePushSiteState(ctx);
+  if (!unlocked || !settings.features.notifications || !settings.features[feature]) return null;
+  return { ctx, now, settings };
+}
+
+type LocalizedPayload = (locale: Locale) => PushPayload;
+
+/** One event's deliveries, collected from the item pushes and the due summaries, sent together. */
+interface PushEvent {
+  add(
+    subscriptions: readonly StoredPushSubscription[],
+    payloadForLocale: LocalizedPayload,
+    kind: PushKind,
+  ): Promise<void>;
+  /** Deliveries collected so far. */
+  readonly size: number;
+  flush(): Promise<void>;
+}
+
+/**
+ * R-NTF-01, 03, 05, 06: builds one event's deliveries (localized plaintext payload, subscription
+ * keys, headers) and hands them to `PushTransport` in a single `send`, so the event stays within
+ * its 7 batches whatever mix of pushes and summaries it holds. Encryption happens at delivery;
+ * here the VAPID key is imported once and the JWT signed once per push-service audience.
+ * `flush` updates `failure_count` and deletes expired rows (R-NTF-06).
+ */
+function createPushEvent(ctx: ReadyPushContext, now: number): PushEvent {
+  const sub = ctx.siteOrigin ?? DEFAULT_SITE_ORIGIN;
   const deliveries: PushDeliveryRequest[] = [];
   const subById = new Map<string, StoredPushSubscription>();
+  const authByAudience = new Map<string, string | null>();
+  let signingKey: Promise<CryptoKey> | undefined;
 
-  for (const item of subscriptions) {
-    // R-NTF-02: re-check endpoint against the allow-list before every send.
-    if (!isAllowedPushEndpoint(item.endpoint)) continue;
+  async function authorizationFor(endpoint: string): Promise<string | null> {
+    const audience = new URL(endpoint).origin;
+    const known = authByAudience.get(audience);
+    if (known !== undefined) return known;
+    let authorization: string | null = null;
     try {
-      const payload = payloadForLocale(item.locale);
-      const body = await encryptPushPayload(encoder.encode(JSON.stringify(payload)), {
-        p256dh: item.p256dh,
-        auth: item.auth,
-      });
-      const authorization = await createVapidAuthorization({
-        endpoint: item.endpoint,
+      signingKey ??= importVapidSigningKey(ctx.vapid.privateKey);
+      authorization = await createVapidAuthorization({
+        endpoint,
         sub,
         keys: ctx.vapid,
         nowMs: now,
+        signingKey: await signingKey,
       });
-      const headers = buildPushHeaders(kind, payload.tag, authorization);
-      deliveries.push({
-        subscriptionId: item.id,
-        endpoint: item.endpoint,
-        headers,
-        body,
-      });
-      subById.set(item.id, item);
     } catch {
-      // Malformed stored key material: count as a delivery failure.
-      await updateFailureCount(ctx.database.db, item, 400, now);
+      // A VAPID key or origin problem is configuration, not a subscription failure (R-NTF-06).
+      logLine({ config: 'vapid_sign_failed' });
     }
+    authByAudience.set(audience, authorization);
+    return authorization;
   }
 
-  if (deliveries.length === 0) return;
-  const results = await ctx.push.send(deliveries);
-  for (const res of results) {
-    const stored = subById.get(res.subscriptionId);
-    if (stored) {
-      await updateFailureCount(ctx.database.db, stored, res.status, now);
-    }
-  }
+  return {
+    get size() {
+      return deliveries.length;
+    },
+    async add(subscriptions, payloadForLocale, kind) {
+      for (const item of subscriptions) {
+        // R-NTF-02: re-check endpoint against the allow-list before every send.
+        if (!isAllowedPushEndpoint(item.endpoint)) continue;
+        const authorization = await authorizationFor(item.endpoint);
+        if (!authorization) continue;
+        const payload = payloadForLocale(item.locale);
+        deliveries.push({
+          subscriptionId: item.id,
+          endpoint: item.endpoint,
+          p256dh: item.p256dh,
+          auth: item.auth,
+          payload: JSON.stringify(payload),
+          headers: buildPushHeaders(kind, payload.tag, authorization),
+        });
+        subById.set(item.id, item);
+      }
+    },
+    async flush() {
+      if (deliveries.length === 0) return;
+      const results = await ctx.push.send(deliveries);
+      for (const res of results) {
+        const stored = subById.get(res.subscriptionId);
+        if (stored) {
+          await updateFailureCount(ctx.database.db, stored, res.status, now);
+        }
+      }
+    },
+  };
 }
 
-/** R-NTF-13: sends a summary push to a quiet member if the doubling interval has passed. */
-export async function sendSummaryIfDue(
+/**
+ * R-NTF-13: claims a quiet member's summary if the doubling interval has passed and returns what
+ * to send (or null). The claim advances `summaries_sent` and `last_push_at`.
+ */
+async function claimSummary(
   ctx: PushServiceContext,
   userId: string,
-  now = (ctx.now ?? Date.now)(),
-  preloadedSettings?: SiteSettings,
-): Promise<boolean> {
-  if (!hasVapidAndTransport(ctx)) return false;
-  const settings = preloadedSettings ?? (await resolvePushSiteState(ctx)).settings;
-  if (!settings.features.notifications) return false;
+  now: number,
+  settings: SiteSettings,
+): Promise<{ subscriptions: StoredPushSubscription[]; payloadForLocale: LocalizedPayload } | null> {
+  if (!settings.features.notifications) return null;
 
   const checked = await sendSummaryCheck(
     ctx.database.db,
@@ -140,7 +193,7 @@ export async function sendSummaryIfDue(
     siteConfig.push.summaryHours,
     siteConfig.push.quietAfter,
   );
-  if (!checked) return false;
+  if (!checked) return null;
 
   const counts = await readSummaryCounts(
     ctx.database.db,
@@ -153,22 +206,28 @@ export async function sendSummaryIfDue(
     },
   );
   const subscriptions = await getSubscriptionsForPush(ctx.database.db, [userId]);
-  if (subscriptions.length === 0) return false;
-
-  await buildAndSend(
-    ctx,
+  if (subscriptions.length === 0) return null;
+  return {
     subscriptions,
-    (locale) =>
-      renderPushPayload({
-        kind: 'summary',
-        locale,
-        siteName: settings.name,
-        counts,
-      }),
-    'summary',
-    now,
-  );
-  return true;
+    payloadForLocale: (locale) =>
+      renderPushPayload({ kind: 'summary', locale, siteName: settings.name, counts }),
+  };
+}
+
+/** Claims every quiet member's due summary that still fits the event and adds it (after the item pushes). */
+async function addDueSummaries(
+  ctx: PushServiceContext,
+  event: PushEvent,
+  quietMembers: readonly { userId: string }[],
+  now: number,
+  settings: SiteSettings,
+): Promise<void> {
+  for (const quiet of quietMembers) {
+    // A summary the event cannot carry (7 batches of 40) is not claimed, so it stays due.
+    if (event.size >= (ctx.maxDeliveriesPerEvent ?? MAX_PUSH_DELIVERIES_PER_EVENT)) break;
+    const summary = await claimSummary(ctx, quiet.userId, now, settings);
+    if (summary) await event.add(summary.subscriptions, summary.payloadForLocale, 'summary');
+  }
 }
 
 export interface SendChatPushInput {
@@ -183,16 +242,15 @@ export interface SendChatPushInput {
  * R-NTF-04, 07, 13: sends chat pushes after the room broadcast.
  * Excludes the sender and every member the broadcast reached, coalesces per
  * `push.chatCoalesceSeconds`, and routes quiet members (`unseen_pushes >= quietAfter`)
- * through `sendSummaryIfDue`.
+ * through the summary path, in the same `send` as the chat pushes.
  */
 export async function sendChatPush(
   ctx: PushServiceContext,
   input: SendChatPushInput,
 ): Promise<void> {
-  if (!hasVapidAndTransport(ctx)) return;
-  const now = input.now ?? (ctx.now ?? Date.now)();
-  const { unlocked, settings } = await resolvePushSiteState(ctx);
-  if (!unlocked || !settings.features.notifications || !settings.features.chat) return;
+  const opened = await openPush(ctx, input.now, 'chat');
+  if (!opened) return;
+  const { now, settings } = opened;
 
   const excludeUserIds = [...new Set([input.senderId, ...input.connectedMemberIds])];
   const coalesceMs = siteConfig.push.chatCoalesceSeconds * 1000;
@@ -213,10 +271,10 @@ export async function sendChatPush(
     quietAfter,
   });
 
+  const event = createPushEvent(opened.ctx, now);
   if (normalRecipientIds.length > 0) {
     const subscriptions = await getSubscriptionsForPush(ctx.database.db, normalRecipientIds);
-    await buildAndSend(
-      ctx,
+    await event.add(
       subscriptions,
       (locale) =>
         renderPushPayload({
@@ -226,13 +284,10 @@ export async function sendChatPush(
           message: input.messageText,
         }),
       'chat',
-      now,
     );
   }
-
-  for (const quiet of quietMembers) {
-    await sendSummaryIfDue(ctx, quiet.userId, now, settings);
-  }
+  await addDueSummaries(ctx, event, quietMembers, now, settings);
+  await event.flush();
 }
 
 /**
@@ -243,10 +298,9 @@ export async function sendJoinPush(
   ctx: PushServiceContext,
   input: { requestedName: string; now?: number },
 ): Promise<void> {
-  if (!hasVapidAndTransport(ctx)) return;
-  const now = input.now ?? (ctx.now ?? Date.now)();
-  const { unlocked, settings } = await resolvePushSiteState(ctx);
-  if (!unlocked || !settings.features.notifications || !settings.features.join) return;
+  const opened = await openPush(ctx, input.now, 'join');
+  if (!opened) return;
+  const { now } = opened;
 
   const admins = await ctx.database.db
     .selectDistinct({ userId: users.id })
@@ -265,8 +319,8 @@ export async function sendJoinPush(
   if (admins.length === 0) return;
   const adminIds = admins.map((a) => a.userId);
   const subscriptions = await getSubscriptionsForPush(ctx.database.db, adminIds);
-  await buildAndSend(
-    ctx,
+  const event = createPushEvent(opened.ctx, now);
+  await event.add(
     subscriptions,
     (locale) =>
       renderPushPayload({
@@ -275,8 +329,8 @@ export async function sendJoinPush(
         requestedName: input.requestedName,
       }),
     'join',
-    now,
   );
+  await event.flush();
 }
 
 export interface SendItemPushInput {
@@ -294,17 +348,16 @@ export interface SendItemPushInput {
 /**
  * R-NTF-04, 07, 13: `thread` (a new post, to every recipient) and `reply` (a new comment,
  * to the thread's followers) pushes, after the write committed. Quiet members get
- * `sendSummaryIfDue` instead of the item.
+ * the summary path instead of the item.
  */
 export async function sendItemPush(
   ctx: PushServiceContext,
   kind: 'thread' | 'reply',
   input: SendItemPushInput,
 ): Promise<void> {
-  if (!hasVapidAndTransport(ctx)) return;
-  const now = input.now ?? (ctx.now ?? Date.now)();
-  const { unlocked, settings } = await resolvePushSiteState(ctx);
-  if (!unlocked || !settings.features.notifications || !settings.features.discussions) return;
+  const opened = await openPush(ctx, input.now, 'discussions');
+  if (!opened) return;
+  const { now, settings } = opened;
 
   const followersOfPostId = kind === 'reply' ? input.postId : undefined;
   const quietAfter = siteConfig.push.quietAfter;
@@ -324,6 +377,7 @@ export async function sendItemPush(
     ...(followersOfPostId ? { followersOfPostId } : {}),
   });
 
+  const event = createPushEvent(opened.ctx, now);
   if (recipientIds.length > 0) {
     const found = await getSubscriptionsForPush(ctx.database.db, recipientIds);
     // Array.sort is stable: the author's devices first, the rest keep their order.
@@ -331,8 +385,7 @@ export async function sendItemPush(
       (a, b) =>
         Number(b.userId === input.priorityUserId) - Number(a.userId === input.priorityUserId),
     );
-    await buildAndSend(
-      ctx,
+    await event.add(
       subscriptions,
       (locale) =>
         kind === 'thread'
@@ -352,19 +405,17 @@ export async function sendItemPush(
               comment: input.commentText ?? '',
             }),
       kind,
-      now,
     );
   }
-
-  for (const quiet of quietMembers) {
-    await sendSummaryIfDue(ctx, quiet.userId, now, settings);
-  }
+  await addDueSummaries(ctx, event, quietMembers, now, settings);
+  await event.flush();
 }
 
 /**
  * R-NTF-04: runs a push trigger after the write committed. A failure is logged without any
  * endpoint or key and never reaches the caller. Under `waitUntil` the request does not wait;
- * without one (local dev, tests) the trigger is awaited so a recording transport sees it.
+ * without one (local dev, tests) the trigger is awaited so a recording transport sees it,
+ * except the join push, which is dropped.
  */
 export async function pushAfterCommit(
   context: AppContext,
@@ -372,6 +423,9 @@ export async function pushAfterCommit(
   task: (ctx: PushServiceContext) => Promise<void>,
 ): Promise<void> {
   if (!context.push || !context.vapid) return;
+  // R-AUTH-28: the join push is never awaited inline (the /join reply is uniform), so without a
+  // `waitUntil` it is dropped.
+  if (label === 'join' && !context.waitUntil) return;
   const work = Promise.resolve()
     .then(() =>
       task({

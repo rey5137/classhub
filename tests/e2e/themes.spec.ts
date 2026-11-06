@@ -72,7 +72,8 @@ test('AC-NAV-01 memories shows the seeded photo wall and album filters alongside
   page,
 }) => {
   await page.goto('/memories');
-  await expect(page.locator('.wall > li .photo img')).toHaveCount(10);
+  // At least the 10 seeded photos: the uploads project adds more to the same local DB, and the demo seed keeps them.
+  await expect(page.locator('.wall > li .photo img').nth(9)).toBeVisible();
   await expect(page.locator('.filters .chip')).not.toHaveCount(0);
 });
 
