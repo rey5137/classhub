@@ -25,7 +25,7 @@ import { updateSettings } from '$lib/server/services/settings';
 import { siteMediaKeys, type Feature, type Features } from '$lib/contracts/settings';
 import { themes } from '$lib/themes/registry';
 
-const featureKeys: Feature[] = ['memories', 'discussions', 'chat', 'join'];
+const featureKeys: Feature[] = ['memories', 'discussions', 'chat', 'join', 'notifications'];
 
 // R-NAV-03: the invite screen loads here, after the membership check; R-NAV-05 refuses
 // everyone but admins before any row is read.

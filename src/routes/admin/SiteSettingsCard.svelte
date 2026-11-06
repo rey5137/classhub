@@ -50,7 +50,14 @@
   }
 
   const featuresError = $derived(
-    ['features', 'features.memories', 'features.discussions', 'features.chat', 'features.join']
+    [
+      'features',
+      'features.memories',
+      'features.discussions',
+      'features.chat',
+      'features.join',
+      'features.notifications',
+    ]
       .map(fieldError)
       .find(Boolean),
   );
@@ -242,7 +249,7 @@
     >
       <legend>{i18n.t('admin.settings.features')}</legend>
       <div class="choices">
-        {#each ['memories', 'discussions', 'chat'] as const as feature (feature)}
+        {#each ['memories', 'discussions', 'chat', 'notifications'] as const as feature (feature)}
           <label class="choice">
             <input type="checkbox" name={feature} checked={settings.features[feature]} />
             <input

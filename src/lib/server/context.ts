@@ -2,7 +2,9 @@ import { createCloudflareContext } from './adapters/cloudflare/context';
 import type { Database } from './ports/database';
 import type { IdentityProvider } from './ports/identity';
 import type { ObjectStorage } from './ports/object-storage';
+import type { PushTransport } from './ports/push-transport';
 import type { RealtimeHub } from './ports/realtime';
+import type { VapidKeys } from './push';
 import type { TurnstileVerifier } from './services/turnstile';
 
 export interface AppContext {
@@ -13,6 +15,10 @@ export interface AppContext {
   /** R-AUTH-12: false while `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` is missing, which keeps the site locked. */
   accessConfigured: boolean;
   realtime: RealtimeHub;
+  /** R-NTF-05: Web Push transport port; absent only in harnesses that do not exercise push. */
+  push?: PushTransport;
+  /** R-NTF-01: VAPID key pair; absent when `VAPID_PUBLIC_KEY` or `VAPID_PRIVATE_KEY` is unset. */
+  vapid?: VapidKeys;
   /** R-AUTH-23: the `LOG_HASH_SALT` secret; unset in dev and tests (see log.ts). */
   logHashSalt?: string;
   /** R-AUTH-27: absent while the Turnstile keys are unset, and then no `/join` submission passes. */

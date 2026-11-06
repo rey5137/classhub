@@ -126,7 +126,13 @@
 
 <PageHeader title={i18n.t('prof.title')} lede={i18n.t('prof.lede')} />
 
-<p class="install-link"><a href={resolve('/install')}>{i18n.t('install.profileLink')}</a></p>
+<p class="install-link">
+  <a href={resolve('/install')}>{i18n.t('install.profileLink')}</a>
+  {#if data.features.notifications}
+    <span aria-hidden="true">·</span>
+    <a href={resolve('/notifications')}>{i18n.t('profile.notificationsLink')}</a>
+  {/if}
+</p>
 
 {#snippet visibilityFor(field: Editable)}
   <div class="visibility">

@@ -1,6 +1,8 @@
 import { signContext, verifyContext } from '../../internal-context';
 import type { Database } from '../../ports/database';
+import type { PushTransport } from '../../ports/push-transport';
 import type { RealtimeHub } from '../../ports/realtime';
+import type { VapidKeys } from '../../push';
 import { attachmentOf, ChatRoomCore, type RoomSocket } from '../../services/chat-room';
 import { pendingUpgrades, TICKET_HEADER, type LocalSocket } from './upgrade-registry';
 
@@ -8,6 +10,8 @@ export interface LocalHubOptions {
   database: Database;
   /** Signer and room share one process, so a random key per process serves unless one is set. */
   contextKey?: string;
+  push?: PushTransport;
+  vapid?: VapidKeys;
   now?: () => number;
 }
 
@@ -28,9 +32,15 @@ export function createLocalHub(options: LocalHubOptions): RealtimeHub {
   const contextKey = options.contextKey || randomKey();
   const now = options.now ?? Date.now;
   const sockets = new Set<RoomSocket>();
-  const room = new ChatRoomCore({ database: options.database, sockets: () => [...sockets], now });
+  const room = new ChatRoomCore({
+    database: options.database,
+    sockets: () => [...sockets],
+    push: options.push,
+    vapid: options.vapid,
+    now,
+  });
 
-  function accept(token: string, socket: LocalSocket): void {
+  function accept(token: string, socket: LocalSocket, siteOrigin: string | undefined): void {
     let peer: RoomSocket | undefined;
     let closed = false;
     // One step at a time per socket, as the Durable Object delivers them: the hello
@@ -40,7 +50,7 @@ export function createLocalHub(options: LocalHubOptions): RealtimeHub {
       if (closed) return;
       if (!context) return socket.close(1008, 'not authorized');
       peer = {
-        attachment: attachmentOf(context, now()),
+        attachment: attachmentOf(context, now(), siteOrigin),
         send: (text) => socket.send(text),
         close: (code, reason) => socket.close(code, reason),
       };
@@ -75,7 +85,10 @@ export function createLocalHub(options: LocalHubOptions): RealtimeHub {
         contextKey,
         now(),
       );
-      pending.accept = (socket) => accept(token, socket);
+      // R-NTF-01: a VAPID `sub` must be an `https://` origin; the dev server's http one is left out.
+      const origin = new URL(request.url);
+      const siteOrigin = origin.protocol === 'https:' ? origin.origin : undefined;
+      pending.accept = (socket) => accept(token, socket, siteOrigin);
       return new Response(null, { status: 204 });
     },
     async disconnectMember(memberId) {

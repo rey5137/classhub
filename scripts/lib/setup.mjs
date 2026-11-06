@@ -34,9 +34,27 @@ export const SETUP_SECRETS = ['INTERNAL_CONTEXT_KEY', 'LOG_HASH_SALT'];
  *   nodeVersion: string;
  *   uuid: () => string;
  *   secret: () => string;
+ *   vapidKeyPair?: () => Promise<{ publicKey: string; privateKey: string }>;
  *   now?: number;
  * }} SetupDeps
  */
+
+/** R-OPS-04 step 5 / R-NTF-01: generates a P-256 key pair for Web Push VAPID on WebCrypto. */
+export async function generateVapidKeyPair() {
+  const keyPair = /** @type {CryptoKeyPair} */ (
+    await globalThis.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
+      'deriveKey',
+    ])
+  );
+  const pkcs8 = new Uint8Array(
+    await globalThis.crypto.subtle.exportKey('pkcs8', keyPair.privateKey),
+  );
+  const rawPub = new Uint8Array(await globalThis.crypto.subtle.exportKey('raw', keyPair.publicKey));
+  return {
+    privateKey: Buffer.from(pkcs8).toString('base64url'),
+    publicKey: Buffer.from(rawPub).toString('base64url'),
+  };
+}
 
 export class SetupError extends Error {
   name = 'SetupError';
@@ -321,6 +339,23 @@ export async function runSetup(deps) {
     if (result.status !== 0)
       throw new SetupError(`storing secret ${name} failed: ${reason(result)}`);
     out(`Secret ${name}: created.`);
+  }
+
+  // R-OPS-04 step 5 / R-NTF-01: generate a VAPID P-256 key pair when VAPID_PUBLIC_KEY is empty.
+  // A rerun never replaces an existing pair.
+  const existingVapidPublic =
+    typeof config.vars?.VAPID_PUBLIC_KEY === 'string' ? config.vars.VAPID_PUBLIC_KEY.trim() : '';
+  if (existingVapidPublic) {
+    out('VAPID key pair: exists, kept.');
+  } else {
+    const vapid = await (deps.vapidKeyPair ?? generateVapidKeyPair)();
+    const secretRes = run(['secret', 'put', 'VAPID_PRIVATE_KEY'], { input: vapid.privateKey });
+    if (secretRes.status !== 0) {
+      throw new SetupError(`storing secret VAPID_PRIVATE_KEY failed: ${reason(secretRes)}`);
+    }
+    config.vars = { ...config.vars, VAPID_PUBLIC_KEY: vapid.publicKey };
+    writeFileSync(configPath, serializeConfig(config));
+    out('VAPID key pair: created.');
   }
 
   // 6. Remote migrations, then the defaults (never demo content). On a database already in

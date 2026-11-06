@@ -17,6 +17,7 @@
     }
   ],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "classhub-media" }],
+  "services": [{ "binding": "PUSH", "service": "classhub", "entrypoint": "PushDelivery" }],
   "durable_objects": { "bindings": [{ "name": "CHAT_ROOM", "class_name": "ChatRoom" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ChatRoom"] }]
 }

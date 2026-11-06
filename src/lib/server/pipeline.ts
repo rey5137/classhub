@@ -256,7 +256,7 @@ async function guard(
     return unlocked ? deny(event) : locked(event);
   }
 
-  const member = await resolveMember(context.database, identity);
+  const member = await resolveMember(context.database, identity, (options.now ?? Date.now)());
   if (!unlocked) {
     // R-AUTH-12: one answer for everyone, known or not, except the bootstrap admin,
     // who reaches the setup checklist and nothing else.

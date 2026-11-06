@@ -5,7 +5,9 @@ import { appearance, applyAppearance } from '../../src/lib/server/appearance';
 import { createSecurityHandle } from '../../src/lib/server/pipeline';
 import type { Database } from '../../src/lib/server/ports/database';
 import type { ObjectStorage } from '../../src/lib/server/ports/object-storage';
+import type { PushTransport } from '../../src/lib/server/ports/push-transport';
 import type { RealtimeHub } from '../../src/lib/server/ports/realtime';
+import type { VapidKeys } from '../../src/lib/server/push';
 import type { TurnstileVerifier } from '../../src/lib/server/services/turnstile';
 import {
   AUDIENCE,
@@ -88,6 +90,8 @@ export async function createHarness(
     appearance?: boolean;
     /** R-AUTH-27: the `/join` Turnstile check; absent as in a deployment without its keys. */
     turnstile?: TurnstileVerifier;
+    push?: PushTransport;
+    vapid?: VapidKeys;
     /** A production build: `LOG_HASH_SALT` must then be set (R-AUTH-23, R-AUTH-29). */
     production?: boolean;
   } = {},
@@ -104,6 +108,8 @@ export async function createHarness(
     identity,
     accessConfigured: options.accessConfigured ?? true,
     realtime: options.realtime ?? recordingHub(),
+    ...(options.push ? { push: options.push } : {}),
+    ...(options.vapid ? { vapid: options.vapid } : {}),
     ...(options.logHashSalt ? { logHashSalt: options.logHashSalt } : {}),
     ...(options.turnstile ? { turnstile: options.turnstile } : {}),
   };

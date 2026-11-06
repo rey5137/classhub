@@ -52,9 +52,12 @@ function exportedNames(bundle) {
   return names;
 }
 
-if (!exportedNames(entrySource).has('ChatRoom')) {
-  console.error(`check-worker-exports: ${bundlePath} does not export ChatRoom`);
-  process.exit(1);
+const exported = exportedNames(entrySource);
+for (const required of ['ChatRoom', 'PushDelivery']) {
+  if (!exported.has(required)) {
+    console.error(`check-worker-exports: ${bundlePath} does not export ${required}`);
+    process.exit(1);
+  }
 }
 
 // AC-PLAT-02/09: the Worker bundle must not carry the local adapters (the chat
@@ -77,4 +80,4 @@ for (const token of [
   }
 }
 
-console.log(`check-worker-exports: ${bundlePath} exports ChatRoom`);
+console.log(`check-worker-exports: ${bundlePath} exports ChatRoom and PushDelivery`);

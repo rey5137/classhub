@@ -176,7 +176,10 @@ describe('chat socket route (R-CHAT-04)', () => {
       member,
     );
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toBe('main https://chat-room.internal/connect');
+    // Only the site origin travels on, as the VAPID `sub` (R-NTF-01); no client header does.
+    expect(calls[0]!.url).toBe(
+      `main https://chat-room.internal/connect?origin=${encodeURIComponent(ORIGIN)}`,
+    );
     expect([...calls[0]!.headers.keys()].sort()).toEqual(['upgrade', CONTEXT_HEADER]);
     const context = await verifyContext(calls[0]!.headers.get(CONTEXT_HEADER), key);
     expect(context).toMatchObject({ memberId: 'm-1', role: 'member', authUntil: 9e12 });

@@ -10,8 +10,11 @@ import {
   comments,
   invites,
   media,
+  notificationPrefs,
   posts,
   profileContacts,
+  pushSubscriptions,
+  threadFollowers,
   users,
 } from '../db/schema';
 import { uuidv7 } from '../ids';
@@ -480,6 +483,10 @@ export async function completeDeletion(
       .set({ email: tombstone, status: 'revoked' })
       .where(and(eq(invites.email, row.authEmail), live)),
     db.delete(profileContacts).where(and(eq(profileContacts.userId, userId), live)),
+    // R-NTF-08: completing a deletion removes subscriptions, prefs and follower rows.
+    db.delete(pushSubscriptions).where(and(eq(pushSubscriptions.userId, userId), live)),
+    db.delete(notificationPrefs).where(and(eq(notificationPrefs.userId, userId), live)),
+    db.delete(threadFollowers).where(and(eq(threadFollowers.userId, userId), live)),
     db
       .update(users)
       .set({

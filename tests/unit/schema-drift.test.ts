@@ -188,15 +188,17 @@ function actualSchema(client: Database.Database): ExpectedTable[] {
         .get(name) as { sql: string } | undefined
     )?.sql;
 
-    const columns = (client.prepare(`PRAGMA table_info('${name}')`).all() as TableInfoRow[]).map(
-      (column) => ({
-        name: column.name,
-        type: column.type.toLowerCase(),
-        notNull: column.notnull === 1,
-        primary: column.pk > 0,
-        default: column.dflt_value === null ? null : column.dflt_value.trim(),
-      }),
-    );
+    const rawColumns = client.prepare(`PRAGMA table_info('${name}')`).all() as TableInfoRow[];
+    // Drizzle marks column.primary only for single-column PKs (.primaryKey() on the column).
+    // A composite PK defined via primaryKey({ columns: [...] }) leaves column.primary false.
+    const isCompositePk = rawColumns.filter((c) => c.pk > 0).length > 1;
+    const columns = rawColumns.map((column) => ({
+      name: column.name,
+      type: column.type.toLowerCase(),
+      notNull: column.notnull === 1,
+      primary: !isCompositePk && column.pk > 0,
+      default: column.dflt_value === null ? null : column.dflt_value.trim(),
+    }));
 
     const indexes = (client.prepare(`PRAGMA index_list('${name}')`).all() as IndexListRow[])
       .filter((index) => !index.name.startsWith('sqlite_autoindex_'))

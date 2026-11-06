@@ -41,8 +41,10 @@ sequenceDiagram
 - **R-CHAT-04** **Handshake.** `/api/v1/chat/ws` verifies identity (R-AUTH-03), active membership and `Origin`
   (R-AUTH-17) **before** contacting the Durable Object. It then sends the DO a new Request built from scratch (no
   client header is forwarded) carrying `X-ClassHub-Context`: `{ memberId, role, displayName, authUntil, exp }` (`authUntil` is the verified Access JWT's `exp`) signed with
-  HMAC-SHA-256 under the Worker secret `INTERNAL_CONTEXT_KEY`, expiring in 30 s. The DO rejects any request without a
-  valid, unexpired context; it has no public route.
+  HMAC-SHA-256 under the Worker secret `INTERNAL_CONTEXT_KEY`, expiring in 30 s. Its URL carries only the site's
+  origin (`?origin=`), which the DO keeps on the socket when it is an `https://` origin, as the VAPID `sub` of the
+  pushes that socket's messages trigger (R-NTF-01). The DO rejects any request without a valid, unexpired context; it
+  has no public route.
 - **R-CHAT-05** **Sending.** The DO validates the frame with Zod (≤ 4 KB), applies a per-member token bucket (1 per
   second, burst 5; `429`-style `{type:"error", code:"rate_limited"}`), and inserts with
   `INSERT … SELECT … WHERE EXISTS (SELECT 1 FROM users WHERE id = ? AND status = 'active')` and `ON CONFLICT

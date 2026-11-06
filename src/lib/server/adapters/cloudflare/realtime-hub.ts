@@ -6,6 +6,7 @@ import type { ChatRoom } from './chat-room';
 
 /** The internal URL the room is fetched on; only the binding can reach it. */
 const ROOM_URL = 'https://chat-room.internal/connect';
+export const ORIGIN_PARAM = 'origin';
 
 /**
  * The ChatRoom Durable Object bridge (R-CHAT-04, 09). One room, addressed by name
@@ -21,7 +22,7 @@ export function createDurableObjectHub(
     return rooms.get(rooms.idFromName(options.roomName ?? CHAT_ROOM_ID));
   };
   return {
-    async connect(_request, member) {
+    async connect(request, member) {
       if (!contextKey) throw new Error('INTERNAL_CONTEXT_KEY is not set');
       const token = await signContext(
         {
@@ -34,7 +35,10 @@ export function createDurableObjectHub(
         (options.now ?? Date.now)(),
       );
       // A Request built from scratch: no client header (cookie, Access assertion) travels on.
-      const response = await room().fetch(ROOM_URL, {
+      // Only the site origin does, as the VAPID `sub` of the pushes this socket's messages trigger (R-NTF-01).
+      const url = new URL(ROOM_URL);
+      url.searchParams.set(ORIGIN_PARAM, new URL(request.url).origin);
+      const response = await room().fetch(url.href, {
         headers: { upgrade: 'websocket', [CONTEXT_HEADER]: token },
       });
       return response as unknown as Response;

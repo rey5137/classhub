@@ -351,6 +351,7 @@ describe('site settings API (R-UI-01, R-UI-04)', () => {
       memories: false,
       chat: false,
       join: false,
+      notifications: true,
     });
   });
 
@@ -656,7 +657,13 @@ describe('the /admin settings form (R-UI-01, R-AUTH-17)', () => {
       accent: { dark: '#8cc4ef' },
       density: 'compact',
       locale: 'en',
-      features: { memories: true, discussions: false, chat: true, join: false },
+      features: {
+        memories: true,
+        discussions: false,
+        chat: true,
+        join: false,
+        notifications: false,
+      },
     };
     expect(await stored()).toEqual(expected);
     expect(locals).toMatchObject({
@@ -684,6 +691,7 @@ describe('the /admin settings form (R-UI-01, R-AUTH-17)', () => {
       discussions: true,
       chat: false,
       join: false,
+      notifications: false,
     });
   });
 
@@ -701,6 +709,7 @@ describe('the /admin settings form (R-UI-01, R-AUTH-17)', () => {
       discussions: true,
       chat: true,
       join: false,
+      notifications: false,
     });
     // Forging was-chat as already off while the box is ticked changes nothing.
     await submit('settings', { ...same, discussions: 'on', 'was-chat': '' });

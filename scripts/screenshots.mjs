@@ -22,6 +22,7 @@ const routes = [
   '/members/member-demo',
   '/info/reunion',
   '/profile',
+  '/notifications',
   '/install',
   // Home as an Android phone sees it: the install card needs a coarse pointer (R-NAV-11).
   '/home-install-card',
@@ -215,6 +216,16 @@ async function run() {
             ? await demoThreadPath()
             : route;
     if (route === '/chat') await markChatPartlyRead(page);
+    if (route === '/notifications') {
+      await page.addInitScript(() => {
+        if ('Notification' in window) {
+          Object.defineProperty(window.Notification, 'permission', {
+            get: () => 'default',
+            configurable: true,
+          });
+        }
+      });
+    }
     for (const { theme, mode } of combos) {
       for (const { width, height } of sizes) {
         await page.setViewportSize({ width, height });

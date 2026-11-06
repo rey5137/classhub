@@ -16,6 +16,8 @@ const FEATURE_ROUTES: [RegExp, Feature][] = [
   [/^\/api\/v1\/(posts|comments)(\/|$)/, 'discussions'],
   [/^\/chat(\/|$)/, 'chat'],
   [/^\/api\/v1\/chat(\/|$)/, 'chat'],
+  [/^\/notifications(\/|$)/, 'notifications'],
+  [/^\/api\/v1\/notifications(\/|$)/, 'notifications'],
 ];
 
 /**

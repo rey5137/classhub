@@ -1,5 +1,6 @@
 import { normalizeEmail } from '../../shared/normalize';
 import type { Database } from '../ports/database';
+import { resetUnseenPushes } from '../repositories/notification-prefs';
 import {
   activateInvitedUser,
   findUserByEmail,
@@ -39,6 +40,10 @@ export async function resolveMember(
     return { id: current.id, role: current.role, displayName: current.displayName };
   } else if (user.status === 'active') {
     await recordAccessSub(database, user, identity.subject, now);
+    // R-NTF-13: opening the app resets unseen_pushes, quiet_since and summaries_sent; a write only when > 0.
+    if (user.unseenPushes > 0) {
+      await resetUnseenPushes(database.db, user.id, now);
+    }
   } else {
     return null;
   }

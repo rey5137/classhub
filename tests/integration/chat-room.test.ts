@@ -9,7 +9,11 @@ import { chatMessages, siteSettings, users } from '../../src/lib/server/db/schem
 import { uuidv7 } from '../../src/lib/server/ids';
 import type { Database } from '../../src/lib/server/ports/database';
 import type { RealtimeHub, RealtimeMember } from '../../src/lib/server/ports/realtime';
-import { ChatRoomCore, type RoomSocket } from '../../src/lib/server/services/chat-room';
+import {
+  ChatRoomCore,
+  type RoomSocket,
+  type SocketAttachment,
+} from '../../src/lib/server/services/chat-room';
 import { suspendMember } from '../../src/lib/server/services/members';
 import { normalizeName } from '../../src/lib/shared/normalize';
 import { MEMBERS, Probe, sendFrame, type ClientSocket } from '../contract/realtime';
@@ -348,5 +352,19 @@ describe('ChatRoom (§9.2)', () => {
     sender.send(sendFrame('😀'.repeat(1_000)));
     expect((await sender.next('ack')).message.deleted).toBe(false);
     sender.close();
+  });
+
+  it('R-NTF-01 a socket carries the https origin it connected through, as the VAPID sub', async () => {
+    const chat = room();
+    const probe = await chat.open(MEMBERS.active);
+    const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(chat.name));
+    const origins = await runInDurableObject(stub, (instance: ChatRoom) => {
+      const live = instance as unknown as { ctx: DurableObjectState };
+      return live.ctx
+        .getWebSockets()
+        .map((socket) => (socket.deserializeAttachment() as SocketAttachment).siteOrigin);
+    });
+    expect(origins).toEqual(['https://classhub.example.test']);
+    probe.close();
   });
 });

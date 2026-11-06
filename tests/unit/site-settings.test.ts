@@ -76,14 +76,26 @@ describe('effective settings (R-UI-01)', () => {
     const settings = effectiveSettings(
       rows({
         name: JSON.stringify('Lớp 12A'),
-        features: JSON.stringify({ memories: true, discussions: false, chat: true, join: true }),
+        features: JSON.stringify({
+          memories: true,
+          discussions: false,
+          chat: true,
+          join: true,
+          notifications: false,
+        }),
         setup_state: JSON.stringify('unlocked'),
       }),
     );
     expect(settings).toEqual({
       ...defaultSettings,
       name: 'Lớp 12A',
-      features: { memories: true, discussions: false, chat: true, join: true },
+      features: {
+        memories: true,
+        discussions: false,
+        chat: true,
+        join: true,
+        notifications: false,
+      },
     });
   });
 
@@ -96,6 +108,7 @@ describe('effective settings (R-UI-01)', () => {
       discussions: false,
       chat: false,
       join: false,
+      notifications: true,
     });
     expect(effectiveSettings(rows({ features: JSON.stringify({ chat: 'off' }) })).features).toEqual(
       defaultSettings.features,
@@ -128,6 +141,9 @@ describe('feature routes (R-NAV-02)', () => {
     expect(featureOf('/api/v1/comments/abc')).toBe('discussions');
     expect(featureOf('/chat')).toBe('chat');
     expect(featureOf('/api/v1/chat/messages')).toBe('chat');
+    expect(featureOf('/notifications')).toBe('notifications');
+    expect(featureOf('/api/v1/notifications')).toBe('notifications');
+    expect(featureOf('/api/v1/notifications/subscriptions/abc')).toBe('notifications');
     // Shared with avatars and site media: the media service refuses only a photo there.
     expect(featureOf('/api/v1/media/reservations')).toBeNull();
     expect(featureOf('/api/v1/media/reservations/abc/image')).toBeNull();
@@ -147,7 +163,13 @@ describe('feature routes (R-NAV-02)', () => {
   });
 
   it('a route is disabled only while its own flag is off', () => {
-    const features = { memories: true, discussions: false, chat: true, join: false };
+    const features = {
+      memories: true,
+      discussions: false,
+      chat: true,
+      join: false,
+      notifications: true,
+    };
     expect(disabledFeature('/discussions', features)).toBe('discussions');
     expect(disabledFeature('/memories', features)).toBeNull();
     expect(disabledFeature('/members', features)).toBeNull();

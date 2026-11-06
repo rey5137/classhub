@@ -1,5 +1,13 @@
 import { sql } from 'drizzle-orm';
-import { check, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  check,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
 // §5.1: UUIDv7 text ids, epoch-millisecond INTEGER timestamps, portable SQLite
 // types only. Column names are explicit so the migration and the schema drift
@@ -337,6 +345,70 @@ export const joinRequests = sqliteTable(
     uniqueIndex('join_requests_email_unique').on(table.email),
     check('join_requests_email_lower_check', sql`${table.email} = lower(${table.email})`),
     index('join_requests_created_idx').on(table.createdAt),
+  ],
+);
+
+// R-NTF-08: one browser's Web Push subscription; emptied on restore (R-BAK-06).
+export const pushSubscriptions = sqliteTable(
+  'push_subscriptions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    endpoint: text('endpoint').notNull(),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    locale: text('locale', { enum: ['vi', 'en'] })
+      .notNull()
+      .default('vi'),
+    deviceLabel: text('device_label').notNull(),
+    failureCount: integer('failure_count', { mode: 'number' }).notNull().default(0),
+    createdAt: integer('created_at', { mode: 'number' }).notNull().$defaultFn(now),
+    updatedAt: integer('updated_at', { mode: 'number' }).notNull().$defaultFn(now),
+  },
+  (table) => [
+    uniqueIndex('push_subscriptions_endpoint_unique').on(table.endpoint),
+    index('push_subscriptions_user_idx').on(table.userId),
+  ],
+);
+
+// R-NTF-07, 09, 13: per-member notification kinds, mute, chat coalescing and quiet mode.
+export const notificationPrefs = sqliteTable(
+  'notification_prefs',
+  {
+    userId: text('user_id')
+      .primaryKey()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    kindsJson: text('kinds_json')
+      .notNull()
+      .default('{"chat":true,"thread":true,"reply":true,"join":true}'),
+    muteUntil: integer('mute_until', { mode: 'number' }),
+    lastChatPushAt: integer('last_chat_push_at', { mode: 'number' }).notNull().default(0),
+    lastPushAt: integer('last_push_at', { mode: 'number' }).notNull().default(0),
+    unseenPushes: integer('unseen_pushes', { mode: 'number' }).notNull().default(0),
+    quietSince: integer('quiet_since', { mode: 'number' }),
+    summariesSent: integer('summaries_sent', { mode: 'number' }).notNull().default(0),
+    updatedAt: integer('updated_at', { mode: 'number' }).notNull().$defaultFn(now),
+  },
+  (table) => [index('notification_prefs_user_idx').on(table.userId)],
+);
+
+// R-NTF-07: who gets `reply` pushes for a thread (author and commenters).
+export const threadFollowers = sqliteTable(
+  'thread_followers',
+  {
+    postId: text('post_id')
+      .notNull()
+      .references(() => posts.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.postId, table.userId] }),
+    index('thread_followers_post_idx').on(table.postId),
+    index('thread_followers_user_idx').on(table.userId),
   ],
 );
 

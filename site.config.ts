@@ -15,7 +15,7 @@ export const siteDefaults = {
   nav: ['home', 'memories', 'discussions', 'chat', 'members'],
   profileFields: ['city', 'bio', 'contact_email', 'phone', 'messaging_url'],
   // R-AUTH-27: the public /join form stays off until an admin turns it on.
-  features: { memories: true, discussions: true, chat: true, join: false },
+  features: { memories: true, discussions: true, chat: true, join: false, notifications: true },
   uploads: {
     maxImageBytes: 25_000_000,
     imageTypes: ['image/jpeg', 'image/webp'],
@@ -25,6 +25,18 @@ export const siteDefaults = {
   chat: { retainDays: 365, maxMessages: 30_000 },
   // R-AUTH-29: pending join requests at most (1–50), and never more than the free seats.
   join: { maxPending: 20 },
+  // R-NTF-02, 07, 13: Web Push endpoint allow-list, chat coalescing and quiet mode tuning.
+  push: {
+    chatCoalesceSeconds: 60,
+    quietAfter: 10,
+    summaryHours: 6,
+    endpointHosts: [
+      'fcm.googleapis.com',
+      'updates.push.services.mozilla.com',
+      'push.apple.com',
+      'notify.windows.com',
+    ],
+  },
   // R-AUTH-08: days an invite stays usable; null means it never expires.
   invite: { expiryDays: 30 },
   // R-PROF-06: hosts a `messaging_url` may point at (subdomains included); add to extend.

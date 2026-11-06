@@ -23,6 +23,8 @@ import {
   ownLiveAvatar,
   type StoredProfile,
 } from '../repositories/profiles';
+import { getPrefs } from '../repositories/notification-prefs';
+import { listSubscriptions } from '../repositories/push-subscriptions';
 import { parse, rateLimit, type AdminFailure, type AdminResult } from './admin';
 import type { MemberServices } from './members';
 import { projectProfile, visibilityOf } from './projection';
@@ -350,6 +352,8 @@ export async function exportOwnData(
   const stored = await findProfile(db, member.id);
   if (!stored) return notFound;
   const content = await findOwnContent(db, member.id);
+  const prefs = await getPrefs(db, member.id);
+  const devices = await listSubscriptions(db, member.id);
   return {
     ok: true as const,
     status: 200,
@@ -377,6 +381,10 @@ export async function exportOwnData(
         ...item,
         links: { image: `/api/v1/media/${item.id}/image`, thumb: `/api/v1/media/${item.id}/thumb` },
       })),
+      // R-PROF-09 / R-NTF-02: notification kinds, mute and device labels only (never endpoints or keys).
+      notificationKinds: prefs.kinds,
+      muteUntil: prefs.muteUntil,
+      devices: devices.map(({ deviceLabel, createdAt }) => ({ deviceLabel, createdAt })),
     },
   };
 }

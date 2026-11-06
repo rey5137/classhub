@@ -120,6 +120,9 @@
       </summary>
       <div class="menu">
         <a href={resolve('/profile')}>{i18n.t('shell.profile')}</a>
+        {#if page.data.features?.notifications !== false}
+          <a href={resolve('/notifications')}>{i18n.t('nav.notifications')}</a>
+        {/if}
         <a href={resolve('/admin')}>{i18n.t('shell.admin')}</a>
         <button type="button" onclick={switchLanguage}>{i18n.t('shell.switchLanguage')}</button>
       </div>

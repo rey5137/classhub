@@ -8,9 +8,13 @@ import {
 } from '../../contracts/chat';
 import { uuidv7 } from '../ids';
 import type { MemberContext } from '../internal-context';
+import { logLine } from '../log';
 import type { Database } from '../ports/database';
+import type { PushTransport } from '../ports/push-transport';
+import type { VapidKeys } from '../push';
 import { AUTHORIZE_MAX_MEMBERS, newestMessageId, sendMessage } from '../repositories/chat';
 import { setupUnlockedIn } from '../repositories/settings';
+import { sendChatPush } from './push-service';
 import { effectiveSettings } from './settings';
 import { EVERY_MEMBER, toChatMessage } from './chat';
 
@@ -25,6 +29,8 @@ export interface SocketAttachment {
   displayName: string;
   connectedAt: number;
   authUntil: number;
+  /** R-NTF-01: the `https://` origin the member connected through, the VAPID `sub` of the pushes it triggers. */
+  siteOrigin?: string;
 }
 
 export interface RoomSocket {
@@ -37,6 +43,9 @@ export interface ChatRoomDeps {
   database: Database;
   /** Every socket the room has open, the one being handled included. */
   sockets(): RoomSocket[];
+  push?: PushTransport;
+  vapid?: VapidKeys;
+  waitUntil?: (promise: Promise<unknown>) => void;
   now?: () => number;
 }
 
@@ -44,9 +53,15 @@ export interface ChatRoomDeps {
 const BUCKET_SIZE = 5;
 const REFILL_MS = 1_000;
 
-export function attachmentOf(context: MemberContext, now: number): SocketAttachment {
+export function attachmentOf(
+  context: MemberContext,
+  now: number,
+  siteOrigin?: string,
+): SocketAttachment {
   const { memberId, role, displayName, authUntil } = context;
-  return { memberId, role, displayName, connectedAt: now, authUntil };
+  const attachment: SocketAttachment = { memberId, role, displayName, connectedAt: now, authUntil };
+  if (siteOrigin) attachment.siteOrigin = siteOrigin;
+  return attachment;
 }
 
 function sendFrame(socket: RoomSocket, frame: ServerFrame): void {
@@ -195,6 +210,7 @@ export class ChatRoomCore {
       setupUnlockedIn(authorization.settings) &&
       effectiveSettings(authorization.settings).features.chat;
     const known = new Set(before);
+    const reachedMemberIds = new Set<string>([sender.memberId]);
     for (const peer of this.live(this.deps.sockets())) {
       const { memberId } = peer.attachment;
       if (!open || (bound.has(memberId) && !authorization.activeIds.has(memberId))) {
@@ -205,7 +221,40 @@ export class ChatRoomCore {
       // verified moments ago, is its authorization. One open before it whose member
       // did not fit the read's bound stays open but hears nothing this time.
       const authorized = bound.has(memberId) || !known.has(peer);
-      if (authorized && message && result.inserted) sendFrame(peer, { type: 'message', message });
+      if (authorized && message && result.inserted) {
+        sendFrame(peer, { type: 'message', message });
+        reachedMemberIds.add(memberId);
+      }
+    }
+
+    // R-NTF-04, 07: after the broadcast, trigger chat push for members the broadcast did not reach.
+    // A failed push never fails the ack; it is logged without any endpoint or key.
+    if (
+      open &&
+      message &&
+      !message.deleted &&
+      result.inserted &&
+      this.deps.push &&
+      this.deps.vapid
+    ) {
+      const pushTask = sendChatPush(
+        {
+          database: this.deps.database,
+          push: this.deps.push,
+          vapid: this.deps.vapid,
+          siteOrigin: sender.siteOrigin,
+          now: this.now,
+        },
+        {
+          senderId: sender.memberId,
+          senderName: message.sender.displayName,
+          messageText: message.body,
+          connectedMemberIds: [...reachedMemberIds],
+          now,
+        },
+      ).catch(() => logLine({ pushError: 'chat' }));
+      if (this.deps.waitUntil) this.deps.waitUntil(pushTask);
+      else await pushTask;
     }
   }
 }

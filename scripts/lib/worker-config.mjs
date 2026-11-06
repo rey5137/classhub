@@ -47,6 +47,11 @@ export function renderWorkerConfig({ example, existing, accountId, slug, databas
         binding: 'MEDIA',
         bucket_name: `${slug}-media`,
       }),
+      services: withBinding(base.services, 'binding', {
+        binding: 'PUSH',
+        service: slug,
+        entrypoint: 'PushDelivery',
+      }),
       durable_objects: {
         ...example.durable_objects,
         ...existing?.durable_objects,

@@ -1,7 +1,9 @@
 import type { D1Database, DurableObjectNamespace, R2Bucket } from '@cloudflare/workers-types';
 import type { AppContext } from '../../context';
+import { logLine } from '../../log';
 import { AccessIdentityProvider } from './access-identity';
 import { createD1Database } from './d1-database';
+import { createCloudflarePushTransport, type PushServiceBinding } from './push-transport';
 import { createR2Storage } from './r2-storage';
 import { createDurableObjectHub } from './realtime-hub';
 import type { ChatRoom } from './chat-room';
@@ -10,6 +12,8 @@ import { siteverifyTurnstile } from '../../services/turnstile';
 function stringVar(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
+
+let loggedMissingVapid = false;
 
 /** The Cloudflare bindings are named only here and in src/worker.ts (INV-4). */
 export function createCloudflareContext(env: Record<string, unknown>): AppContext {
@@ -21,6 +25,14 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
   const audience = stringVar(env.ACCESS_AUD);
   const turnstileSiteKey = stringVar(env.TURNSTILE_SITE_KEY)?.trim();
   const turnstileSecret = stringVar(env.TURNSTILE_SECRET_KEY)?.trim();
+  const vapidPublicKey = stringVar(env.VAPID_PUBLIC_KEY)?.trim();
+  const vapidPrivateKey = stringVar(env.VAPID_PRIVATE_KEY)?.trim();
+  const hasVapid = Boolean(vapidPublicKey && vapidPrivateKey);
+  if (!hasVapid && !import.meta.env.DEV && !loggedMissingVapid) {
+    loggedMissingVapid = true;
+    // R-NTF-01: log one config warning without any value when VAPID keys are absent in production.
+    logLine({ config: 'vapid_unavailable' });
+  }
   return {
     database: createD1Database(database),
     storage: createR2Storage(media),
@@ -31,6 +43,10 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
       env.CHAT_ROOM as DurableObjectNamespace<ChatRoom> | undefined,
       stringVar(env.INTERNAL_CONTEXT_KEY),
     ),
+    push: createCloudflarePushTransport(env.PUSH as PushServiceBinding | undefined),
+    ...(hasVapid && vapidPublicKey && vapidPrivateKey
+      ? { vapid: { publicKey: vapidPublicKey, privateKey: vapidPrivateKey } }
+      : {}),
     logHashSalt: stringVar(env.LOG_HASH_SALT),
     // R-AUTH-27: the site key is a var, the secret a Worker secret; both or no /join submission passes.
     ...(turnstileSiteKey && turnstileSecret

@@ -1,5 +1,5 @@
 import { and, eq, gt, isNull, lt, ne, or, sql } from 'drizzle-orm';
-import { invites, users } from '../db/schema';
+import { invites, notificationPrefs, users } from '../db/schema';
 import type { Database, DatabaseHandle } from '../ports/database';
 import { auditInsertWhere } from './audit';
 
@@ -14,6 +14,8 @@ export type UserStatus = 'invited' | 'active' | 'suspended';
 export interface UserIdentityRow extends ActiveMember {
   status: UserStatus;
   accessSub: string | null;
+  /** R-NTF-13: joined in the membership read so resetting unseen pushes writes only when > 0. */
+  unseenPushes: number;
 }
 
 /** INV-1: only an `active` row counts; `invited` and `suspended` rows read as no member. */
@@ -41,11 +43,14 @@ export async function findUserByEmail(
       displayName: users.displayName,
       status: users.status,
       accessSub: users.accessSub,
+      unseenPushes: notificationPrefs.unseenPushes,
     })
     .from(users)
+    .leftJoin(notificationPrefs, eq(notificationPrefs.userId, users.id))
     .where(eq(users.authEmail, normalizedEmail))
     .limit(1);
-  return rows[0] ?? null;
+  const row = rows[0];
+  return row ? { ...row, unseenPushes: row.unseenPushes ?? 0 } : null;
 }
 
 /**

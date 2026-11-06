@@ -31,6 +31,7 @@ export const featuresSchema = z
     discussions: z.boolean(),
     chat: z.boolean(),
     join: z.boolean(),
+    notifications: z.boolean(),
   })
   .strict();
 
@@ -116,6 +117,17 @@ const siteConfigSchema = z
     join: z
       .object({
         maxPending: z.number().int().min(1).max(50),
+      })
+      .strict(),
+    push: z
+      .object({
+        chatCoalesceSeconds: z.number().int().min(1).max(3600),
+        quietAfter: z.number().int().min(1).max(1000),
+        summaryHours: z.number().int().min(1).max(168),
+        endpointHosts: z
+          .array(z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i))
+          .min(1)
+          .max(20),
       })
       .strict(),
     invite: z

@@ -22,6 +22,12 @@ afterEach(() => box.close());
 const readState = () => box.readState();
 const d1 = () => box.d1();
 const setup = (flags: string[] = []) => box.run('setup.mjs', flags);
+const wranglerVars = () =>
+  (
+    JSON.parse(readFileSync(join(dir, 'wrangler.jsonc'), 'utf8')) as {
+      vars: Record<string, string>;
+    }
+  ).vars;
 const api = {
   get requests() {
     return box.api.requests;
@@ -43,7 +49,16 @@ describe('scripts/setup.mjs (R-OPS-04)', { timeout: 30_000 }, () => {
     expect(first.stdout).toContain('D1 classhub-db: created.');
     expect(first.stdout).toContain('R2 classhub-media: created.');
     const secrets = readState().secrets;
-    expect(Object.keys(secrets).sort()).toEqual(['INTERNAL_CONTEXT_KEY', 'LOG_HASH_SALT']);
+    expect(Object.keys(secrets).sort()).toEqual([
+      'INTERNAL_CONTEXT_KEY',
+      'LOG_HASH_SALT',
+      'VAPID_PRIVATE_KEY',
+    ]);
+    // R-NTF-01: the VAPID public key is a var next to its private secret, never in the output.
+    const vapidPublicKey = wranglerVars().VAPID_PUBLIC_KEY;
+    expect(vapidPublicKey).toMatch(/^[A-Za-z0-9_-]{87}$/);
+    expect(first.stdout).toContain('VAPID key pair: created.');
+    expect(first.stdout).not.toContain(secrets.VAPID_PRIVATE_KEY);
 
     // Members and settings change between the runs; the rerun must keep both.
     const db = d1();
@@ -67,6 +82,9 @@ describe('scripts/setup.mjs (R-OPS-04)', { timeout: 30_000 }, () => {
     expect(second.stdout).toContain('D1 classhub-db: exists, reused.');
     expect(second.stdout).toContain('R2 classhub-media: exists, reused.');
     expect(second.stdout).toContain('Secret INTERNAL_CONTEXT_KEY: exists, kept.');
+    // A rerun never replaces the pair: that would silence every subscribed device.
+    expect(second.stdout).toContain('VAPID key pair: exists, kept.');
+    expect(wranglerVars().VAPID_PUBLIC_KEY).toBe(vapidPublicKey);
     expect(second.calls.filter((call) => call[1] === 'create' || call[2] === 'create')).toEqual([]);
     expect(second.calls.some((call) => call[0] === 'secret' && call[1] === 'put')).toBe(false);
     expect(summary(second.stdout)).toBe(summary(first.stdout));

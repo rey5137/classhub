@@ -8,8 +8,18 @@ import {
   type SocketAttachment,
 } from '../../services/chat-room';
 import { createD1Database } from './d1-database';
+import { createCloudflarePushTransport, type PushServiceBinding } from './push-transport';
+import { ORIGIN_PARAM } from './realtime-hub';
 
 export type ChatRoomEnv = Record<string, unknown>;
+
+/** The site origin the hub put on the internal URL, kept only when it is an `https://` origin (R-NTF-01). */
+function httpsOrigin(roomUrl: string): string | undefined {
+  const value = new URL(roomUrl).searchParams.get(ORIGIN_PARAM);
+  if (!value || !URL.canParse(value)) return undefined;
+  const origin = new URL(value);
+  return origin.protocol === 'https:' && origin.origin === value ? value : undefined;
+}
 
 // Transport only (INV-2 / D5): chat history lives in D1, so the room writes nothing to
 // its own storage (AC-CHAT-11). The SQLite-backed class exists because Workers Free
@@ -23,10 +33,19 @@ export class ChatRoom extends DurableObject<ChatRoomEnv> {
 
   constructor(ctx: DurableObjectState, env: ChatRoomEnv) {
     super(ctx, env);
+    const vapidPublicKey =
+      typeof env.VAPID_PUBLIC_KEY === 'string' ? env.VAPID_PUBLIC_KEY.trim() : '';
+    const vapidPrivateKey =
+      typeof env.VAPID_PRIVATE_KEY === 'string' ? env.VAPID_PRIVATE_KEY.trim() : '';
     // Rebuilt on every wake from hibernation, so buckets and presence may reset (R-CHAT-08).
     this.room = new ChatRoomCore({
       database: createD1Database(env.DB as D1Database),
       sockets: () => this.ctx.getWebSockets().map((socket) => this.wrap(socket)),
+      push: createCloudflarePushTransport(env.PUSH as PushServiceBinding | undefined),
+      ...(vapidPublicKey && vapidPrivateKey
+        ? { vapid: { publicKey: vapidPublicKey, privateKey: vapidPrivateKey } }
+        : {}),
+      waitUntil: (promise) => this.ctx.waitUntil(promise),
     });
   }
 
@@ -58,7 +77,7 @@ export class ChatRoom extends DurableObject<ChatRoomEnv> {
     const { 0: client, 1: server } = new WebSocketPair();
     // R-CHAT-07: the Hibernation API; the room may sleep between frames.
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment(attachmentOf(context, now));
+    server.serializeAttachment(attachmentOf(context, now, httpsOrigin(request.url)));
     await this.room.opened(this.wrap(server));
     return new Response(null, { status: 101, webSocket: client });
   }
