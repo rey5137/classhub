@@ -30,7 +30,7 @@ commit is on `main` and tagged `pN-verified`. The gate approval goes in that tag
 | 1 — Identity and members | 1a · 1b · 1c · 1d | allowed vs denied Gmail in the second account; visibility tests |
 | 2 — Memories | 2a · 2b · 2c | upload / view / delete, quota stop, private media |
 | 3 — Home and discussions | 3a · 3b | pinned threads, pagination over thousands, moderation |
-| 4 — Live chat | 4a · 4b · 4c · 4d | two live sessions in production, persistence, verified-archive pruning |
+| 4 — Live chat | 4a · 4b · 4c · 4d · 4e | two live sessions in production, persistence, verified-archive pruning |
 | 5 — Portability | 5a · 5b · 5c | an independent restore of the production site, `restore --target local` opening it offline |
 | 6 — Open-source release | 6a · 6b | a second person deploys from a clean clone; v1.0.0 tag |
 
@@ -290,7 +290,19 @@ successful independent restore. Deploying is not enough.
   `docs/PRIVACY.md` section, the Bypass app and Turnstile keys in `docs/DEPLOY_CLOUDFLARE.md`.
 - Model: Opus · high (identity and the Access boundary).
 
-**Manual Verification Checklist (4c, 4d, phase gate)**
+#### Slice 4e — installable app and install guide
+- **Covers:** AC-NAV-06, 07, 08, 09, 10.
+- `/manifest.webmanifest` route, the default icon set in `static/icons/` drawn from `favicon.svg`, the head links and
+  meta in `app.html`/the root layout, `src/service-worker.ts` with `static/offline.html`, `src/lib/install/detect.ts`,
+  the `/install` page, the Home card and the `/profile` link, both dictionaries, the Level B `shortName`, the
+  icon-replacing step in the customization docs. No D1 change, no new dependency, CSP unchanged (`manifest-src` and
+  `worker-src` fall back to `'self'`). Screens: `/install` and Home with the card.
+- Risk: Android's WebAPK minting may fail to fetch icons behind Access and install a plain shortcut instead. Record it
+  at checklist item 6; the fix (an Access Bypass for the manifest and icons, which makes the site name public) is an
+  owner decision, not part of this slice.
+- Model: Sonnet · medium.
+
+**Manual Verification Checklist (4c, 4d, 4e, phase gate)**
 1. Two phones on the live site: messages arrive instantly both ways, the online count is 2.
 2. Turn one phone's network off, send from the other, turn it back on: the missed messages appear in order.
 3. Suspend the second account from `/admin`: its chat disconnects and it can't send.
@@ -298,6 +310,10 @@ successful independent restore. Deploying is not enough.
 5. Turn join requests on in `/admin`. In a private window open `/join` and submit a request; approve it on `/admin`;
    that Google account signs in and lands on Home. A second request for the same address shows the same
    confirmation and stores nothing. With the queue full, `/join` shows the closed notice.
+6. On the live site, Android Chrome: the Home card's Install button installs the app; it opens standalone with the
+   class icon (note whether the icon carries a Chrome badge, see 4e's risk), signs in and reaches chat.
+7. iPhone Safari: follow `/install` (Share → Add to Home Screen); the app opens standalone, asks to sign in once, then
+   reaches chat. Open the site link from Zalo or Messenger: the card shows the open-in-Safari steps and Copy link.
 
 ### Phase 5 — Portability
 
