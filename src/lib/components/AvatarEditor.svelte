@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { invalidateAll } from '$app/navigation';
   import type { Encoded } from '$lib/client/image/encode';
-  import { cropCenter, MAX_ZOOM, squareCrop } from '$lib/client/image/policy';
+  import { cropCenter, IMAGE_ACCEPT, MAX_ZOOM, squareCrop } from '$lib/client/image/policy';
   import { setAvatar, UploadError, uploadEncoded } from '$lib/client/upload';
   import type { MessageKey } from '$lib/i18n';
   import { useI18n } from '$lib/i18n/context';
@@ -185,7 +185,7 @@
     id="avatar-file"
     class="visually-hidden"
     type="file"
-    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+    accept={IMAGE_ACCEPT}
     tabindex="-1"
     aria-hidden="true"
     onchange={picked}

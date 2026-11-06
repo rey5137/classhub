@@ -14,6 +14,7 @@ import type { Member } from '../auth/membership';
 import { can } from '../auth/permissions';
 import type { AppContext } from '../context';
 import { ObjectTooLargeError } from '../ports/object-storage';
+import { findProfile } from '../repositories/profiles';
 import {
   completeReservation,
   finalKeys,
@@ -24,10 +25,13 @@ import {
   releaseReservation,
   reservationKeys,
   reserve,
+  soonestOpenExpiry,
   uploadLimited,
   type Reservation,
+  type StoredMedia,
 } from '../repositories/media';
 import { parse, type AdminFailure, type AdminResult } from './admin';
+import { projectProfile } from './projection';
 
 const forbidden: AdminFailure = { ok: false, code: 'forbidden' };
 const conflict: AdminFailure = { ok: false, code: 'conflict' };
@@ -87,6 +91,13 @@ function imageStream(body: ReadableStream<Uint8Array>, mime: string): ReadableSt
   });
 }
 
+/** The staging key, declared size and hash of one variant of a reservation. */
+function reservedVariant(row: Reservation, variant: MediaVariant) {
+  return variant === 'image'
+    ? { key: row.objectKey, expected: row.imageBytes, hash: row.sha256 }
+    : { key: row.thumbKey, expected: row.thumbBytes, hash: row.thumbSha256 };
+}
+
 function reservationAccess(
   row: Reservation | undefined,
   member: Member,
@@ -94,6 +105,26 @@ function reservationAccess(
 ): AdminFailure | null {
   if (!row || row.ownerId !== member.id) return forbidden;
   return row.state !== 'open' || row.expiresAt <= now ? conflict : null;
+}
+
+/** R-MEM-13: a concurrent slot frees when its reservation expires; the daily count has no single moment, so 900 s. */
+async function uploadRefusal(
+  context: AppContext,
+  member: Member,
+  reason: 'daily' | 'concurrent',
+  now: number,
+): Promise<AdminFailure> {
+  const soonest =
+    reason === 'concurrent' ? await soonestOpenExpiry(context.database, member.id, now) : null;
+  const retryAfterSeconds =
+    soonest === null ? 900 : Math.min(900, Math.max(1, Math.ceil((soonest - now) / 1000)));
+  return {
+    ok: false,
+    code: 'rate_limited',
+    reason,
+    messageKey: `upload.error.rate_limited_${reason}`,
+    retryAfterSeconds,
+  };
 }
 
 export async function createReservation(
@@ -106,12 +137,12 @@ export async function createReservation(
   const parsed = parse(reservationSchema, input);
   if (!parsed.ok) return parsed;
   if (parsed.data.purpose === 'site' && !can(member, 'settings.edit')) return forbidden;
-  if (await uploadLimited(context.database, member.id, parsed.data.purpose, now))
-    return { ok: false, code: 'rate_limited', retryAfterSeconds: 900 };
+  const limited = await uploadLimited(context.database, member.id, parsed.data.purpose, now);
+  if (limited) return uploadRefusal(context, member, limited, now);
   const row = await reserve(context.database, member.id, parsed.data, now);
   if (!row) {
-    if (await uploadLimited(context.database, member.id, parsed.data.purpose, now))
-      return { ok: false, code: 'rate_limited', retryAfterSeconds: 900 };
+    const raced = await uploadLimited(context.database, member.id, parsed.data.purpose, now);
+    if (raced) return uploadRefusal(context, member, raced, now);
     return { ok: false, code: 'storage_full' };
   }
   return { ok: true, status: 201, body: reservationResponseSchema.parse(row) };
@@ -129,14 +160,11 @@ export async function uploadVariant(
   const row = await findReservation(context.database, parsed.data.id);
   const refusal = reservationAccess(row, member, now);
   if (refusal || !row) return refusal ?? forbidden;
-  const variant = parsed.data.variant;
-  const key = variant === 'image' ? row.objectKey : row.thumbKey;
+  const { key, expected, hash } = reservedVariant(row, parsed.data.variant);
   if (!key) return notFound;
   const mime = request.headers.get('content-type');
   if (!mediaMimeSchema.safeParse(mime).success || mime !== row.mimeType || !request.body)
     return invalid;
-  const expected = variant === 'image' ? row.imageBytes : row.thumbBytes;
-  const hash = variant === 'image' ? row.sha256 : row.thumbSha256;
   try {
     const measured = await context.storage.put(key, imageStream(request.body, row.mimeType), {
       contentType: row.mimeType,
@@ -180,17 +208,14 @@ export async function finishReservation(
   };
   try {
     for (const variant of variants) {
-      const key = variant === 'image' ? row.objectKey : row.thumbKey;
-      const expected = variant === 'image' ? row.imageBytes : row.thumbBytes;
+      const { key, expected } = reservedVariant(row, variant);
       const head = await context.storage.head(key);
       if (!head || head.size !== expected || head.contentType !== row.mimeType)
         throw new InvalidImage();
     }
     for (const variant of variants) {
-      const key = variant === 'image' ? row.objectKey : row.thumbKey;
+      const { key, expected, hash } = reservedVariant(row, variant);
       const destination = variant === 'image' ? keys.objectKey : keys.thumbKey;
-      const expected = variant === 'image' ? row.imageBytes : row.thumbBytes;
-      const hash = variant === 'image' ? row.sha256 : row.thumbSha256;
       const object = await context.storage.get(key);
       if (!object?.body) throw new InvalidImage();
       const measured = await context.storage.put(
@@ -232,6 +257,16 @@ export async function abandonReservation(
   return { ok: true, status: 200, body: mediaMutationResponseSchema.parse({ ok: true }) };
 }
 
+/** R-MEM-16: an avatar's bytes follow the owner's current, projected avatar, like every payload (INV-5). */
+async function avatarShownTo(context: AppContext, viewer: Member, row: StoredMedia) {
+  const owner = await findProfile(context.database.db, row.ownerId);
+  return (
+    !!owner &&
+    owner.avatarMediaId === row.id &&
+    projectProfile(viewer, owner).avatarMediaId === row.id
+  );
+}
+
 export async function deliverMedia(
   context: AppContext,
   member: Member,
@@ -243,6 +278,7 @@ export async function deliverMedia(
   if (!parsed.ok) return parsed;
   const row = await findLiveMedia(context.database, parsed.data.id);
   if (!row || !mediaMimeSchema.safeParse(row.mimeType).success) return notFound;
+  if (row.mediaType === 'avatar' && !(await avatarShownTo(context, member, row))) return notFound;
   const variant = parsed.data.variant;
   const key = variant === 'image' ? row.objectKey : row.thumbKey;
   if (!key) return notFound;

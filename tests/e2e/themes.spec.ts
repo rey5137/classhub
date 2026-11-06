@@ -68,12 +68,12 @@ test('AC-NAV-01 the chat composer stays immediately above the mobile tabs and de
   }
 });
 
-test('AC-NAV-01 memories retains the prototype album grid alongside the rails', async ({
+test('AC-NAV-01 memories shows the seeded photo wall and album filters alongside the rails', async ({
   page,
 }) => {
   await page.goto('/memories');
-  await expect(page.locator('.wall > section')).toHaveCount(3);
-  await expect(page.locator('.wall .gallery > [role="img"]')).toHaveCount(10);
+  await expect(page.locator('.wall > li .photo img')).toHaveCount(10);
+  await expect(page.locator('.filters .chip')).not.toHaveCount(0);
 });
 
 test('R-UI-06 minimal headings use the neutral theme text colour', async ({ page }) => {
@@ -87,8 +87,9 @@ test('R-UI-06 minimal headings use the neutral theme text colour', async ({ page
 
 test('AC-NAV-01 mobile row metadata starts below its title', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/memories');
-  const heading = page.locator('.rowhead h2').first();
+  // The prototype rows left /memories with the real gallery; Row.svelte still renders on the home page.
+  await page.goto('/');
+  const heading = page.locator('.rowhead h2:has(small)').first();
   const title = await heading.boundingBox();
   const meta = await heading.locator('small').boundingBox();
   expect(title).not.toBeNull();
@@ -121,16 +122,6 @@ test('R-UI-05 prototype tints vary across tiles and people without clipped RSVP 
       expect(colours.length).toBeGreaterThanOrEqual(4);
       expect(new Set(colours).size).toBe(colours.length);
     }
-    await page.goto(`/memories?theme=${theme}&mode=${mode}`);
-    const colours = await page
-      .locator('.ph')
-      .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).background));
-    expect(new Set(colours).size).toBeGreaterThanOrEqual(5);
-    const cells = await page
-      .locator('.gallery .cell')
-      .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).background));
-    expect(cells).toHaveLength(10);
-    expect(new Set(cells).size).toBe(10);
     await page.goto(`/members?theme=${theme}&mode=${mode}`);
     const avatars = await page
       .locator('.person .avatar')

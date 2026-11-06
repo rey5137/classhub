@@ -9,18 +9,30 @@ const channel =
     ? ({ channel: 'chrome' } as const)
     : {};
 
+const uploadSpecs = /(memories-upload|avatar|memories)\.spec\.ts$/;
+
 // R-PLAT-11: e2e runs against dev:offline (local adapters), so no build step is needed.
 export default defineConfig({
   testDir: 'tests/e2e',
   use: { baseURL: 'http://127.0.0.1:5173' },
   projects: [
-    { name: 'chromium', use: { browserName: 'chromium', ...channel } },
+    { name: 'chromium', use: { browserName: 'chromium', ...channel }, testIgnore: uploadSpecs },
+    // Every worker signs in as the one demo admin, who may hold 2 open uploads (AC-MEM-01),
+    // so the specs that upload run in a project limited to one worker.
+    {
+      name: 'chromium-uploads',
+      use: { browserName: 'chromium', ...channel },
+      testMatch: uploadSpecs,
+      workers: 1,
+    },
     // Risk 4: Safari can't encode WebP and decodes differently, so the browser encoder
     // (AC-MEM-01, AC-MEM-02) and the avatar crop also run in WebKit.
     {
       name: 'webkit',
       use: { browserName: 'webkit' },
       testMatch: /(memories-upload|avatar)\.spec\.ts$/,
+      workers: 1,
+      dependencies: ['chromium-uploads'],
     },
   ],
   // The dev identity lets nobody in by itself: seed the demo data and sign in as its admin.

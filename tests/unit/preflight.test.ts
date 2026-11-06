@@ -280,13 +280,13 @@ describe('preflight (R-OPS-10)', () => {
       breakIt: () => writeConfig({ ...config(), preview_urls: true }),
     },
     {
-      name: 'the bucket has a public r2.dev URL',
+      name: 'the bucket has a public r2.dev URL (AC-MEM-08)',
       fails: ['bucket'],
       reason: 'public r2.dev URL enabled',
       breakIt: () => box.writeState({ ...box.readState(), devUrl: { 'classhub-media': true } }),
     },
     {
-      name: 'the bucket has a custom domain',
+      name: 'the bucket has a custom domain (AC-MEM-08)',
       fails: ['bucket'],
       reason: 'a custom domain is connected',
       breakIt: () =>

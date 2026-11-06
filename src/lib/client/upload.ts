@@ -8,6 +8,8 @@ import type { Encoded } from './image/encode';
 export type UploadFailure =
   | 'storage_full'
   | 'rate_limited'
+  | 'rate_limited_daily'
+  | 'rate_limited_concurrent'
   | 'validation'
   | 'payload_too_large'
   | 'conflict'
@@ -68,7 +70,11 @@ const byStatus: Record<number, UploadFailure> = {
 /** Exported for its unit test: the failure a refused response stands for. */
 export async function failureOf(response: Response): Promise<UploadFailure> {
   const body = errorBodySchema.safeParse(await response.json().catch(() => null));
-  if (body.success) return byCode[body.data.error.code];
+  if (body.success) {
+    const { code, reason } = body.data.error;
+    // R-MEM-13: the two upload limits get their own sentence.
+    return code === 'rate_limited' && reason ? `rate_limited_${reason}` : byCode[code];
+  }
   return byStatus[response.status] ?? 'internal';
 }
 

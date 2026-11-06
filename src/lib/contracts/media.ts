@@ -7,6 +7,9 @@ export const mediaPathSchema = z.object({ id: z.uuid(), variant: mediaVariantSch
 export const reservationPathSchema = z.object({ id: z.uuid() });
 export const mediaMimeSchema = z.enum(['image/webp', 'image/jpeg']);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
+/** R-MEM-13: a 512 px avatar is far under this; it bounds what a member can park in the quota. */
+export const avatarMaxBytes = 1_048_576;
+const year = z.number().int().min(1000).max(9999);
 const bytes = z.number().int().nonnegative().max(siteConfig.uploads.maxImageBytes);
 
 export const reservationSchema = z
@@ -28,6 +31,8 @@ export const reservationSchema = z
         : value.thumbBytes === 0
     )
       ctx.addIssue({ code: 'custom', path: ['thumbBytes'], message: 'validation' });
+    if (value.purpose === 'avatar' && value.imageBytes > avatarMaxBytes)
+      ctx.addIssue({ code: 'custom', path: ['imageBytes'], message: 'validation' });
   });
 export type ReservationInput = z.infer<typeof reservationSchema>;
 
@@ -35,7 +40,7 @@ export const completeSchema = z
   .object({
     caption: z.string().max(500).optional(),
     albumId: z.uuid().optional(),
-    takenYear: z.number().int().min(1000).max(9999).optional(),
+    takenYear: year.optional(),
   })
   .strict();
 export type CompleteInput = z.infer<typeof completeSchema>;
@@ -48,7 +53,6 @@ export const mediaCompleteResponseSchema = z.object({ id: z.uuid() });
 export const mediaMutationResponseSchema = z.object({ ok: z.literal(true) });
 
 // R-MEM-14: albums, the gallery page and a photo's own edits.
-const year = z.number().int().min(1000).max(9999);
 const albumName = z.string().trim().min(1).max(80);
 const albumDescription = z.string().trim().max(500);
 export const albumCreateSchema = z

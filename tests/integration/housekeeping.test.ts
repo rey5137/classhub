@@ -2,14 +2,22 @@ import { applyD1Migrations, env } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createD1Database } from '../../src/lib/server/adapters/cloudflare/d1-database';
+import { createRemoteDatabase } from '../../src/lib/server/adapters/cloudflare/remote-database';
 import { R2ObjectStorage } from '../../src/lib/server/adapters/cloudflare/r2-storage';
 import {
   media,
   schemaMeta,
   storageUsage,
   uploadReservations,
+  users,
 } from '../../src/lib/server/db/schema';
-import { releaseExpired } from '../../src/lib/server/repositories/housekeeping';
+import { staleYearRows } from '../../src/lib/server/repositories/gallery';
+import {
+  releaseExpired,
+  retainedObjectKeys,
+  retireOrphanAvatars,
+} from '../../src/lib/server/repositories/housekeeping';
+import { uuidv7 } from '../../src/lib/server/ids';
 import {
   completeReservation,
   finalKeys,
@@ -64,6 +72,68 @@ beforeEach(async () => {
 });
 
 describe('housekeeping on D1/R2', () => {
+  const avatar = (overrides: Partial<typeof media.$inferInsert> = {}) =>
+    seedDeletedMedia(database, {
+      mediaType: 'avatar',
+      thumbKey: '',
+      thumbSizeBytes: 0,
+      deletedAt: null,
+      createdAt: now - 2 * 3_600_000,
+      ...overrides,
+    });
+  const live = async () =>
+    (await database.db.select().from(media).where(eq(media.mediaType, 'avatar'))).filter(
+      (row) => row.deletedAt === null,
+    ).length;
+
+  it('R-MEM-13 retireOrphanAvatars retires old non-current avatars, keeps the current and recent ones', async () => {
+    const current = await avatar();
+    const old = await avatar();
+    const recent = await avatar({ createdAt: now - 60_000 });
+    const photo = await seedDeletedMedia(database, {
+      deletedAt: null,
+      createdAt: now - 2 * 3_600_000,
+    });
+    await database.db
+      .update(users)
+      .set({ avatarMediaId: current.id })
+      .where(eq(users.id, PEOPLE.active.id));
+    await retireOrphanAvatars(database, now);
+    const rows = await database.db.select().from(media);
+    const deleted = (id: string) => rows.find((row) => row.id === id)!.deletedAt;
+    expect(deleted(old.id)).toBe(now);
+    expect(deleted(current.id)).toBeNull();
+    expect(deleted(recent.id)).toBeNull();
+    expect(deleted(photo.id)).toBeNull();
+    await database.db
+      .update(users)
+      .set({ avatarMediaId: null })
+      .where(eq(users.id, PEOPLE.active.id));
+  });
+
+  it('R-MEM-13 retireOrphanAvatars takes at most 20 per run, and a traffic run does it while the CLI run does not', async () => {
+    for (let n = 0; n < 25; n++) await avatar();
+    await retireOrphanAvatars(database, now);
+    expect(await live()).toBe(5);
+    await runner().run(now);
+    expect(await live()).toBe(5);
+    await runner().trigger(now);
+    expect(await live()).toBe(0);
+  });
+
+  it('R-MEM-13 the orphan-avatar lookup uses the media index, not a media scan', async () => {
+    const plan = await env.DB.prepare(
+      `explain query plan select id from media where media_type = 'avatar' and deleted_at is null and created_at <= ?1 and not exists (select 1 from users where avatar_media_id = media.id) order by created_at limit 20`,
+    )
+      .bind(now)
+      .all<{ detail: string }>();
+    const details = plan.results.map((row) => row.detail);
+    expect(details.some((detail) => /SEARCH media USING (COVERING )?INDEX/.test(detail))).toBe(
+      true,
+    );
+    expect(details.some((detail) => /SCAN media\b(?! USING)/.test(detail))).toBe(false);
+  });
+
   it('R-MEM-18 a traffic run counts its listing as Class A and its deletes as nothing; a CLI run counts nothing', async () => {
     await write('staging/v1/orphan-a/image.webp', 4);
     await write('staging/v1/orphan-b/image.webp', 4);
@@ -195,7 +265,9 @@ it('AC-MEM-09 CLI reconcile on D1/R2 retains live keys, deletes orphans and matc
     await write(row.objectKey, 12);
     await write(row.thumbKey, 8);
   }
-  for (const prefix of ['media/', 'avatars/', 'staging/']) await write(`${prefix}orphan`, 10);
+  await write(`media/v1/${uuidv7()}/image.webp`, 10);
+  await write(`avatars/v1/owner/${uuidv7()}.webp`, 10);
+  await write('staging/orphan', 10);
   const open = await seedReservation(database, { expiresAt: now + 60_000 });
   const finals = finalKeys((await findReservation(database, open.id))!);
   for (const key of [open.objectKey, finals.objectKey]) await write(key, 12);
@@ -214,14 +286,49 @@ it('AC-MEM-09 CLI reconcile on D1/R2 retains live keys, deletes orphans and matc
       finals.thumbKey,
     ].sort(),
   );
+  // The open reservation's copied finals (20 bytes) are still in reserved_bytes, not counted twice.
   expect((await usage(database)).committedBytes).toBe(
     (await storage.list('')).objects
       .filter((object) => !object.key.startsWith('staging/'))
-      .reduce((sum, object) => sum + object.size, 0),
+      .reduce((sum, object) => sum + object.size, 0) - 20,
   );
   expect((await usage(database)).lastReconciledAt).toBe(now);
   expect((await usage(database)).reservedBytes).toBe(20);
   expect(await runHousekeeping(['--reconcile'], { ...deps, now: now + 1 })).toBe(0);
-  expect((await usage(database)).committedBytes).toBe(60);
+  expect((await usage(database)).committedBytes).toBe(40);
   expect((await usage(database)).lastReconciledAt).toBe(now + 1);
+});
+
+it('AC-MEM-09 the reconcile key lookups use the primary key and the open-state index, never a media scan', async () => {
+  const recorded: { sql: string; params: unknown[] }[] = [];
+  const remote = createRemoteDatabase(async (statement) => {
+    recorded.push(statement);
+    return [{ success: true, results: { columns: [], rows: [] }, meta: { changes: 0 } }];
+  });
+  const keys = [
+    ...Array.from({ length: 3 }, () => `media/v1/${uuidv7()}/image.webp`),
+    `avatars/v1/owner/${uuidv7()}.jpg`,
+    'staging/v1/a/image.webp',
+  ];
+  await retainedObjectKeys(remote, keys, now);
+  expect(recorded.some((statement) => statement.sql.includes('from "media"'))).toBe(true);
+  for (const { sql, params } of recorded) {
+    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`)
+      .bind(...params)
+      .all<{ detail: string }>();
+    const details = plan.results.map((row) => row.detail).join('\n');
+    expect(details).not.toMatch(/SCAN (media|upload_reservations)\b(?! USING)/);
+    if (sql.includes('from "media"'))
+      expect(details).toMatch(/SEARCH media USING INDEX sqlite_autoindex_media_1/);
+  }
+});
+
+it('AC-MEM-09 the year-rewrite sweep select searches media_album_idx, never a media scan', async () => {
+  const { sql, params } = staleYearRows(database, uuidv7()).toSQL();
+  const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`)
+    .bind(...params)
+    .all<{ detail: string }>();
+  const details = plan.results.map((row) => row.detail).join('\n');
+  expect(details).toMatch(/SEARCH media USING INDEX media_album_idx/);
+  expect(details).not.toMatch(/SCAN media\b(?! USING)/);
 });

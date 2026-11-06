@@ -28,7 +28,8 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
 - **R-BAK-01** **SQL is the authoritative restore artifact; NDJSON/JSON is the cross-database interchange.** Both are
   written; neither contains a provider URL, account id or token.
 - **R-BAK-02** `manifest.json`: `format: "classhub-backup"`, `formatVersion`, `appVersion`, `schemaVersion`,
-  `exportedAt`, `database { path, sha256, bytes }`, per-table row counts, `objects { count, totalBytes }`,
+  `exportedAt` (D1's clock, the same value as `backup_runs.verified_at`, R-BAK-09; `RESTORE.md` and the snapshot name
+  carry it too, never the admin machine's clock), `database { path, sha256, bytes }`, per-table row counts, `objects { count, totalBytes }`,
   `completed`. `completed: true` is written last, only after every check of R-BAK-04 passed; a directory without it
   is not a backup.
 

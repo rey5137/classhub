@@ -35,6 +35,7 @@ export type AdminFailure = {
   messageKey?: MessageKey;
   fields?: Record<string, string>;
   retryAfterSeconds?: number;
+  reason?: 'daily' | 'concurrent';
 };
 export type AdminResult<T> = { ok: true; status: number; body: T } | AdminFailure;
 

@@ -80,8 +80,10 @@ test('AC-UI-06 placeholder content follows the selected locale on navigation', a
   await page.getByRole('button', { name: 'Chuyển sang English' }).click();
   await expect(page.getByText('Morning in the schoolyard', { exact: true })).toBeAttached();
   await page.goto('/memories');
-  await expect(page.getByText('Setting up tents', { exact: true }).first()).toBeAttached();
-  await expect(page.getByText('03.2006 · 14 photos', { exact: true }).first()).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Memories' })).toBeVisible();
+  await expect(
+    page.getByText('Photos from the class, newest first.', { exact: true }),
+  ).toBeVisible();
   await page.goto('/chat');
   await expect(
     page.getByText('Please confirm how many are coming before June 30.', { exact: true }),

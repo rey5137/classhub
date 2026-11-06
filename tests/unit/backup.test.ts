@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseBackupArgs } from '../../scripts/backup.mjs';
+import { BACKUP_RUNS_INSERT } from '../../scripts/lib/backup-sql.mjs';
 import { acquireBackupLock } from '../../scripts/lib/backup-lock.mjs';
 import { backupDependencies, encryptWithAge, runBackup } from '../../scripts/lib/backup.mjs';
 import type { CfResult } from '../../scripts/lib/cf-child.mjs';
@@ -112,6 +113,12 @@ function fakeRun(live: Record<string, number | null | undefined> = {}, sql = dum
         const rows = id in live ? [[live[id] ?? null]] : [];
         return ok(JSON.stringify([{ results: { columns: ['deleted_at'], rows } }]));
       }
+      if (body.sql.startsWith('SELECT CAST(unixepoch'))
+        return ok(
+          JSON.stringify([
+            { results: { columns: ['now_ms'], rows: [[Date.parse('2026-11-05T00:00:00.000Z')]] } },
+          ]),
+        );
       if (body.sql.startsWith('INSERT INTO backup_runs')) return ok('[]');
     }
     return { status: 1, stdout: '', stderr: `unexpected ${args.join(' ')}` };
@@ -146,7 +153,6 @@ function deps(overrides: Partial<Parameters<typeof runBackup>[0]> = {}) {
       encrypt: fakeEncrypt,
       lockPath: join(dir, 'backup.lock'),
       tmpRoot: join(dir, 'tmp'),
-      now: () => new Date('2026-11-05T00:00:00.000Z'),
       out: () => {},
       err: (line: string) => errors.push(line),
       ...overrides,
@@ -215,7 +221,8 @@ describe('npm run backup', () => {
     expect(existsSync(d.lockPath)).toBe(false);
     // The guard runs first; no `staging/` prefix is ever listed (R-BAK-04).
     expect(calls[0]!.args).toEqual(['api', `/r2/buckets/${bucket}`]);
-    expect(calls[1]!.args.slice(0, 4)).toEqual(['d1', 'export', 'DB', '--remote']);
+    expect(calls[1]!.args[0]).toBe('d1-query'); // D1's clock, right before the export
+    expect(calls[2]!.args.slice(0, 4)).toEqual(['d1', 'export', 'DB', '--remote']);
     expect(vi.mocked(d.storage.list).mock.calls.map(([prefix]) => prefix)).not.toContain(
       'staging/',
     );
@@ -233,6 +240,9 @@ describe('npm run backup', () => {
       completed: true,
     });
     expect(Object.keys(manifest).at(-1)).toBe('completed');
+    expect(readFileSync(join(snapshot, 'RESTORE.md'), 'utf8')).toContain(
+      'Exported 2026-11-05T00:00:00.000Z by',
+    );
     expect(readdirSync(snapshot).sort()).toEqual([
       'RESTORE.md',
       'checksums.sha256',
@@ -245,7 +255,7 @@ describe('npm run backup', () => {
     );
     expect((await verifySnapshot(snapshot)).errors).toEqual([]);
     // R-BAK-09: one content-free row, after verification, with the manifest's hash.
-    const insert = calls.find((call) => call.args[0] === 'd1-query');
+    const insert = calls.find((call) => call.input?.includes('INSERT INTO backup_runs'));
     expect(insert?.args).toEqual(['d1-query', databaseId]);
     const body = JSON.parse(insert!.input!);
     expect(body.sql).toMatch(/^INSERT INTO backup_runs /);
@@ -268,7 +278,7 @@ describe('npm run backup', () => {
     expect(readdirSync(join(dir, 'out'))).toEqual([]);
     expect(readdirSync(join(dir, 'tmp'))).toEqual([]);
     expect(existsSync(d.lockPath)).toBe(false);
-    expect(calls.some((call) => call.args[0] === 'd1-query')).toBe(false);
+    expect(calls.some((call) => call.input?.includes('INSERT INTO backup_runs'))).toBe(false);
   });
 
   it('AC-BAK-09 an encryption failure leaves no archive and no partial file', async () => {
@@ -380,12 +390,66 @@ describe('npm run backup, review round 1', () => {
       return get(...args);
     });
     const { run, calls } = fakeRun();
-    const { deps: d } = deps({ run, storage, now: () => new Date(clock) });
+    const { deps: d } = deps({ run, storage });
     expect(await runBackup(d)).toBe(0);
     expect(clock).toBeGreaterThan(exportedAt);
-    const insert = calls.find((call) => call.args[0] === 'd1-query');
+    const insert = calls.find((call) => call.input?.includes('INSERT INTO backup_runs'));
     expect(JSON.parse(insert!.input!).params.at(-1)).toBe(exportedAt);
   });
+
+  it('INV-7 takes verified_at, the snapshot name and exportedAt from the D1 clock, not a local clock that runs ahead', async () => {
+    const d1Time = Date.parse('2026-11-05T00:00:00.000Z');
+    const { run, calls } = fakeRun();
+    // The admin's machine is five hours fast.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(d1Time + 5 * 3_600_000);
+    const { deps: d } = deps({ run });
+    try {
+      expect(await runBackup(d)).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(readdirSync(join(dir, 'out'))).toEqual(['classhub-backup-2026-11-05T000000Z.tar.age']);
+    const clock = calls.findIndex((call) => call.input?.includes('unixepoch'));
+    const exported = calls.findIndex((call) => call.args[1] === 'export');
+    expect(clock).toBeGreaterThan(-1);
+    expect(clock).toBeLessThan(exported);
+    const insert = calls.find((call) => call.input?.includes('INSERT INTO backup_runs'));
+    expect(JSON.parse(insert!.input!).params.at(-1)).toBe(d1Time);
+    expect(JSON.parse(insert!.input!).sql).toBe(BACKUP_RUNS_INSERT);
+  });
+
+  it.each([
+    ['fails', { status: 1, stdout: '', stderr: 'cf.mjs: D1 housekeeping query failed.' }],
+    [
+      'returns no row',
+      { status: 0, stdout: JSON.stringify([{ results: { columns: [], rows: [] } }]), stderr: '' },
+    ],
+    [
+      'returns a non-number',
+      {
+        status: 0,
+        stdout: JSON.stringify([{ results: { columns: ['a'], rows: [['x']] } }]),
+        stderr: '',
+      },
+    ],
+  ])(
+    'INV-7 stops before the export and records nothing when the D1 clock read %s',
+    async (_name, reply) => {
+      const base = fakeRun();
+      const run = vi.fn((args: string[], options: { input?: string } = {}) =>
+        options.input?.includes('unixepoch')
+          ? (base.calls.push({ args, input: options.input }), reply)
+          : base.run(args, options),
+      );
+      const { deps: d } = deps({ run });
+      expect(await runBackup(d)).toBe(1);
+      expect(base.calls.some((call) => call.args[1] === 'export')).toBe(false);
+      expect(base.calls.some((call) => call.input?.includes('INSERT INTO backup_runs'))).toBe(
+        false,
+      );
+    },
+  );
 
   it.each([
     `age1pq1${'q'.repeat(80)}`,

@@ -26,8 +26,9 @@ export async function runHousekeeping(argv, deps) {
   return 0;
 }
 
-/** @param {import('../../src/lib/server/services/job-runner.ts').JobContext & { writes?: import('../../src/lib/server/services/job-runner.ts').HousekeepingWrites }} context @param {number} now */
-async function reconcile({ database, storage, writes }, now) {
+/** @param {import('../../src/lib/server/services/job-runner.ts').JobContext & { writes?: import('../../src/lib/server/services/job-runner.ts').HousekeepingWrites; out: (line: string) => void }} deps @param {number} now */
+async function reconcile(deps, now) {
+  const { database, storage, writes } = deps;
   const cutoff = now - siteConfig.deletedMediaGraceDays * DAY;
   // Finish the purge backlog before resetting usage, so later purges cannot subtract it again.
   for (let batch = 0; ; batch++) {
@@ -53,17 +54,24 @@ async function reconcile({ database, storage, writes }, now) {
         if (!Number.isSafeInteger(object.size) || object.size < 0 || !object.key.startsWith(prefix))
           throw new Error('Invalid bucket listing');
       }
-      for (let start = 0; start < page.objects.length; start += 20) {
-        const objects = page.objects.slice(start, start + 20);
-        const keep = await retainedObjectKeys(
+      for (let start = 0; start < page.objects.length; start += 90) {
+        const objects = page.objects.slice(start, start + 90);
+        const { keep, pending, unrecognised } = await retainedObjectKeys(
           database,
           objects.map((object) => object.key),
           cutoff,
         );
+        for (const key of unrecognised) deps.out(`housekeeping: unrecognised object kept: ${key}`);
         const remove = objects.filter((object) => !keep.has(object.key));
         if (remove.length) await storage.delete(remove.map((object) => object.key));
         for (const object of objects) {
-          if (keep.has(object.key) && !object.key.startsWith('staging/')) total += object.size;
+          // A pending complete's copies are still counted in reserved_bytes (R-MEM-11).
+          if (
+            keep.has(object.key) &&
+            !pending.has(object.key) &&
+            !object.key.startsWith('staging/')
+          )
+            total += object.size;
           if (!Number.isSafeInteger(total))
             throw new Error('Bucket size exceeds integer precision');
         }

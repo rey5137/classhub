@@ -56,12 +56,23 @@
   the in-request run takes its slot with a conditional `UPDATE schema_meta SET value = ? WHERE key =
   'housekeeping_last_run_at' AND CAST(value AS INTEGER) < ?` and proceeds only if it changed a row (two concurrent
   requests cannot both run). It releases **at most 20** expired reservations (R-MEM-21), deletes their staging
-  objects, and purges at most 20 deleted photos past the grace period (R-MEM-20); the rest wait for the next run. The
+  objects, retires orphan avatars (R-MEM-13) and finishes one flagged album year-rewrite chunk (R-MEM-14), both traffic runs only, and purges at most 20 deleted photos past the grace
+  period (R-MEM-20); the rest wait for the next run. The
   **reconcile is CLI-only** (`npm run housekeeping -- --reconcile`, weekly by the operator; it does not fit the
   Workers Free CPU and subrequest limits): it lists the bucket, deletes objects under `media/`, `avatars/` and
   `staging/` that have no live row and no open reservation, treating a soft-deleted row **past its grace period or
   with `purged_at` set** as no row, and resets `committed_bytes` to the listed total of the kept objects outside `staging/`,
-  recording `last_reconciled_at`. The CLI uses bucket-scoped Object Read & Write credentials
+  recording `last_reconciled_at`. Final keys encode the media id (R-MEM-12), so it looks rows up by primary key in
+  chunks of 90 listed objects (D1's 100-parameter limit) and compares the keys itself; one statement spawns one
+  `cf.mjs d1-query` process, with a 250 ms pause between them. The finals an open reservation's `complete` has
+  already copied are kept but **not added to the total** (their bytes are still in `reserved_bytes`). A key under
+  `media/` or `avatars/` that is not a final key is **kept and counted**, and listed as `unrecognised object kept`.
+  **Precedence of the two ledgers:** the REST path has no atomic batch, so each CLI run starts by rebuilding
+  `reserved_bytes` from the open reservations, and rebuilds `committed_bytes` from the live rows **only while
+  `last_reconciled_at` is null**. After the first reconcile the bucket total is authoritative: a plain run leaves
+  `committed_bytes` alone, and a CLI purge subtracts exactly the rows it flipped (clamped at 0), so a retry never
+  subtracts twice. A crash between the row update and that subtraction leaves an overcount (the quota looks fuller,
+  never emptier) until the next reconcile. The CLI uses bucket-scoped Object Read & Write credentials
   `R2_HOUSEKEEPING_ACCESS_KEY_ID` / `R2_HOUSEKEEPING_SECRET_ACCESS_KEY`; backup credentials stay read-only.
 
 ## 7.3 Object keys
@@ -75,14 +86,27 @@
 ## 7.4 Albums, avatars, deletion and limits
 
 - **R-MEM-13** Per member: 25 photos per day, 2 concurrent open reservations; avatar uploads count against the quota
-  but not the daily photo limit. Avatars are one 512 px square (the browser crops) with no separate thumbnail.
+  but not the daily photo limit. Avatars are one 512 px square (the browser crops) with no separate thumbnail, and a
+  reservation for one is refused (`400 validation`) above 1 MB (1,048,576 bytes). The daily count is **reservations in
+  a rolling 24 hours, released ones included**, not completed photos. A refusal is `429 rate_limited` with
+  `error.reason` `daily` or `concurrent` and its own localized sentence; when both limits are hit it is `concurrent`.
+  `Retry-After` for `concurrent` is the soonest open reservation's `expires_at` minus now (at least 1, at most 900
+  seconds); for `daily` it is 900. Traffic housekeeping (R-MEM-11) soft-deletes up to 20 live avatar rows older than
+  one hour that are no member's current `avatar_media_id` (a `complete` whose `PATCH /me` never followed); R-MEM-20
+  purges them after the grace period. The CLI run does not do this.
 - **R-MEM-14** Albums have a name (1–80), an optional year tag (four digits) and description (≤ 500). The gallery
   filters by album and by year, newest first, 30 per page, keyset paged. The year is the stored
   `media.effective_year` (album year tag, else the photo's `taken_year`), set when the photo is completed or moved to
   another album and rewritten for the album's photos when an album's year tag changes (R-DB-06): the album row and
   the first ≤ 500 stale photos in one batch, then further chunks of ≤ 500 in the same request until none remain,
   capped at 20,000 rows per request (R-BUD-08). Each chunk selects only stale rows (`album_id = ? AND deleted_at IS
-  NULL AND effective_year IS NOT <new value>`), so a retry or the next PATCH finishes an interrupted rewrite.
+  NULL AND effective_year IS NOT <new value>`), so a retry or the next PATCH finishes an interrupted rewrite. The PATCH also adds its album id to the
+  `schema_meta` value `year_rewrite_pending` (`,id,id,`, no duplicates) in the album batch. While the key lists an
+  album, each traffic housekeeping run (R-MEM-11) rewrites one chunk of ≤ 500 stale live photos of the first listed
+  album only, through `media_album_idx` (one stale-year predicate shared with the PATCH, so no scan of other albums'
+  photos), and removes that id in the same batch once no stale photo remains; the key is deleted when the list is
+  empty. Only the housekeeping run removes an id, as the same album may be PATCHed again meanwhile. A value that is
+  not a `,id,…,` list is deleted with no work. Without the key the run does nothing, so no hourly scan of `media`.
   Captions are plain text ≤ 500 characters.
 - **R-MEM-20** Deleting a photo (owner or admin) sets `deleted_at`, removes it from every view and from
   `/api/v1/media/:id/*` at once, and **keeps its objects for a grace period**: `deletedMediaGraceDays` in
@@ -96,7 +120,11 @@
 ## 7.5 Delivery and caching
 
 - **R-MEM-16** `GET /api/v1/media/:id/:variant` (`image`, `thumb`; avatars through `/api/v1/media/:id/image`) verifies
-  identity and membership, that the row exists and isn't deleted, then streams the object from R2. The bucket has no
+  identity and membership, that the row exists and isn't deleted, then streams the object from R2. An `avatar` row is
+  served only while it is its owner's current `avatar_media_id` **and** `projectProfile(viewer, owner)` shows it to this
+  viewer (R-PROF-02/03/13); otherwise the answer is the same `not_found` as an unknown id, also for a revalidation that
+  would have been a `304`. Because avatars are `private, max-age=300` (R-MEM-17), a browser that already holds one can
+  keep showing it for up to five minutes after the owner hides or changes it. The bucket has no
   custom domain and `r2.dev` stays disabled (INV-3).
 - **R-MEM-17** Response headers: `Cache-Control: private, max-age=300` for thumbnails and avatars, `private, no-cache`
   for full images; `ETag` from the stored SHA-256 with `If-None-Match` → `304`; `Content-Type` from the row;
@@ -112,7 +140,8 @@
 - **R-MEM-18** `/admin` usage shows committed and reserved bytes, photo count, last reconcile, the R2 operation
   estimate (Class A puts and lists written per request, a multipart put counted as its create, each part and its
   complete, exact unless that write fails; Class B reads tallied per isolate and written at most once a minute, so a
-  lost isolate undercounts; deletes and multipart aborts are not billed and not counted)
+  lost isolate undercounts; deletes and multipart aborts are not billed and not counted; operations made by the CLI, backup, housekeeping
+  and reconcile, are not counted either, so the estimate is a floor)
   and a link to the account's R2 dashboard, and states that
   the app's cap is not a billing cap (§14).
 - **R-MEM-19** Concurrent reservations can't overshoot, in a form a D1 batch can run (a batch cannot branch on an
@@ -146,7 +175,7 @@
 | AC-MEM-04 | A PNG body declared `image/webp`, a body larger than reserved, and a hash mismatch are each refused and leave no object | R-MEM-08 | integration (R2 pool) |
 | AC-MEM-05 | Twenty parallel reservations near the stop threshold never take usage past it | R-MEM-19 | integration |
 | AC-MEM-06 | At 9 GB reservations return `507`; at 8 GB admins see the warning; members can still browse | R-MEM-15 | integration with a seeded counter |
-| AC-MEM-07 | A media URL copied into a session without Access, or by a suspended member, returns the uniform denial | R-MEM-16 | `test:security` |
+| AC-MEM-07 | A media URL copied into a session without Access, or by a suspended member, returns the uniform denial; an avatar's bytes follow the owner's current avatar and its visibility | R-MEM-16 | `test:security` |
 | AC-MEM-08 | The bucket has no public access and no custom domain | R-MEM-16 | `preflight` (R-OPS-10) |
 | AC-MEM-09 | Expired reservations are released and orphan objects removed; the counter matches the bucket after reconcile | R-MEM-11 | integration |
 | AC-MEM-10 | Media responses carry the R-MEM-17 headers and answer `If-None-Match` with `304` | R-MEM-17 | integration |

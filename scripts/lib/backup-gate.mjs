@@ -3,6 +3,7 @@
 // through the account guard (cf.mjs).
 
 import { d1Remote, reason } from './cf-child.mjs';
+import { compareMigrations, localMigrations, remoteMigrations } from './migrations.mjs';
 
 /** R-DB-11: a destructive step is its own migration with this suffix. */
 export const DESTRUCTIVE_MIGRATION = /_destructive\.sql$/;
@@ -68,5 +69,39 @@ export async function backupGate(run) {
   return {
     ok: true,
     detail: `verified backup ${backup} is newer than the last deploy${deployedAt === null ? ' (none yet)' : ` (${new Date(deployedAt).toISOString()})`}.`,
+  };
+}
+
+/**
+ * INV-7 for a raw `d1 migrations apply DB --remote` (scripts/cf.mjs): when a pending migration
+ * is destructive, the same backupGate as `db:migrate:remote` must pass. Nothing pending, or
+ * only additive steps, is not gated here. A database with no `d1_migrations` table yet holds no
+ * member data, so a fresh setup still applies everything; any other unreadable state refuses.
+ * @param {import('./cf-child.mjs').CfRunner} run @param {string} root
+ * @returns {Promise<{ ok: true } | { ok: false; detail: string; fix: string }>}
+ */
+export async function pendingDestructiveGate(run, root) {
+  const local = localMigrations(root);
+  if (!local.some((name) => DESTRUCTIVE_MIGRATION.test(name))) return { ok: true };
+  let pending;
+  try {
+    pending = compareMigrations(local, await remoteMigrations(run)).pending;
+  } catch (error) {
+    if (/no such table: d1_migrations/i.test(/** @type {Error} */ (error).message))
+      return { ok: true };
+    return {
+      ok: false,
+      detail: `cannot read the applied migrations (${/** @type {Error} */ (error).message}).`,
+      fix: 'run npm run db:migrate:remote.',
+    };
+  }
+  const destructive = pending.filter((name) => DESTRUCTIVE_MIGRATION.test(name));
+  if (destructive.length === 0) return { ok: true };
+  const gate = await backupGate(run);
+  if (gate.ok) return { ok: true };
+  return {
+    ok: false,
+    detail: `${destructive.join(', ')} is destructive and ${gate.detail}`,
+    fix: `${gate.fix} Then run npm run db:migrate:remote.`,
   };
 }

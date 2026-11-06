@@ -3,6 +3,9 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pendingDestructiveGate } from './lib/backup-gate.mjs';
+import { BACKUP_RUNS_INSERT } from './lib/backup-sql.mjs';
+import { runCf } from './lib/cf-child.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const envPath = join(root, '.env.cloudflare');
@@ -108,6 +111,62 @@ if (
   fail('d1 export may only run as: d1 export DB --remote --output <file>.');
 }
 
+// R-BAK-09: the two gates below key on a bare `--remote`. Any other spelling wrangler's parser
+// reads as remote (`--remote=true`, `--no-local`, `--local=false`, `-r`) would skip them.
+if (
+  args[0] === 'd1' &&
+  (args[1] === 'execute' || (args[1] === 'migrations' && args[2] === 'apply'))
+) {
+  for (const arg of args) {
+    if (!arg.startsWith('-') || arg === '-' || arg === '--' || arg === '--remote') continue;
+    const name = arg.replace(/^-+/, '').split('=')[0].toLowerCase();
+    const shortGroup = !arg.startsWith('--') && /[rl]/.test(arg.slice(1).split('=')[0]);
+    if (
+      shortGroup ||
+      name === 'remote' ||
+      name === 'no-remote' ||
+      name === 'no-local' ||
+      (name === 'local' && (arg !== '--local' || args.includes('--remote')))
+    )
+      fail(
+        `${arg} is not allowed: remote d1 commands take the bare --remote flag only (no =value, --no-local, --local=false or short forms).`,
+      );
+  }
+}
+
+// INV-7 (R-DB-11): a raw remote migration run waits for the same backup gate as
+// db:migrate:remote when a pending migration is destructive.
+if (
+  args[0] === 'd1' &&
+  args[1] === 'migrations' &&
+  args[2] === 'apply' &&
+  args.includes('--remote')
+) {
+  const gate = await pendingDestructiveGate(runCf, root);
+  if (!gate.ok) fail(`d1 migrations apply refused: ${gate.detail} ${gate.fix}`);
+}
+
+// INV-7: remote SQL goes only as the one-command shape the scripts use, never DDL, PRAGMA or a
+// comment, and never a write to backup_runs (only d1-query's pinned INSERT) or d1_migrations
+// (only wrangler), so a destructive change cannot skip the migration gate through `d1 execute`.
+if (args[0] === 'd1' && args[1] === 'execute' && args.includes('--remote')) {
+  const sql = args[6] ?? '';
+  const scan = scanSql(sql);
+  if (
+    args.length !== 7 ||
+    args[2] !== 'DB' ||
+    args[3] !== '--remote' ||
+    args[4] !== '--json' ||
+    args[5] !== '--command' ||
+    scan.unsafe ||
+    (/\b(?:insert|update|delete|replace)\b/i.test(scan.text) &&
+      /\b(?:backup_runs|d1_migrations)\b/i.test(scan.text))
+  )
+    fail(
+      'd1 execute --remote may only run as: d1 execute DB --remote --json --command <SQL>, with no schema changes, comments, double quotes, or writes to backup_runs or d1_migrations; apply migrations with npm run db:migrate:remote.',
+    );
+}
+
 if (isD1Query) {
   await d1Query(args, /** @type {string} */ (accountId), /** @type {string} */ (token));
 }
@@ -156,6 +215,26 @@ function isLocalDryRun(argv) {
     return false;
   }
   return true;
+}
+
+/**
+ * The one SQL scanner for `d1 execute` and `d1-query`: literal contents are blanked first (so a
+ * quote inside a comment cannot swallow real SQL), simple quoted identifiers are unquoted, and a
+ * comment opener, a leftover double quote or a DDL/PRAGMA keyword marks the text unsafe.
+ * @param {string} raw @returns {{ text: string, unsafe: boolean }}
+ */
+function scanSql(raw) {
+  const text = raw
+    .replace(/'(?:''|[^'])*'/g, " '' ")
+    .replace(/"([a-z_][a-z0-9_]*)"/gi, ' $1 ')
+    .replace(/\s*\.\s*/g, '.')
+    .trim();
+  return {
+    text,
+    unsafe:
+      /--|\/\*|"/.test(text) ||
+      /\b(?:drop|alter|create|pragma|attach|detach|vacuum|truncate)\b/i.test(text),
+  };
 }
 
 /** @param {string[]} argv */
@@ -401,9 +480,8 @@ function renderDryRunConfig() {
  */
 async function apiGet(argv, account, apiToken) {
   const put = argv[1] === '--put';
-  const write = put;
   const method = put ? 'PUT' : 'GET';
-  const path = argv[write ? 2 : 1] ?? '';
+  const path = argv[put ? 2 : 1] ?? '';
   const policy = /^\/access\/(?:apps\/[A-Za-z0-9_-]{1,64}\/)?policies\/[A-Za-z0-9_-]{1,64}$/;
   // Only the reads the scripts make: the workers.dev subdomain, one bucket by name
   // (R2 names: lower-case letters, digits, hyphens), that bucket's domains, and the
@@ -415,18 +493,18 @@ async function apiGet(argv, account, apiToken) {
     policy,
   ];
   const allowed = put ? policy.test(path) : shapes.some((shape) => shape.test(path));
-  if (argv.length !== (write ? 3 : 2) || !allowed) {
+  if (argv.length !== (put ? 3 : 2) || !allowed) {
     fail(
       'usage: node scripts/cf.mjs api /workers/subdomain | /r2/buckets/<name>[/domains/managed|custom] | /access/[apps/<id>/]policies/<id> | --put /access/[apps/<id>/]policies/<id>',
     );
   }
   let payload;
-  if (write) {
+  if (put) {
     payload = readFileSync(0, 'utf8');
     try {
       JSON.parse(payload);
     } catch {
-      fail(`${argv[1]} needs a JSON body on stdin.`);
+      fail('--put needs a JSON body on stdin.');
     }
   }
   let response;
@@ -435,9 +513,9 @@ async function apiGet(argv, account, apiToken) {
       method,
       headers: {
         authorization: `Bearer ${apiToken}`,
-        ...(write ? { 'content-type': 'application/json' } : {}),
+        ...(put ? { 'content-type': 'application/json' } : {}),
       },
-      ...(write ? { body: payload } : {}),
+      ...(put ? { body: payload } : {}),
       signal: AbortSignal.timeout(30_000),
     });
   } catch (error) {
@@ -491,14 +569,10 @@ async function d1Query(argv, account, apiToken) {
     )
   )
     fail('d1-query needs one {sql, params} statement.');
-  // This deliberately accepts a small SQL subset. Strip literal contents before checking
-  // syntax, unquote identifiers, and reject comma joins as well as qualified table names.
-  const sql = body.sql
-    .replace(/'(?:''|[^'])*'/g, " '' ")
-    .replace(/"([a-z_][a-z0-9_]*)"/gi, ' $1 ')
-    .replace(/\s*\.\s*/g, '.')
-    .trim()
-    .replace(/;$/, '');
+  // This deliberately accepts a small SQL subset: the shared scan strips literal contents and
+  // unquotes identifiers, then comma joins and qualified table names are rejected here.
+  const scan = scanSql(body.sql);
+  const sql = scan.text.replace(/;$/, '');
   const references = [...sql.matchAll(/\b(from|join|update|into)\b\s*/gi)];
   const tables = references.map(
     (match) =>
@@ -514,8 +588,9 @@ async function d1Query(argv, account, apiToken) {
   );
   if (
     !/^(?:select|update|delete|insert)\b/i.test(sql) ||
-    /[;`[\]]|--|\/\*|"/.test(sql) ||
-    /\b(?:drop|alter|create|pragma|attach|detach|replace|with|load_extension)\b/i.test(sql) ||
+    scan.unsafe ||
+    /[;`[\]]/.test(sql) ||
+    /\b(?:replace|with|load_extension)\b/i.test(sql) ||
     commaJoin ||
     !tables.length ||
     tables.some(
@@ -524,9 +599,8 @@ async function d1Query(argv, account, apiToken) {
           table,
         ),
     ) ||
-    // R-BAK-09: backup_runs takes one plain INSERT from backup, nothing else.
-    (tables.includes('backup_runs') &&
-      (tables.length !== 1 || !/^insert\s+into\s+backup_runs\s*\(/i.test(sql)))
+    // R-BAK-09: backup_runs takes the one INSERT backup sends, verbatim, nothing else.
+    (tables.includes('backup_runs') && body.sql !== BACKUP_RUNS_INSERT)
   )
     fail('d1-query permits SELECT/UPDATE/DELETE/INSERT on housekeeping tables only.');
   let response;

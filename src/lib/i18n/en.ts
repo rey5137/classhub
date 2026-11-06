@@ -169,6 +169,10 @@ export const en: Record<keyof typeof vi, string> = {
     'Uploads are paused because the class’s storage is full. Photos can still be viewed.',
   'upload.error.rate_limited':
     'You’ve uploaded a lot today or have too many uploads in progress. Try again later.',
+  'upload.error.rate_limited_daily':
+    'You’ve reached today’s photo limit. Try again in a while; the limit counts the last 24 hours.',
+  'upload.error.rate_limited_concurrent':
+    'You already have two uploads in progress. Wait a minute for them to finish, then try again.',
   'upload.error.validation': 'The server refused this photo. Try choosing it again.',
   'upload.error.payload_too_large': 'This photo is too large to upload.',
   'upload.error.conflict': 'This upload took too long and expired. Try again.',

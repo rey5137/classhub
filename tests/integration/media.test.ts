@@ -1,6 +1,7 @@
 import { applyD1Migrations, env } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { t } from '../../src/lib/i18n';
 import { siteConfig } from '../../src/lib/config';
 import { errorBodySchema } from '../../src/lib/contracts/errors';
 import { createD1Database } from '../../src/lib/server/adapters/cloudflare/d1-database';
@@ -12,6 +13,8 @@ import {
   rateEvents,
   storageUsage,
   uploadReservations,
+  profileContacts,
+  users,
 } from '../../src/lib/server/db/schema';
 import { uuidv7 } from '../../src/lib/server/ids';
 import type { Database } from '../../src/lib/server/ports/database';
@@ -205,6 +208,13 @@ describe('private media upload protocol on D1/R2', () => {
     const [row] = await database.db.select().from(media).limit(1);
     expect(row!.objectKey).toBe(`avatars/v1/${PEOPLE.active.id}/${avatar.mediaId}.webp`);
     expect(row!.thumbKey).toBe('');
+    // R-MEM-16: the bytes are served only while it is the owner's current avatar.
+    const hidden = await harness.send(`/api/v1/media/${avatar.mediaId}/image`, { headers: auth });
+    expect(hidden.status).toBe(404);
+    await database.db
+      .update(users)
+      .set({ avatarMediaId: avatar.mediaId })
+      .where(eq(users.id, PEOPLE.active.id));
     const image = await harness.send(`/api/v1/media/${avatar.mediaId}/image`, { headers: auth });
     expect(image.status).toBe(200);
     expect(image.headers.get('cache-control')).toBe('private, max-age=300');
@@ -489,6 +499,180 @@ describe('private media upload protocol on D1/R2', () => {
     expect(read).not.toHaveBeenCalled();
     expect(await usage()).toEqual({ reserved: 0, committed: 32 });
     expect(await keys()).toHaveLength(2);
+  });
+});
+
+describe('avatar bytes and upload refusals', () => {
+  const avatarOverrides = {
+    purpose: 'avatar',
+    width: 512,
+    height: 512,
+    thumbBytes: 0,
+    thumbSha256: digest(new Uint8Array()),
+  };
+  async function currentAvatar() {
+    const reservation = await uploaded(avatarOverrides);
+    expect((await finish(reservation.id)).status).toBe(201);
+    await database.db
+      .update(users)
+      .set({ avatarMediaId: reservation.mediaId, status: 'active' })
+      .where(eq(users.id, PEOPLE.active.id));
+    await database.db.delete(profileContacts).where(eq(profileContacts.userId, PEOPLE.active.id));
+    return `/api/v1/media/${reservation.mediaId}/image`;
+  }
+  const setVisibility = (value: string) =>
+    database.db
+      .insert(profileContacts)
+      .values({
+        userId: PEOPLE.active.id,
+        visibilityJson: JSON.stringify({ avatar_media_id: value }),
+      })
+      .onConflictDoUpdate({
+        target: profileContacts.userId,
+        set: { visibilityJson: JSON.stringify({ avatar_media_id: value }) },
+      });
+  // Admin and the owner are two members; a third viewer is the suspended one's counterpart.
+  const viewer = () => harness.as(PEOPLE.admin.email);
+
+  afterEach(async () => {
+    await database.db
+      .update(users)
+      .set({ avatarMediaId: null, status: 'active' })
+      .where(eq(users.id, PEOPLE.active.id));
+    await database.db
+      .update(users)
+      .set({ status: 'suspended' })
+      .where(eq(users.id, PEOPLE.suspended.id));
+    await database.db.delete(profileContacts);
+  });
+
+  it('AC-MEM-07 AC-PROF-01 an avatar is served to the owner and, by visibility, to other members', async () => {
+    const path = await currentAvatar();
+    const member = await harness.as(PEOPLE.admin.email);
+    expect((await harness.send(path, { headers: auth })).status).toBe(200);
+    expect((await harness.send(path, { headers: member })).status).toBe(200);
+    await setVisibility('private');
+    expect((await harness.send(path, { headers: auth })).status).toBe(200);
+    expect((await harness.send(path, { headers: member })).status).toBe(404);
+    await setVisibility('admins');
+    expect((await harness.send(path, { headers: member })).status).toBe(200);
+  });
+
+  it('AC-MEM-07 AC-PROF-01 a member viewer is refused an admins-only avatar, an admin is not', async () => {
+    const path = await currentAvatar();
+    // The owner of the avatar is the admin here, so `active` is the plain member viewer.
+    const mediaId = path.split('/')[4]!;
+    await database.db
+      .update(users)
+      .set({ avatarMediaId: null })
+      .where(eq(users.id, PEOPLE.active.id));
+    await database.db.update(media).set({ ownerId: PEOPLE.admin.id }).where(eq(media.id, mediaId));
+    await database.db
+      .update(users)
+      .set({ avatarMediaId: mediaId })
+      .where(eq(users.id, PEOPLE.admin.id));
+    await database.db.insert(profileContacts).values({
+      userId: PEOPLE.admin.id,
+      visibilityJson: JSON.stringify({ avatar_media_id: 'admins' }),
+    });
+    expect((await harness.send(path, { headers: auth })).status).toBe(404);
+    expect((await harness.send(path, { headers: await viewer() })).status).toBe(200);
+    await database.db
+      .update(users)
+      .set({ avatarMediaId: null })
+      .where(eq(users.id, PEOPLE.admin.id));
+  });
+
+  it('AC-MEM-07 AC-PROF-01 a suspended owner, a replaced avatar and a hidden avatar on the 304 path get 404', async () => {
+    const path = await currentAvatar();
+    const member = await viewer();
+    const etag = (await harness.send(path, { headers: member })).headers.get('etag')!;
+    const revalidate = () => harness.send(path, { headers: { ...member, 'if-none-match': etag } });
+    expect((await revalidate()).status).toBe(304);
+    await database.db
+      .update(users)
+      .set({ status: 'suspended' })
+      .where(eq(users.id, PEOPLE.active.id));
+    expect((await harness.send(path, { headers: member })).status).toBe(404);
+    expect((await revalidate()).status).toBe(404);
+    await database.db.update(users).set({ status: 'active' }).where(eq(users.id, PEOPLE.active.id));
+    expect((await revalidate()).status).toBe(304);
+    await setVisibility('private');
+    expect((await revalidate()).status).toBe(404);
+    await database.db.delete(profileContacts);
+    await database.db
+      .update(users)
+      .set({ avatarMediaId: null })
+      .where(eq(users.id, PEOPLE.active.id));
+    expect((await harness.send(path, { headers: auth })).status).toBe(404);
+  });
+
+  it('AC-MEM-07 a soft-deleted (retired) avatar disappears even for its owner', async () => {
+    const path = await currentAvatar();
+    await database.db
+      .update(media)
+      .set({ deletedAt: Date.now() })
+      .where(eq(media.id, path.split('/')[4]!));
+    expect((await harness.send(path, { headers: auth })).status).toBe(404);
+  });
+
+  it('R-MEM-13 a refusal says which limit it hit, and a concurrent one frees at the soonest expiry', async () => {
+    const send = () =>
+      harness.send(root, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(input()) });
+    const first = await reserve();
+    await reserve();
+    const [early] = await database.db
+      .select({ at: uploadReservations.expiresAt })
+      .from(uploadReservations)
+      .where(eq(uploadReservations.id, first.id));
+    await database.db
+      .update(uploadReservations)
+      .set({ expiresAt: Date.now() + 90_000 })
+      .where(eq(uploadReservations.id, first.id));
+    expect(early!.at).toBeGreaterThan(Date.now() + 90_000);
+    // Both limits are hit (25 events and two open reservations): concurrent is reported.
+    await database.db.insert(rateEvents).values(
+      Array.from({ length: 25 }, () => ({
+        bucket: `upload:${PEOPLE.active.id}`,
+        at: Date.now(),
+      })),
+    );
+    const both = await send();
+    expect(both.status).toBe(429);
+    const bothBody = errorBodySchema.parse(await both.json());
+    expect(bothBody.error.reason).toBe('concurrent');
+    expect(bothBody.error.message).toBe(t('en', 'upload.error.rate_limited_concurrent'));
+    const wait = Number(both.headers.get('retry-after'));
+    expect(wait).toBeGreaterThan(80);
+    expect(wait).toBeLessThanOrEqual(90);
+    await abandon(first.id);
+    await abandon((await database.db.select().from(uploadReservations).limit(1))[0]!.id);
+    const daily = await send();
+    expect(errorBodySchema.parse(await daily.json()).error.reason).toBe('daily');
+    expect(daily.headers.get('retry-after')).toBe('900');
+  });
+
+  it('R-MEM-13 a concurrent refusal waits at least one second and at most 900', async () => {
+    const send = () =>
+      harness.send(root, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(input()) });
+    const first = await reserve();
+    await reserve();
+    await database.db
+      .update(uploadReservations)
+      .set({ expiresAt: Date.now() + 200 })
+      .where(eq(uploadReservations.id, first.id));
+    expect(Number((await send()).headers.get('retry-after'))).toBe(1);
+  });
+
+  it('R-MEM-13 an avatar over 1 MB is refused at the reservation; 1 MB is accepted', async () => {
+    const response = await harness.send(root, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ ...input(), ...avatarOverrides, imageBytes: 1_048_577 }),
+    });
+    expect(response.status).toBe(400);
+    expect(errorBodySchema.parse(await response.json()).error.code).toBe('validation');
+    await reserve({ ...avatarOverrides, imageBytes: 1_048_576 });
   });
 });
 

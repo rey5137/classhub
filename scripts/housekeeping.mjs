@@ -8,15 +8,8 @@ import { readEnvFile } from './lib/env-file.mjs';
 import { runHousekeeping } from './lib/housekeeping.mjs';
 import { createHousekeepingWrites } from './lib/housekeeping-writes.mjs';
 import { createS3Client } from './lib/s3.mjs';
-import { readWorkerConfig } from './lib/worker-config.mjs';
+import { guardedTargets } from './lib/guarded-targets.mjs';
 
-const configSchema = z.object({
-  account_id: z.string().regex(/^[0-9a-f]{32}$/),
-  d1_databases: z.array(z.object({ binding: z.string(), database_id: z.string().uuid() })),
-  r2_buckets: z.array(
-    z.object({ binding: z.string(), bucket_name: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/) }),
-  ),
-});
 const envSchema = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string(),
   R2_HOUSEKEEPING_ACCESS_KEY_ID: z.string().min(1),
@@ -25,15 +18,12 @@ const envSchema = z.object({
 
 /** @param {string} root @param {typeof runCf} [run] */
 export function housekeepingDependencies(root, run = runCf) {
-  const config = configSchema.parse(readWorkerConfig(root));
   const env = envSchema.parse(readEnvFile(join(root, '.env.cloudflare')));
-  if (config.account_id !== env.CLOUDFLARE_ACCOUNT_ID)
-    throw new Error('Cloudflare account mismatch');
-  const databaseId = config.d1_databases.find((entry) => entry.binding === 'DB')?.database_id;
-  const bucket = config.r2_buckets.find((entry) => entry.binding === 'MEDIA')?.bucket_name;
-  if (!databaseId || !bucket) throw new Error('Missing housekeeping bindings');
+  const { account, databaseId, bucket } = guardedTargets(root, env.CLOUDFLARE_ACCOUNT_ID);
   /** @param {string[]} args @param {string} [input] */
   function guarded(args, input) {
+    // cf.mjs takes one statement per process; a fixed pause keeps a long reconcile well under the API rate limit.
+    if (args[0] === 'd1-query') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
     const result = run(args, { input });
     if (result.status !== 0) throw new Error('Guarded Cloudflare request failed');
     return JSON.parse(result.stdout);
@@ -49,7 +39,7 @@ export function housekeepingDependencies(root, run = runCf) {
     writes,
     repairUsage: writes.repairUsage,
     storage: createS3Client({
-      account: config.account_id,
+      account,
       bucket,
       accessKey: env.R2_HOUSEKEEPING_ACCESS_KEY_ID,
       secretKey: env.R2_HOUSEKEEPING_SECRET_ACCESS_KEY,

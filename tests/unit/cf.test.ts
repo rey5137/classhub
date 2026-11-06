@@ -15,6 +15,9 @@ import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createRemoteDatabase } from '../../src/lib/server/adapters/cloudflare/remote-database';
+import { retainedObjectKeys } from '../../src/lib/server/repositories/housekeeping';
+import { createHousekeepingWrites } from '../../scripts/lib/housekeeping-writes.mjs';
 import { startFakeApi, type FakeApi } from '../fixtures/fake-cloudflare-api';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -46,6 +49,13 @@ beforeEach(() => {
   logPath = join(dir, 'wrangler.log');
 
   copyFileSync(join(repoRoot, 'scripts', 'cf.mjs'), cfScript);
+  // cf.mjs imports the INV-7 gate and the pinned backup statements.
+  mkdirSync(join(dir, 'scripts', 'lib'), { recursive: true });
+  for (const file of ['backup-gate', 'backup-sql', 'cf-child', 'migrations'])
+    copyFileSync(
+      join(repoRoot, 'scripts', 'lib', `${file}.mjs`),
+      join(dir, 'scripts', 'lib', `${file}.mjs`),
+    );
   copyFileSync(join(repoRoot, 'wrangler.jsonc.example'), join(dir, 'wrangler.jsonc.example'));
   copyFileSync(join(repoRoot, 'tests', 'fixtures', 'fake-wrangler.mjs'), fakeWrangler);
   chmodSync(fakeWrangler, 0o755);
@@ -701,6 +711,41 @@ describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
     ).toBe(0);
   });
 
+  it('AC-MEM-09 allows every statement the reconcile and REST purge actually send', async () => {
+    writeValidEnv();
+    const sent: { sql: string; params: unknown[] }[] = [];
+    // `returning` reads rows back, so the fake answers with one row of zeros.
+    const remote = createRemoteDatabase(async (statement) => {
+      sent.push(statement);
+      return [
+        {
+          success: true,
+          results: { columns: ['a', 'b'], rows: [[0, 0]] },
+          meta: { changes: 1 },
+        },
+      ];
+    });
+    const writes = createHousekeepingWrites(remote);
+    await retainedObjectKeys(
+      remote,
+      ['media/v1/a/image.webp', 'avatars/v1/o/b.webp', 'staging/v1/c/image.webp'],
+      1,
+    );
+    await writes.markPurged(remote, ['a'], 1, 1);
+    await writes.releaseExpired(remote, ['a'], 1);
+    expect(sent.some((statement) => /returning/i.test(statement.sql))).toBe(true);
+    expect(sent.some((statement) => /max\(0,/i.test(statement.sql))).toBe(true);
+    expect(sent.some((statement) => /case when/i.test(statement.sql))).toBe(true);
+    expect(sent.some((statement) => /"media"."id" in/i.test(statement.sql))).toBe(true);
+    for (const statement of sent) {
+      const result = await runApi(['d1-query', databaseId], {
+        config: d1Config(),
+        input: JSON.stringify(statement),
+      });
+      expect(result.status, statement.sql).toBe(0);
+    }
+  });
+
   it.each([
     'DROP TABLE media',
     'ALTER TABLE media ADD value TEXT',
@@ -724,6 +769,14 @@ describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
     'DELETE FROM backup_runs',
     'INSERT INTO backup_runs (id) SELECT id FROM media',
     'INSERT INTO media (id) SELECT id FROM backup_runs',
+    // INV-7: only the exact statement backup sends can mint a verified backup.
+    'INSERT INTO backup_runs (id) VALUES (?)',
+    'insert into backup_runs (id, kind, manifest_sha256, object_count, total_bytes, verified_at) values (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO backup_runs (id, kind, manifest_sha256, object_count, total_bytes, verified_at) VALUES (?, ?, ?, ?, ?, 1)',
+    'INSERT INTO backup_runs (id, kind, manifest_sha256, object_count, total_bytes, verified_at)  VALUES (?, ?, ?, ?, ?, ?)',
+    // The shared scanner: a quote inside a comment or identifier cannot hide what follows.
+    "select 1 from media -- '\ndelete from media;\n-- '",
+    'select "\'" from media /* \' */',
   ])('AC-MEM-09 refuses SQL outside the housekeeping subset: %s', async (sql) => {
     writeValidEnv();
     const result = await runApi(['d1-query', databaseId], {
@@ -899,5 +952,227 @@ describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
     expect(extra.status).not.toBe(0);
     expect(extra.stderr).toContain('usage');
     expect(api.requests).toEqual([]);
+  });
+});
+
+describe('scripts/cf.mjs INV-7 gate and remote SQL shape (R-DB-11, R-OPS-12)', () => {
+  const fake = `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+appendFileSync(process.env.FAKE_WRANGLER_LOG, JSON.stringify({ args }) + '\\n');
+const rows = (results) => process.stdout.write(JSON.stringify([{ results }]));
+if (args[0] === 'whoami') process.stdout.write(process.env.FAKE_WRANGLER_WHOAMI);
+else if (args[0] === 'deployments') process.stdout.write('[]');
+else if (args[0] === 'd1' && args[1] === 'execute') {
+  const sql = args.at(-1);
+  if (process.env.FAKE_D1_ERROR && sql.includes('d1_migrations')) {
+    process.stderr.write(process.env.FAKE_D1_ERROR);
+    process.exitCode = 1;
+  } else if (sql.includes('d1_migrations')) rows(JSON.parse(process.env.FAKE_APPLIED ?? '[]').map((name) => ({ name })));
+  else if (sql.includes('backup_runs')) rows([{ at: process.env.FAKE_BACKUP_AT ? Number(process.env.FAKE_BACKUP_AT) : null }]);
+}
+`;
+  const apply = ['d1', 'migrations', 'apply', 'DB', '--remote'];
+
+  beforeEach(() => {
+    writeValidEnv();
+    writeWranglerConfig(account);
+    writeFileSync(join(dir, 'fake-gate-wrangler.mjs'), fake);
+    chmodSync(join(dir, 'fake-gate-wrangler.mjs'), 0o755);
+    mkdirSync(join(dir, 'migrations'), { recursive: true });
+    writeFileSync(join(dir, 'migrations', '0001_init.sql'), 'select 1;');
+  });
+
+  function gated(args: string[], extraEnv: Record<string, string> = {}) {
+    return run(args, {
+      whoami: whoami(account),
+      extraEnv: { CF_WRANGLER_BIN: join(dir, 'fake-gate-wrangler.mjs'), ...extraEnv },
+    });
+  }
+  const applied = (invocations: Invocation[]) =>
+    invocations.some((entry) => entry.args.join(' ') === apply.join(' '));
+  const destructive = () =>
+    writeFileSync(join(dir, 'migrations', '0009_x_destructive.sql'), 'drop table x;');
+
+  it('AC-OPS-06 refuses a pending destructive migration with no verified backup, without spawning the apply', () => {
+    destructive();
+    const { result, invocations } = gated(apply, { FAKE_APPLIED: '["0001_init.sql"]' });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('0009_x_destructive.sql');
+    expect(result.stderr).toContain('no verified backup exists');
+    expect(applied(invocations)).toBe(false);
+  });
+
+  it('AC-OPS-06 applies a pending destructive migration once a backup newer than the last deploy exists', () => {
+    destructive();
+    const { result, invocations } = gated(apply, {
+      FAKE_APPLIED: '["0001_init.sql"]',
+      FAKE_BACKUP_AT: '1700000000000',
+    });
+    expect(result.status).toBe(0);
+    expect(applied(invocations)).toBe(true);
+  });
+
+  it('AC-OPS-06 does not gate a destructive migration that is already applied, or a run with only additive files', () => {
+    destructive();
+    expect(
+      applied(
+        gated(apply, { FAKE_APPLIED: '["0001_init.sql","0009_x_destructive.sql"]' }).invocations,
+      ),
+    ).toBe(true);
+    rmSync(join(dir, 'migrations', '0009_x_destructive.sql'));
+    rmSync(logPath);
+    const additive = gated(apply, { FAKE_D1_ERROR: 'would fail if read' });
+    expect(additive.result.status).toBe(0);
+    expect(
+      additive.invocations.some((entry) => entry.args[0] === 'd1' && entry.args[1] === 'execute'),
+    ).toBe(false);
+  });
+
+  it('AC-OPS-06 allows a database with no d1_migrations table yet, on that exact error only', () => {
+    destructive();
+    const fresh = gated(apply, {
+      FAKE_D1_ERROR: 'D1_ERROR: no such table: d1_migrations: SQLITE_ERROR',
+    });
+    expect(fresh.result.status).toBe(0);
+    expect(applied(fresh.invocations)).toBe(true);
+  });
+
+  it.each([
+    'D1_ERROR: network unreachable',
+    'D1_ERROR: no such table d1_migrations (reworded)',
+    'D1_ERROR: no such table: users',
+  ])('AC-OPS-06 fails closed on any other unreadable migration state: %s', (message) => {
+    destructive();
+    rmSync(logPath, { force: true });
+    const { result, invocations } = gated(apply, { FAKE_D1_ERROR: message });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('cannot read the applied migrations');
+    expect(applied(invocations)).toBe(false);
+  });
+
+  it.each([
+    ['--file', ['d1', 'execute', 'DB', '--remote', '--file', 'x.sql']],
+    [
+      'an extra flag',
+      ['d1', 'execute', 'DB', '--remote', '--json', '--command', 'select 1', '--yes'],
+    ],
+    ['a missing --json', ['d1', 'execute', 'DB', '--remote', '--command', 'select 1']],
+    ['another database', ['d1', 'execute', 'OTHER', '--remote', '--json', '--command', 'select 1']],
+    ['DROP', ['d1', 'execute', 'DB', '--remote', '--json', '--command', 'drop table users']],
+    [
+      'ALTER',
+      ['d1', 'execute', 'DB', '--remote', '--json', '--command', 'ALTER TABLE users ADD x'],
+    ],
+    ['CREATE', ['d1', 'execute', 'DB', '--remote', '--json', '--command', 'create table x (a)']],
+    [
+      'PRAGMA',
+      ['d1', 'execute', 'DB', '--remote', '--json', '--command', 'pragma foreign_keys=off'],
+    ],
+    ['ATTACH', ['d1', 'execute', 'DB', '--remote', '--json', '--command', "attach 'x' as y"]],
+    ['VACUUM', ['d1', 'execute', 'DB', '--remote', '--json', '--command', 'vacuum']],
+    [
+      'a keyword after a literal',
+      ['d1', 'execute', 'DB', '--remote', '--json', '--command', "select 'a'; drop table users"],
+    ],
+  ])('AC-OPS-06 refuses d1 execute --remote with %s', (_name, args) => {
+    const { result, invocations } = gated(args);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('d1 execute --remote may only run as');
+    expect(invocations.some((entry) => entry.args[1] === 'execute')).toBe(false);
+  });
+
+  it.each([
+    "select 'drop table alter create pragma' as word",
+    "insert into site_settings (key, value_json, updated_at) values ('setup_state', '\"locked\"', 1) on conflict (key) do update set value_json = excluded.value_json, updated_by = null, updated_at = excluded.updated_at",
+    "insert into audit_events (id, actor_id, action, entity_type, entity_id, created_at) values ('a', null, 'site.locked', 'site_settings', 'setup_state', 1)",
+    "select count(*) as n from users where role = 'admin' and status = 'active'",
+    'select name from d1_migrations order by id;\nselect count(*) as n from backup_runs where verified_at is not null',
+  ])(
+    'AC-OPS-06 passes the d1 execute shapes setup, invite, unlock and preflight send: %s',
+    (sql) => {
+      const { result, invocations } = gated([
+        'd1',
+        'execute',
+        'DB',
+        '--remote',
+        '--json',
+        '--command',
+        sql,
+      ]);
+      expect(result.status).toBe(0);
+      expect(invocations.some((entry) => entry.args[1] === 'execute')).toBe(true);
+    },
+  );
+
+  const execute = (sql: string) => ['d1', 'execute', 'DB', '--remote', '--json', '--command', sql];
+
+  it.each([
+    ['a quote inside a -- comment', "select 1 -- '\ndrop table media;\n-- '"],
+    ['a quote inside a double-quoted identifier', 'select "\'"; drop table users; select "\'"'],
+    ['a block comment', 'select 1 /* x */'],
+    ['a line comment', 'select 1 -- nothing'],
+    [
+      'a forged backup_runs insert',
+      "insert into backup_runs (id,kind,manifest_sha256,object_count,total_bytes,verified_at) values ('x','full','x',0,0,99999999999999)",
+    ],
+    ['an upper-case replace into backup_runs', "REPLACE INTO backup_runs (id) VALUES ('x')"],
+    ['a quoted backup_runs insert', 'INSERT INTO "backup_runs" (id) VALUES (\'x\')'],
+    ['an update of d1_migrations', "update d1_migrations set name = 'x'"],
+    ['a delete from d1_migrations', 'delete from d1_migrations'],
+  ])('AC-OPS-06 refuses d1 execute --remote with %s', (_name, sql) => {
+    const { result, invocations } = gated(execute(sql));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('d1 execute --remote may only run as');
+    expect(invocations.some((entry) => entry.args[1] === 'execute')).toBe(false);
+  });
+
+  it.each([
+    ['migrations apply', ['d1', 'migrations', 'apply', 'DB']],
+    ['execute', ['d1', 'execute', 'DB', '--json', '--command', 'drop table media']],
+  ])('AC-OPS-06 refuses every remote spelling but the bare --remote on d1 %s', (_name, base) => {
+    destructive();
+    for (const flag of [
+      '--remote=true',
+      '--remote=false',
+      '--no-remote',
+      '--no-local',
+      '--local=false',
+      '--local=0',
+      '-r',
+      '-rl',
+    ]) {
+      rmSync(logPath, { force: true });
+      const { result, invocations } = gated([...base, flag]);
+      expect(result.status, flag).not.toBe(0);
+      expect(result.stderr, flag).toContain('bare --remote');
+      expect(
+        invocations.some((entry) => entry.args[0] === 'd1'),
+        flag,
+      ).toBe(false);
+    }
+    // --local beside --remote is a conflict, not a way around the gates.
+    const both = gated([...base, '--remote', '--local']);
+    expect(both.result.status).not.toBe(0);
+    expect(both.invocations.some((entry) => entry.args[0] === 'd1')).toBe(false);
+  });
+
+  it('AC-OPS-06 passes the writes the scripts really send, and reads of the two guarded tables', () => {
+    for (const sql of [
+      "update site_settings set value_json = '\"x\"' where key = 'setup_state'",
+      "insert into users (id, name) values ('a', 'o''neil -- not a comment')",
+      'select name from d1_migrations order by id',
+      'select max(verified_at) as at from backup_runs where verified_at is not null',
+    ]) {
+      const { result, invocations } = gated(execute(sql));
+      expect(result.status, sql).toBe(0);
+      expect(invocations.some((entry) => entry.args[1] === 'execute')).toBe(true);
+    }
+  });
+
+  it('AC-OPS-06 leaves a local d1 execute alone', () => {
+    const { result, invocations } = gated(['d1', 'execute', 'DB', '--file', 'x.sql']);
+    expect(result.status).toBe(0);
+    expect(invocations.some((entry) => entry.args[1] === 'execute')).toBe(true);
   });
 });

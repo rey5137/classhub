@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, notExists, sql, type SQL } from 'drizzle-orm';
 import type { AlbumPatch, MediaPatch } from '../../contracts/media';
-import { albums, media, profileContacts, users } from '../db/schema';
+import { albums, media, profileContacts, schemaMeta, users } from '../db/schema';
 import { uuidv7 } from '../ids';
 import type { Database } from '../ports/database';
 import type { ProfileOwner } from '../services/projection';
@@ -22,6 +22,9 @@ export interface GalleryRow {
 }
 
 const live = and(eq(media.mediaType, 'photo'), isNull(media.deletedAt));
+// `live` for a query that must walk `media_album_idx`: the unary plus keeps the planner off
+// `media_type_deleted_created_idx`, which would read every live photo of every album.
+const liveInAlbum = and(sql`+${media.mediaType} = 'photo'`, sql`+${media.deletedAt} is null`);
 
 function select(database: Database) {
   return database.db
@@ -159,23 +162,45 @@ export async function insertAlbum(
 /** R-BUD-08: rows one year-tag rewrite statement may touch, and per request. */
 export const YEAR_REWRITE_CHUNK = 500;
 export const YEAR_REWRITE_LIMIT = 20_000;
+/** R-MEM-14: `,id,id,` of the albums whose year-tag rewrite may be unfinished; row absent when none. */
+export const YEAR_REWRITE_FLAG = 'year_rewrite_pending';
 
-/** The next ≤ 500 live photos of the album whose `effective_year` is stale. */
-function rewriteYearChunk(database: Database, albumId: string, yearTag: number | null) {
-  const target = sql`coalesce(${yearTag}, ${media.takenYear})`;
-  const stale = database.db
+/**
+ * The one stale-year predicate (R-MEM-14): the next ≤ 500 live photos of the album whose
+ * `effective_year` differs from the album's current year tag, else their own `taken_year`.
+ * Read through `media_album_idx`, so it never scans other albums' photos.
+ */
+export function staleYearRows(database: Database, albumId: string) {
+  return database.db
     .select({ id: media.id })
     .from(media)
-    .where(and(eq(media.albumId, albumId), live, sql`${media.effectiveYear} is not ${target}`))
+    .where(
+      and(
+        eq(media.albumId, albumId),
+        liveInAlbum,
+        sql`${media.effectiveYear} is not ${albumYear(albumId)}`,
+      ),
+    )
     .limit(YEAR_REWRITE_CHUNK);
-  return database.db.update(media).set({ effectiveYear: target }).where(inArray(media.id, stale));
+}
+
+function albumYear(albumId: string) {
+  return sql`coalesce((select ${albums.yearTag} from ${albums} where ${albums.id} = ${albumId}), ${media.takenYear})`;
+}
+
+function rewriteYearChunk(database: Database, albumId: string) {
+  return database.db
+    .update(media)
+    .set({ effectiveYear: albumYear(albumId) })
+    .where(inArray(media.id, staleYearRows(database, albumId)));
 }
 
 /**
  * R-MEM-14 / R-BUD-08: a new year tag rewrites the album's photos' `effective_year`;
  * the album row and the first chunk go in one batch, later chunks follow until none
  * are stale or the per-request cap is reached. Each chunk picks only stale rows, so a
- * retry or the next PATCH finishes an interrupted rewrite.
+ * retry, the next PATCH or the flagged housekeeping sweep finishes an interrupted rewrite.
+ * The album's id joins the flag's pending list; only housekeeping removes it.
  */
 export async function updateAlbum(database: Database, id: string, patch: AlbumPatch) {
   const set = {
@@ -185,14 +210,56 @@ export async function updateAlbum(database: Database, id: string, patch: AlbumPa
   };
   const update = database.db.update(albums).set(set).where(eq(albums.id, id));
   if (patch.yearTag === undefined) return void (await update);
-  const yearTag = patch.yearTag ?? null;
-  const [, first] = await database.batch([update, rewriteYearChunk(database, id, yearTag)]);
+  // The id goes in with the album row, so a request that dies after any chunk is finished by housekeeping.
+  const flag = database.db
+    .insert(schemaMeta)
+    .values({ key: YEAR_REWRITE_FLAG, value: `,${id},` })
+    .onConflictDoUpdate({
+      target: schemaMeta.key,
+      set: {
+        value: sql`case when instr(${schemaMeta.value}, ${`,${id},`}) > 0 then ${schemaMeta.value} else ${schemaMeta.value} || ${`${id},`} end`,
+      },
+    });
+  const [, , first] = await database.batch([update, flag, rewriteYearChunk(database, id)]);
   let changed = first?.changes ?? 0;
   let written = changed;
   while (changed === YEAR_REWRITE_CHUNK && written < YEAR_REWRITE_LIMIT) {
-    changed = (await database.batch([rewriteYearChunk(database, id, yearTag)]))[0]?.changes ?? 0;
+    changed = (await database.batch([rewriteYearChunk(database, id)]))[0]?.changes ?? 0;
     written += changed;
   }
+}
+
+/**
+ * R-MEM-14: while the flag lists an album, finish one interrupted rewrite chunk of the first
+ * listed album per housekeeping run (the same `staleYearRows` predicate as the PATCH). The
+ * album's id leaves the list in the same batch once no stale photo remains, and the row is
+ * deleted when the list is empty.
+ */
+export async function finishYearRewrite(database: Database) {
+  const [flag] = await database.db
+    .select({ value: schemaMeta.value })
+    .from(schemaMeta)
+    .where(eq(schemaMeta.key, YEAR_REWRITE_FLAG))
+    .limit(1);
+  if (!flag) return;
+  // Anything but `,id,…,` (a leftover `1`) names no album: drop it, no work this run.
+  const albumId = /^(?:,[^,]+)+,$/.test(flag.value) ? flag.value.split(',')[1] : undefined;
+  if (!albumId) {
+    await database.db.delete(schemaMeta).where(eq(schemaMeta.key, YEAR_REWRITE_FLAG));
+    return;
+  }
+  await database.batch([
+    rewriteYearChunk(database, albumId),
+    database.db
+      .update(schemaMeta)
+      .set({ value: sql`replace(${schemaMeta.value}, ${`,${albumId},`}, ',')` })
+      .where(
+        and(eq(schemaMeta.key, YEAR_REWRITE_FLAG), notExists(staleYearRows(database, albumId))),
+      ),
+    database.db
+      .delete(schemaMeta)
+      .where(and(eq(schemaMeta.key, YEAR_REWRITE_FLAG), eq(schemaMeta.value, ','))),
+  ]);
 }
 
 /** A moved photo takes its new album's year tag, else its own `taken_year` (R-MEM-14). */

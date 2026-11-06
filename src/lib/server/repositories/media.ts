@@ -14,11 +14,14 @@ import type { Database } from '../ports/database';
 export type Reservation = typeof reservations.$inferSelect;
 export type StoredMedia = typeof media.$inferSelect;
 export const DAY = 86_400_000;
-export const reservationKeys = (row: Reservation) => [row.objectKey, row.thumbKey].filter(Boolean);
-export const mediaKeys = (row: StoredMedia) => [row.objectKey, row.thumbKey].filter(Boolean);
+const keysOf = (row: { objectKey: string; thumbKey: string }) =>
+  [row.objectKey, row.thumbKey].filter(Boolean);
+export const reservationKeys: (row: Reservation) => string[] = keysOf;
+export const mediaKeys: (row: StoredMedia) => string[] = keysOf;
+const extensionOf = (mimeType: string) => (mimeType === 'image/webp' ? 'webp' : 'jpg');
 
 export function finalKeys(row: Reservation) {
-  const extension = row.mimeType === 'image/webp' ? 'webp' : 'jpg';
+  const extension = extensionOf(row.mimeType);
   return row.purpose === 'avatar'
     ? { objectKey: `avatars/v1/${row.ownerId}/${row.mediaId}.${extension}`, thumbKey: '' }
     : {
@@ -54,9 +57,26 @@ export async function uploadLimited(
     .from(storageUsage)
     .where(eq(storageUsage.singletonId, 1))
     .limit(1);
-  return (
-    !!row && (row.open >= 2 || (purpose === 'photo' && row.daily >= siteConfig.limits.photosPerDay))
-  );
+  if (!row) return null;
+  if (row.open >= 2) return 'concurrent' as const;
+  return purpose === 'photo' && row.daily >= siteConfig.limits.photosPerDay
+    ? ('daily' as const)
+    : null;
+}
+
+/** R-MEM-13: when the soonest open reservation frees its slot (null when none is open). */
+export async function soonestOpenExpiry(database: Database, ownerId: string, now: number) {
+  const [row] = await database.db
+    .select({ at: sql<number | null>`min(${reservations.expiresAt})` })
+    .from(reservations)
+    .where(
+      and(
+        eq(reservations.ownerId, ownerId),
+        eq(reservations.state, 'open'),
+        gt(reservations.expiresAt, now),
+      ),
+    );
+  return row?.at ?? null;
 }
 
 /** R-MEM-19: the insert takes quota and concurrent slots before the counter can move. */
@@ -70,7 +90,7 @@ export async function reserve(
   const mediaId = uuidv7(now);
   const expiresAt = now + 15 * 60_000;
   const total = input.imageBytes + input.thumbBytes;
-  const extension = input.mimeType === 'image/webp' ? 'webp' : 'jpg';
+  const extension = extensionOf(input.mimeType);
   const exists = sql`exists (select 1 from ${reservations} where ${reservations.id} = ${id})`;
   const [created] = await database.batch([
     database.db.insert(reservations).select(

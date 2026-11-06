@@ -2,6 +2,7 @@
   import { onDestroy, tick } from 'svelte';
   import { invalidateAll } from '$app/navigation';
   import type { Encoded } from '$lib/client/image/encode';
+  import { IMAGE_ACCEPT } from '$lib/client/image/policy';
   import { UploadError, uploadEncoded, type CompleteFields } from '$lib/client/upload';
   import type { MessageKey } from '$lib/i18n';
   import { useI18n } from '$lib/i18n/context';
@@ -144,7 +145,7 @@
       const code = error instanceof UploadError ? error.code : 'internal';
       problem = i18n.t(`upload.error.${code}`);
       // Paused storage or a spent limit won't clear for the rest of the queue.
-      if (code === 'storage_full' || code === 'rate_limited') {
+      if (code === 'storage_full' || code.startsWith('rate_limited')) {
         phase = 'done';
         refresh();
       } else {
@@ -185,7 +186,7 @@
           class="visually-hidden"
           type="file"
           multiple
-          accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+          accept={IMAGE_ACCEPT}
           tabindex="-1"
           aria-hidden="true"
           onchange={picked}

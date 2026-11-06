@@ -52,7 +52,7 @@
 - **R-PROF-09** **Own export:** `/profile` offers *Download my data*: a JSON file with the member's own profile,
   contacts, posts, comments, chat messages and media metadata, plus links to their own photos. It contains no other
   member's contact data.
-- **R-PROF-10** **Clear my profile:** the member can empty every optional field and remove the avatar at once.
+- **R-PROF-10** **Clear my profile:** the member can empty every optional field and remove the avatar at once: it leaves every view and every byte route immediately, and its stored objects are purged after the deleted-media grace period (R-MEM-20).
 - **R-PROF-11** **Deletion request:** the member can ask for account deletion from `/profile`; it is recorded and shown
   to admins, and **from that moment** `projectProfile` hides all of the member's contact fields (R-PROF-13). An admin completes it: the member is suspended, the profile and contacts are cleared, `display_name`
   becomes the localized *Former member*, `auth_email` is replaced by a tombstone (`deleted+<id>@invalid`, lower-case so it satisfies the `auth_email` `CHECK`, so the person can be invited again, R-AUTH-08); the matching `invites.email` is rewritten to the same tombstone and the invite set `revoked`, so the real email no longer remains in the live data (R-DB-13), and the member's posts, comments, photos and chat messages are either kept

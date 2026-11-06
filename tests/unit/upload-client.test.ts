@@ -153,6 +153,18 @@ describe('R-API-02 a refusal is read by its code, then its status', () => {
     expect(await failureOf(coded(status, code))).toBe(expected);
   });
 
+  it('R-MEM-13 a rate_limited body names its limit; one without a reason stays plain', async () => {
+    const limited = (reason?: string) =>
+      new Response(
+        JSON.stringify({ error: { code: 'rate_limited', message: 'x', requestId: 'r', reason } }),
+        { status: 429 },
+      );
+    expect(await failureOf(limited('daily'))).toBe('rate_limited_daily');
+    expect(await failureOf(limited('concurrent'))).toBe('rate_limited_concurrent');
+    expect(await failureOf(limited())).toBe('rate_limited');
+    expect(await failureOf(limited('other'))).toBe('rate_limited');
+  });
+
   it.each([
     [415, 'validation'],
     [423, 'locked'],

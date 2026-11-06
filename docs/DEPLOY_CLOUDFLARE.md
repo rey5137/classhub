@@ -112,7 +112,7 @@ through the account guard (`node scripts/cf.mjs …`), never `npx wrangler`.
 | 3. R2 | R2 → Create bucket `<slug>-media` (no public access, no custom domain) | `node scripts/cf.mjs r2 bucket create <slug>-media --update-config=false` |
 | 4. config | — | `cp wrangler.jsonc.example wrangler.jsonc`; set `account_id`, `name`, `database_name`/`database_id` (from `d1 list`), `bucket_name`, and add `"vars": { "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "" }` |
 | 5. secrets | Workers & Pages → `<slug>` → Settings → Variables and Secrets → Add (type Secret) | `node scripts/cf.mjs secret put INTERNAL_CONTEXT_KEY` and `… LOG_HASH_SALT`; paste a long random value (`openssl rand -base64 32`) at the prompt |
-| 6. migrations | — | `node scripts/cf.mjs d1 migrations apply DB --remote` |
+| 6. migrations | — | `npm run db:migrate:remote` (refuses a destructive migration until a verified backup exists) |
 | 6. seed | — | re-run `npm run setup` (it only seeds what is missing), or `npm run invite -- add <email> --role admin` once an admin exists |
 | 7. hostname | Workers & Pages → Overview → your subdomain (right column) | — |
 

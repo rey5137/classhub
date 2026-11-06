@@ -38,6 +38,7 @@ export function toResponse<T>(locals: App.Locals, result: AdminResult<T>): Respo
     locale: locals.locale,
     ...(result.messageKey ? { messageKey: result.messageKey } : {}),
     ...(result.fields ? { fields: result.fields } : {}),
+    ...(result.reason ? { reason: result.reason } : {}),
     ...(result.retryAfterSeconds
       ? { headers: { 'retry-after': String(result.retryAfterSeconds) } }
       : {}),

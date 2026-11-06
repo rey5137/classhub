@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { acquireBackupLock, BACKUP_LOCK_PATH, LockHeldError } from './backup-lock.mjs';
+import { BACKUP_RUNS_INSERT, D1_CLOCK_SELECT } from './backup-sql.mjs';
 import { reason } from './cf-child.mjs';
 import { readEnvFile } from './env-file.mjs';
 import { uuidv7 } from './ids.mjs';
@@ -39,7 +40,7 @@ import {
   sha256File,
   verifySnapshot,
 } from './verify-backup.mjs';
-import { readWorkerConfig } from './worker-config.mjs';
+import { guardedTargets } from './guarded-targets.mjs';
 
 // Any age-style recipient (X25519, post-quantum `age1pq1…`, plugins such as `age1yubikey1…`);
 // `age` itself rejects a malformed one before anything is written.
@@ -47,13 +48,6 @@ export const AGE_RECIPIENT = /^age1[0-9a-z]+$/;
 // Only final keys; `staging/` is never read, copied or counted (R-BAK-04, R-MEM-12).
 const PREFIXES = ['media/', 'avatars/'];
 
-const configSchema = z.object({
-  account_id: z.string().regex(/^[0-9a-f]{32}$/),
-  d1_databases: z.array(z.object({ binding: z.string(), database_id: z.string().uuid() })),
-  r2_buckets: z.array(
-    z.object({ binding: z.string(), bucket_name: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/) }),
-  ),
-});
 const envSchema = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[0-9a-f]{32}$/),
   R2_ACCESS_KEY_ID: z.string().min(1),
@@ -82,7 +76,6 @@ const rawResultSchema = z.array(
  *   encrypt?: (stage: string, name: string, recipient: string, destination: string) => Promise<void>;
  *   lockPath?: string;
  *   tmpRoot?: string;
- *   now?: () => Date;
  *   out?: (line: string) => void;
  *   err?: (line: string) => void;
  * }} BackupDeps
@@ -95,14 +88,9 @@ const rawResultSchema = z.array(
  * @param {string} root @param {{ fetch?: typeof fetch }} [options]
  */
 export function backupDependencies(root, options = {}) {
-  const config = configSchema.parse(readWorkerConfig(root));
   const file = readEnvFile(join(root, '.env.cloudflare'));
   const env = envSchema.parse(file);
-  if (config.account_id !== env.CLOUDFLARE_ACCOUNT_ID)
-    throw new Error('Cloudflare account mismatch');
-  const databaseId = config.d1_databases.find((entry) => entry.binding === 'DB')?.database_id;
-  const bucket = config.r2_buckets.find((entry) => entry.binding === 'MEDIA')?.bucket_name;
-  if (!databaseId || !bucket) throw new Error('Missing DB or MEDIA binding');
+  const { databaseId, bucket } = guardedTargets(root, env.CLOUDFLARE_ACCOUNT_ID);
   return {
     databaseId,
     bucket,
@@ -176,7 +164,6 @@ export { runPendingCleanups };
 export async function runBackup(deps) {
   const out = deps.out ?? ((/** @type {string} */ line) => console.log(line));
   const err = deps.err ?? ((/** @type {string} */ line) => console.error(line));
-  const now = deps.now ?? (() => new Date());
 
   // R-BAK-05 / AC-BAK-09: refuse before any lock, file or remote read.
   const recipient = deps.recipient?.trim() ?? '';
@@ -203,16 +190,18 @@ export async function runBackup(deps) {
     err(`backup: ${error.message}`);
     return 1;
   }
-  // Taken just before the D1 export, so it is never later than the data the snapshot holds.
-  const exportedAt = now();
-  const name = `classhub-backup-${exportedAt.toISOString().replace(/:|\.\d{3}/g, '')}`;
-  const archive = join(deps.outDir, `${name}.tar.age`);
-  const partial = join(deps.outDir, `.${name}.tar.age.partial`);
+  // Named once the D1 clock is read (below); the cleanup tolerates a failure before that.
+  /** @type {string} */
+  let name;
+  /** @type {string} */
+  let archive;
+  /** @type {string | undefined} */
+  let partial;
   /** @type {string | undefined} */
   let stage;
   const cleanup = () => {
     if (stage) rmSync(stage, { recursive: true, force: true });
-    rmSync(partial, { force: true });
+    if (partial) rmSync(partial, { force: true });
     release();
   };
   const unregister = onSignalCleanup(cleanup);
@@ -220,12 +209,28 @@ export async function runBackup(deps) {
     // mkdtemp creates the directory 0700: plaintext member data stays private to this user.
     // Inside the try, so a full or missing TMPDIR still releases the lock.
     stage = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), 'classhub-backup-'));
-    const snapshot = join(stage, name);
-    mkdirSync(snapshot, { mode: 0o700 });
     const run = deps.run;
     // The account/token guard succeeds before any S3 request (R-BAK-17).
     const guard = run(['api', `/r2/buckets/${deps.bucket}`]);
     if (guard.status !== 0) throw new Error(`the account guard refused (${reason(guard)})`);
+
+    // The export time comes from D1's clock, read right before the export: INV-7 compares it
+    // with Cloudflare's deploy time, and this machine's clock may be wrong (R-BAK-09).
+    const clock = run(['d1-query', deps.databaseId], {
+      input: JSON.stringify({ sql: D1_CLOCK_SELECT, params: [] }),
+    });
+    if (clock.status !== 0) throw new Error(`cannot read the D1 clock (${reason(clock)})`);
+    const exportedAtMs = rawResultSchema.parse(JSON.parse(clock.stdout))[0]?.results.rows[0]?.[0];
+    if (typeof exportedAtMs !== 'number' || !Number.isFinite(exportedAtMs))
+      throw new Error('the D1 clock returned no time');
+    // The manifest, RESTORE.md and the snapshot name all carry this one value, so they agree
+    // with the `verified_at` recorded in backup_runs.
+    const exportedAt = new Date(exportedAtMs).toISOString();
+    name = `classhub-backup-${exportedAt.replace(/:|\.\d{3}/g, '')}`;
+    archive = join(deps.outDir, `${name}.tar.age`);
+    partial = join(deps.outDir, `.${name}.tar.age.partial`);
+    const snapshot = join(stage, name);
+    mkdirSync(snapshot, { mode: 0o700 });
 
     // 1. D1: the SQL export is the authoritative artifact (R-BAK-01).
     const sqlPath = join(snapshot, DATABASE);
@@ -298,7 +303,7 @@ export async function runBackup(deps) {
       restoreNotes({
         appVersion: deps.appVersion,
         schemaVersion,
-        exportedAt: exportedAt.toISOString(),
+        exportedAt,
       }),
       { mode: 0o600 },
     );
@@ -319,7 +324,7 @@ export async function runBackup(deps) {
       formatVersion: 1,
       appVersion: deps.appVersion,
       schemaVersion,
-      exportedAt: exportedAt.toISOString(),
+      exportedAt,
       database: {
         path: DATABASE,
         sha256: await sha256File(sqlPath),
@@ -350,10 +355,10 @@ export async function runBackup(deps) {
     const manifestSha = await sha256File(manifestPath);
     const recorded = run(['d1-query', deps.databaseId], {
       input: JSON.stringify({
-        sql: 'INSERT INTO backup_runs (id, kind, manifest_sha256, object_count, total_bytes, verified_at) VALUES (?, ?, ?, ?, ?, ?)',
-        // verified_at is the D1 export time, not the end of the run: INV-7 compares it with the
-        // last deploy, and a deploy during a long copy must not pass with an older snapshot.
-        params: [uuidv7(), 'full', manifestSha, objectCount, totalBytes, exportedAt.getTime()],
+        sql: BACKUP_RUNS_INSERT,
+        // verified_at is the D1 export time (D1's clock), not the end of the run: INV-7 compares
+        // it with the last deploy, and a deploy during a long copy must not pass with an older snapshot.
+        params: [uuidv7(), 'full', manifestSha, objectCount, totalBytes, exportedAtMs],
       }),
     });
     if (recorded.status !== 0) {

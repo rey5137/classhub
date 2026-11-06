@@ -46,7 +46,7 @@
 | `rate_events` | `bucket` (e.g. `post:<user>`), `at` | server-side rate limits where no DO holds the counter (R-AUTH-21) |
 | `backup_runs` | `id` PK, `kind`, `manifest_sha256`, `object_count`, `total_bytes`, `verified_at`, `reported_at` | admin-visible backup status, written by the CLI (R-BAK-09) |
 | `audit_events` | `id` PK, `actor_id`, `action`, `entity_type`, `entity_id`, `created_at` | admin and moderation changes; never content or contact payloads |
-| `schema_meta` | `key` PK, `value` | `schema_version`; `housekeeping_last_run_at` (epoch ms, R-MEM-11) |
+| `schema_meta` | `key` PK, `value` | `schema_version`; `housekeeping_last_run_at` (epoch ms, R-MEM-11); `year_rewrite_pending` (R-MEM-14; `,albumId,albumId,` of the albums whose year-tag rewrite may be unfinished, row absent when none) |
 
 ## 5.3 Constraints and indexes
 
@@ -74,8 +74,15 @@
   `drizzle-kit` and reviewed by hand, applied by `wrangler d1 migrations apply` (through `scripts/cf.mjs`) remotely and
   by the same files locally. Each records `schema_version` in `schema_meta`.
 - **R-DB-11** Migrations are additive where possible. A destructive step (drop, narrowing rewrite) is its own
-  migration, named `*_destructive.sql`, and `preflight` refuses to apply it until a verified backup newer than the
-  last deploy exists (INV-7, R-OPS-12).
+  migration, named `*_destructive.sql`. `preflight` fails its check while one is pending without a verified backup
+  newer than the last deploy, and every path that applies remote migrations (`db:migrate:remote`, `setup`, and
+  `scripts/cf.mjs d1 migrations apply`) refuses a pending destructive one until such a backup exists (INV-7,
+  R-OPS-12). `cf.mjs` also refuses `d1 execute --remote` except as the one-command shape the scripts send, with no
+  schema-changing statement, no SQL comment (`--`, `/*`) or double quote left once string literals are blanked (the
+  scan `d1-query` also uses), and no insert, update, delete or replace naming `backup_runs` (written only by
+  `d1-query`'s pinned INSERT, R-BAK-09) or `d1_migrations` (written only by wrangler). On `d1 execute` and
+  `d1 migrations apply`, any remote spelling other than the bare `--remote` (`--remote=…`, `--no-remote`,
+  `--no-local`, `--local=…`, short forms) is refused, so neither gate can be skipped by flag syntax.
 - **R-DB-12** *(Deferred past v1.0: there is no earlier released schema to import.)* Importers will accept backups
   from the current and the two previous released schema versions, and CI will restore a fixture backup of each into
   the current schema (R-BAK-06). In v1.0 a restore requires a backup of the same `schema_version`.
@@ -88,5 +95,5 @@
 | AC-DB-02 | The unique, foreign-key and `CHECK` constraints (enum values, lower-case emails) of §5.3 reject violating rows on both adapters | R-DB-04, 05 | contract `Database` |
 | AC-DB-03 | Every list query in `repositories/` has `LIMIT` and uses an index (`EXPLAIN QUERY PLAN` shows no full scan) over 10,000 seeded rows | R-DB-06, 07 | integration |
 | AC-DB-04 | Board and comment pagination return every row exactly once across pages of 5,000 posts with equal timestamps | R-DB-07 | integration |
-| AC-DB-05 | `preflight` refuses a `*_destructive.sql` migration without a newer verified backup | R-DB-11 | unit |
+| AC-DB-05 | `preflight` fails its check for a pending `*_destructive.sql` migration without a newer verified backup | R-DB-11 | unit |
 | AC-DB-06 | *(Deferred with R-DB-12; not a v1.0 gate.)* Fixture backups at schema N-1 and N-2 restore into schema N | R-DB-12 | `test:migrations` |

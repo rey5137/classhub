@@ -12,7 +12,7 @@
 - **R-API-01** Every endpoint except `GET /health` requires a verified identity and an active membership (INV-1);
   admin endpoints also require `role = admin`.
 - **R-API-02** Errors are `{ error: { code, message, requestId } }` with a stable `code`: `unauthenticated`,
-  `forbidden`, `locked`, `not_found`, `validation` (plus `fields`), `rate_limited`, `storage_full`,
+  `forbidden`, `locked`, `not_found`, `validation` (plus `fields`), `rate_limited` (an upload refusal adds `reason`: `daily` or `concurrent`, R-MEM-13), `storage_full`,
   `feature_disabled`, `conflict`, `payload_too_large`, `unavailable`, `internal`. A JSON API sent another
   `Content-Type` (R-AUTH-17) answers `415` with code `validation`. `message` is a localized,
   non-sensitive sentence; `requestId` is echoed in the `X-Request-Id` header.

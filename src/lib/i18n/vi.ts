@@ -168,6 +168,10 @@ export const vi = {
     'Tạm ngừng tải ảnh lên vì bộ nhớ của lớp đã đầy. Mọi người vẫn xem ảnh được.',
   'upload.error.rate_limited':
     'Bạn đã tải lên nhiều ảnh trong hôm nay hoặc đang tải dở quá nhiều. Hãy thử lại sau.',
+  'upload.error.rate_limited_daily':
+    'Bạn đã dùng hết số ảnh được tải lên hôm nay. Hãy thử lại sau một lúc; giới hạn tính trong 24 giờ gần nhất.',
+  'upload.error.rate_limited_concurrent':
+    'Bạn đang có hai ảnh đang tải lên. Đợi một lát cho chúng xong rồi thử lại nhé.',
   'upload.error.validation': 'Máy chủ không nhận ảnh này. Hãy chọn lại ảnh.',
   'upload.error.payload_too_large': 'Ảnh này quá lớn để tải lên.',
   'upload.error.conflict': 'Lượt tải này đã hết hạn. Hãy thử lại.',

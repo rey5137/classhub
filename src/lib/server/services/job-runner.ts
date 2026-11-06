@@ -7,7 +7,9 @@ import {
   protectedStagingKeys,
   purgeableMedia,
   releaseExpired,
+  retireOrphanAvatars,
 } from '../repositories/housekeeping';
+import { finishYearRewrite } from '../repositories/gallery';
 import { DAY, mediaKeys, reservationKeys } from '../repositories/media';
 import { claimHousekeeping } from '../repositories/settings';
 import { recordOperations } from './operations';
@@ -33,6 +35,10 @@ export class JobRunner {
     const operations = { classA: 0, classB: 0 };
     try {
       await this.run(now, operations);
+      // Traffic only: the CLI's REST write allow-list has no such statement (R-MEM-13).
+      await retireOrphanAvatars(this.context.database, now);
+      // Traffic only, bounded to one chunk: finishes an interrupted album year rewrite (R-MEM-14).
+      await finishYearRewrite(this.context.database);
     } finally {
       // R-MEM-18: the traffic run's lists (deletes are not billed), counted even when a
       // step failed; best effort, so a failed count never hides the run's own error. The CLI calls

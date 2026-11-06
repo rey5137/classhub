@@ -22,6 +22,7 @@ export interface ApiErrorOptions {
   /** Overrides the code's default status (415 for a wrong Content-Type, R-API-02). */
   status?: number;
   fields?: Record<string, string>;
+  reason?: 'daily' | 'concurrent';
   headers?: HeadersInit;
   /** A more specific localized sentence than the code's default (still non-sensitive). */
   messageKey?: MessageKey;
@@ -35,6 +36,7 @@ export function apiError(code: ErrorCode, options: ApiErrorOptions): Response {
       message: t(options.locale, options.messageKey ?? `error.${code}`),
       requestId: options.requestId,
       ...(options.fields ? { fields: options.fields } : {}),
+      ...(options.reason ? { reason: options.reason } : {}),
     },
   };
   const headers = new Headers(options.headers);

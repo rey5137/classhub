@@ -12,6 +12,8 @@ export const THUMB_QUALITY = 0.75;
 /** R-MEM-13: one square, no thumbnail. */
 export const AVATAR_EDGE = 512;
 export const AVATAR_QUALITY = 0.82;
+/** The file picker's `accept` list: what `sniffKind` can recognise (R-MEM-01). */
+export const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif';
 /** How many leading bytes `sniffKind` needs. */
 export const SNIFF_BYTES = 16;
 

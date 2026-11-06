@@ -443,6 +443,9 @@ describe('scripts/invite.mjs (INV-9)', () => {
       'lib/invite.mjs',
       'lib/env-file.mjs',
       'lib/cf-child.mjs',
+      'lib/backup-gate.mjs',
+      'lib/backup-sql.mjs',
+      'lib/migrations.mjs',
       'lib/ids.mjs',
     ]) {
       copyFileSync(join(repoRoot, 'scripts', file), join(dir, 'scripts', file));

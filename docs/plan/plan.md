@@ -236,7 +236,7 @@ successful independent restore. Deploying is not enough.
 2. They appear on `/memories`; filters by album and year work; detail shows the caption and you as uploader.
 3. Copy a photo's address into a private window (no Access cookie): Access login, not the photo.
 4. Download a stored photo from the detail page and check its properties: no location.
-5. Delete a photo: gone from the wall, and `/admin` usage drops.
+5. Delete a photo: gone from the wall and the photo count drops; stored bytes drop after the grace period (R-MEM-20).
 6. With `mediaStopBytes` lowered in a local `site.config.ts` to just above current usage, an upload is refused with *uploads are paused*.
 
 ### Phase 3 — Home and discussions

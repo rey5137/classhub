@@ -25,6 +25,8 @@ export const errorBodySchema = z.object({
     message: z.string(),
     requestId: z.string(),
     fields: z.record(z.string(), z.string()).optional(),
+    /** R-MEM-13: which upload limit a `rate_limited` refusal hit. */
+    reason: z.enum(['daily', 'concurrent']).optional(),
   }),
 });
 export type ErrorBody = z.infer<typeof errorBodySchema>;
