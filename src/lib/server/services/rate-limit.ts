@@ -2,10 +2,12 @@ import { and, asc, eq, gt, lte, sql } from 'drizzle-orm';
 import { rateEvents } from '../db/schema';
 import type { Database } from '../ports/database';
 
+const MINUTE = 60_000;
 const HOUR = 3_600_000;
 
 /** R-AUTH-21 limits held in `rate_events`; posts, comments and uploads join with their features. */
 export const RATE_LIMITS = {
+  post: { limit: 10, windowMs: MINUTE },
   profile: { limit: 20, windowMs: HOUR },
   invite: { limit: 30, windowMs: HOUR },
 } as const;

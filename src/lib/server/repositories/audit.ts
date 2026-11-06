@@ -6,7 +6,7 @@ import type { DatabaseHandle } from '../ports/database';
 export interface AuditEvent {
   actorId: string | null;
   action: string;
-  entityType: 'user' | 'invite';
+  entityType: 'user' | 'invite' | 'post' | 'comment';
   entityId: string;
   createdAt: number;
 }

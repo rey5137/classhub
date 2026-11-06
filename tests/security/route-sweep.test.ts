@@ -65,6 +65,22 @@ describe('route sweep', () => {
     );
   });
 
+  it('AC-API-01 sweeps every built post and comment route', () => {
+    expect(fileRoutes().map(key)).toEqual(
+      expect.arrayContaining([
+        'GET /api/v1/posts',
+        'POST /api/v1/posts',
+        'GET /api/v1/posts/[id]',
+        'PATCH /api/v1/posts/[id]',
+        'DELETE /api/v1/posts/[id]',
+        'GET /api/v1/posts/[id]/comments',
+        'POST /api/v1/posts/[id]/comments',
+        'PATCH /api/v1/comments/[id]',
+        'DELETE /api/v1/comments/[id]',
+      ]),
+    );
+  });
+
   it('AC-API-01 every route except GET /health and /denied refuses a request with no identity', async () => {
     const reached: string[] = [];
     for (const route of unique) {

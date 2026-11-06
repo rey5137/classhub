@@ -22,6 +22,10 @@ export default defineConfig({
   ],
   test: {
     name: 'integration',
-    include: ['tests/integration/**/*.test.ts', 'tests/contract/run-workers.test.ts'],
+    include: [
+      'tests/integration/**/*.test.ts',
+      'tests/contract/run-workers.test.ts',
+      'tests/unit/markdown.test.ts',
+    ],
   },
 });
