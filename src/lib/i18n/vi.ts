@@ -293,6 +293,8 @@ export const vi = {
   'admin.seatsWarning': 'Sắp chạm giới hạn {limit} chỗ của Cloudflare Zero Trust Free.',
   'admin.seatsFull':
     'Đã hết {limit} chỗ. Hãy thu hồi một lời mời hoặc tạm khóa một thành viên trước.',
+  'admin.chatOverRetention':
+    'Trò chuyện đã vượt hạn lưu giữ: hãy chạy npm run export-chat, rồi npm run prune-chat. Không tin nhắn nào bị xóa khi chưa có bản lưu trữ đã kiểm tra.',
   'admin.secondAdmin':
     'Mới có một quản trị viên. Hãy mời thêm một người để lớp không bao giờ bị khóa ngoài.',
   'admin.inviteForm': 'Mời một bạn cùng lớp',

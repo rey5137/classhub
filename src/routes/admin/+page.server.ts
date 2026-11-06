@@ -9,7 +9,9 @@ import {
   adminPatchMember,
   adminRevokeInvite,
 } from '$lib/server/services/admin';
+import { chatOverRetention } from '$lib/server/repositories/chat-archive';
 import { findAuthEmail } from '$lib/server/repositories/users';
+import { siteConfig } from '$lib/config';
 import { countActiveAdmins } from '$lib/server/services/members';
 import { usageSummary } from '$lib/server/services/gallery';
 import { adminInfoPages, createInfo, editInfo, removeInfo } from '$lib/server/services/info';
@@ -35,6 +37,8 @@ export const load: PageServerLoad = async ({ locals }) => {
     selfId: member.id,
     usage: await usageSummary(context, member),
     infoPages: (await adminInfoPages(context, member)) ?? [],
+    // R-CHAT-14: messages over R-CHAT-13's limits with no verified archive yet.
+    chatOverRetention: await chatOverRetention(context.database, siteConfig.chat, Date.now()),
     // R-UI-01: the effective settings this request already read; `settings.edit` is admin-only too.
     settings: locals.settings,
     themes: Object.values(themes).map(({ id, modes }) => ({ id, modes })),

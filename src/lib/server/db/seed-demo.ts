@@ -548,3 +548,60 @@ async function seedChat(
     database.db.insert(chatMessages).values(chunk).returning({ id: chatMessages.id }),
   );
 }
+
+// Rows per insert: 7 bound columns x 14 rows stays under D1's 100 variables.
+const VOLUME_ROWS = 14;
+
+/**
+ * Checklist item 4 of slice 4c (R-CHAT-13): tops the room up to `total` messages with
+ * synthetic text, older than everything already there, ten minutes apart, so a 31,000 room
+ * sits over `chat.maxMessages` while staying inside `chat.retainDays`. Idempotent: a room
+ * already holding `total` gains nothing. Needs the demo members (seedDemo) first.
+ */
+export async function seedChatVolume(
+  database: Database,
+  total: number,
+  now = Date.now(),
+): Promise<number> {
+  const [counted] = await database.db.select({ rows: sql<number>`count(*)` }).from(chatMessages);
+  const missing = total - (counted?.rows ?? 0);
+  if (missing <= 0) return 0;
+  const senders = (
+    await database.db.select({ id: users.id }).from(users).where(eq(users.status, 'active'))
+  ).map((row) => row.id);
+  if (senders.length === 0) throw new Error('seed the demo members first');
+  const [oldest] = await database.db
+    .select({ createdAt: chatMessages.createdAt })
+    .from(chatMessages)
+    .orderBy(chatMessages.createdAt)
+    .limit(1);
+  const end = (oldest?.createdAt ?? now) - 600_000;
+  const rows = Array.from({ length: missing }, (_, index) => {
+    // Oldest first: row 0 is `missing` steps before the current oldest message.
+    const createdAt = end - (missing - 1 - index) * 600_000;
+    return {
+      id: uuidv7(createdAt),
+      roomId: CHAT_ROOM_ID,
+      senderId: senders[index % senders.length]!,
+      clientNonce: uuidv7(createdAt),
+      body: `Tin nhắn mẫu số ${index + 1} (synthetic)`,
+      createdAt,
+    };
+  });
+  let inserted = 0;
+  for (let index = 0; index < rows.length; index += VOLUME_ROWS * 50) {
+    const statements = [];
+    for (let at = index; at < Math.min(rows.length, index + VOLUME_ROWS * 50); at += VOLUME_ROWS)
+      statements.push(
+        database.db
+          .insert(chatMessages)
+          .values(rows.slice(at, at + VOLUME_ROWS))
+          .onConflictDoNothing()
+          .returning({ id: chatMessages.id }),
+      );
+    const [first, ...rest] = statements;
+    const results = await database.batch([first!, ...rest]);
+    inserted += results.reduce((sum, result) => sum + result.rows.length, 0);
+  }
+  return inserted;
+}

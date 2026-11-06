@@ -71,6 +71,9 @@
   {#if data.soleAdmin}
     <Banner tone="warning">{i18n.t('admin.secondAdmin')}</Banner>
   {/if}
+  {#if data.chatOverRetention}
+    <Banner tone="warning">{i18n.t('admin.chatOverRetention')}</Banner>
+  {/if}
   {#if notice}
     <Banner>{notice}</Banner>
   {/if}

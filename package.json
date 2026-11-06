@@ -34,6 +34,8 @@
     "housekeeping": "node --import tsx scripts/housekeeping.mjs",
     "backup": "node scripts/backup.mjs",
     "verify-backup": "node scripts/verify-backup.mjs",
+    "export-chat": "node --import tsx scripts/export-chat.mjs",
+    "prune-chat": "node --import tsx scripts/prune-chat.mjs",
     "db:migrate:remote": "node scripts/db-migrate-remote.mjs",
     "verify": "npm run lint && npm run check && npm run test && npm run test:migrations && npm run test:security && npm run build && npm run build:worker-check",
     "deploy": "node scripts/cf.mjs --check-deploy && node scripts/deploy-check.mjs && npm run build && npm run build:worker-check && node scripts/cf.mjs deploy"

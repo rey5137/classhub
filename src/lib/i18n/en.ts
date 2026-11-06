@@ -291,6 +291,8 @@ export const en: Record<keyof typeof vi, string> = {
   'admin.seats': '{used} of {limit} seats used',
   'admin.seatsWarning': 'Close to the {limit}-seat limit of Cloudflare Zero Trust Free.',
   'admin.seatsFull': 'All {limit} seats are taken. Revoke an invite or suspend a member first.',
+  'admin.chatOverRetention':
+    'Chat is over retention: run npm run export-chat, then npm run prune-chat. Nothing is deleted until a verified archive exists.',
   'admin.secondAdmin':
     'Only one admin is active. Invite a second admin so the class is never locked out.',
   'admin.inviteForm': 'Invite a classmate',

@@ -235,6 +235,24 @@ that `database.sql` loads into SQLite with the manifest's row counts, and that e
 SHA-256 its database row records. `AGE_IDENTITY_FILE` may stand in for `--identity`; an extracted folder needs no
 identity. Each archive's `RESTORE.md` names the app version and the restore commands.
 
+### Chat retention (R-CHAT-13, R-CHAT-14, R-CHAT-18)
+
+Chat keeps messages newer than `chat.retainDays` and at most `chat.maxMessages` (`site.config.ts`). When older ones
+exist, `/admin` shows *chat over retention*. Archive them first, then prune:
+
+```bash
+npm run export-chat -- --identity ~/classhub-backup-key.txt  # → backups/chat/<fromId>_<toId>.ndjson.age
+npm run prune-chat                                            # deletes only what a verified archive holds
+```
+
+`export-chat` writes one age-encrypted NDJSON file per month of old messages (deleted messages are left out), never
+replaces an existing file, then decrypts each file it wrote with the identity and checks its record count and SHA-256
+against D1 before recording it in `chat_archives`. The identity is used for that one run: keep it off the machine and
+folder that hold the archives. `prune-chat` deletes nothing without a verified archive; it deletes in chunks of 500
+and at most 3,000 messages per run (D1's daily write allowance), so run it again until it reports no archived messages
+remain. Both take the backup lock. `--local` runs either against the `dev:offline` database (`CLASSHUB_DB`, else
+`data/dev.sqlite`); `npm run db:seed:demo -- --chat-volume 31000` fills a local room for a rehearsal.
+
 ## 10. The WebSocket probe (R-OPS-16)
 
 Chat needs a WebSocket through Access. Cloudflare documents that Worker-level Access answers upgrades with `403`; a

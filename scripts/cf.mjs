@@ -569,6 +569,17 @@ async function d1Query(argv, account, apiToken) {
     )
   )
     fail('d1-query needs one {sql, params} statement.');
+  // Housekeeping's tables, backup's pinned INSERT, and export-chat / prune-chat (R-CHAT-14, 18).
+  // Never `users`, profiles or any other table.
+  const allowedTables = [
+    'upload_reservations',
+    'media',
+    'storage_usage',
+    'schema_meta',
+    'backup_runs',
+    'chat_messages',
+    'chat_archives',
+  ];
   // This deliberately accepts a small SQL subset: the shared scan strips literal contents and
   // unquotes identifiers, then comma joins and qualified table names are rejected here.
   const scan = scanSql(body.sql);
@@ -593,16 +604,13 @@ async function d1Query(argv, account, apiToken) {
     /\b(?:replace|with|load_extension)\b/i.test(sql) ||
     commaJoin ||
     !tables.length ||
-    tables.some(
-      (table) =>
-        !['upload_reservations', 'media', 'storage_usage', 'schema_meta', 'backup_runs'].includes(
-          table,
-        ),
-    ) ||
+    tables.some((table) => !allowedTables.includes(table)) ||
     // R-BAK-09: backup_runs takes the one INSERT backup sends, verbatim, nothing else.
     (tables.includes('backup_runs') && body.sql !== BACKUP_RUNS_INSERT)
   )
-    fail('d1-query permits SELECT/UPDATE/DELETE/INSERT on housekeeping tables only.');
+    fail(
+      'd1-query permits SELECT/UPDATE/DELETE/INSERT on housekeeping and chat archive tables only.',
+    );
   let response;
   try {
     response = await fetch(`${apiBase()}/client/v4/accounts/${account}/d1/database/${id}/raw`, {

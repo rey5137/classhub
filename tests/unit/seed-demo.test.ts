@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FsObjectStorage } from '../../src/lib/server/adapters/local/fs-storage';
 import { createLocalDatabase } from '../../src/lib/server/adapters/local/sqlite-database';
-import { seedDemo } from '../../src/lib/server/db/seed-demo';
+import { seedChatVolume, seedDemo } from '../../src/lib/server/db/seed-demo';
 import {
   albums,
   chatMessages,
@@ -117,6 +117,28 @@ describe('seedDemo', () => {
       expect(retry.photos).toBe(10);
       expect(await database.db.select().from(albums)).toHaveLength(3);
       expect((await storage.list('')).objects).toHaveLength(20);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('R-CHAT-13 --chat-volume tops the room up with older synthetic messages, idempotently', async () => {
+    const database = createLocalDatabase(':memory:', { migrationsDir: 'migrations' });
+    const storage = new FsObjectStorage(join(directory, 'objects'));
+    try {
+      await seedDemo(database, storage);
+      const before = await database.db.select().from(chatMessages);
+      const oldestDemo = Math.min(...before.map((row) => row.createdAt));
+
+      expect(await seedChatVolume(database, 1_500)).toBe(1_500 - before.length);
+      expect(await seedChatVolume(database, 1_500)).toBe(0);
+
+      const rows = await database.db.select().from(chatMessages);
+      expect(rows).toHaveLength(1_500);
+      const added = rows.filter((row) => !before.some((demo) => demo.id === row.id));
+      expect(added.every((row) => row.createdAt < oldestDemo)).toBe(true);
+      expect(added.every((row) => /\(synthetic\)$/.test(row.body))).toBe(true);
+      expect(new Set(added.map((row) => row.createdAt)).size).toBe(added.length);
     } finally {
       database.close();
     }

@@ -16,6 +16,13 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRemoteDatabase } from '../../src/lib/server/adapters/cloudflare/remote-database';
+import {
+  chatOverRetention,
+  exportCandidates,
+  pruneArchived,
+  rangeRecords,
+  recordVerifiedArchive,
+} from '../../src/lib/server/repositories/chat-archive';
 import { retainedObjectKeys } from '../../src/lib/server/repositories/housekeeping';
 import { createHousekeepingWrites } from '../../scripts/lib/housekeeping-writes.mjs';
 import { startFakeApi, type FakeApi } from '../fixtures/fake-cloudflare-api';
@@ -744,6 +751,68 @@ describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
       });
       expect(result.status, statement.sql).toBe(0);
     }
+  });
+
+  it('R-CHAT-14 allows every statement export-chat and prune-chat send, and nothing on users', async () => {
+    writeValidEnv();
+    const sent: { sql: string; params: unknown[] }[] = [];
+    // Answers by statement shape so each code path runs once: an archive, a candidate, no deletes.
+    const remote = createRemoteDatabase(async (statement) => {
+      sent.push(statement);
+      const sql = statement.sql.toLowerCase();
+      const rows = sql.startsWith('delete')
+        ? []
+        : sql.includes('count(')
+          ? [[0]]
+          : sql.includes('from "chat_archives"')
+            ? [[2, 'm2', 'm1', 'm2', 1, 2, 0]]
+            : sql.includes('"client_nonce"')
+              ? [['m3', 'main', 'u1', 'n3', 'body', 3, null, null]]
+              : [[3, 'm3']];
+      return [{ success: true, results: { columns: [], rows }, meta: { changes: 0 } }];
+    });
+    const policy = { retainDays: 1, maxMessages: 1 };
+    const [range] = await exportCandidates(remote, policy, 10 * 86_400_000);
+    await rangeRecords(remote, range!.from, range!.to);
+    await recordVerifiedArchive(remote, {
+      range: range!,
+      sha256: 'a',
+      exportedAt: 1,
+      verifiedAt: 1,
+    });
+    await chatOverRetention(remote, policy, 1);
+    await pruneArchived(remote, { now: () => 1, pause: async () => {} });
+    for (const pattern of [
+      /^select/i,
+      /^insert into "chat_archives"/i,
+      /^delete from "chat_messages"/i,
+      /^update "chat_archives"/i,
+    ])
+      expect(
+        sent.some((statement) => pattern.test(statement.sql)),
+        String(pattern),
+      ).toBe(true);
+    for (const statement of sent) {
+      const result = await runApi(['d1-query', databaseId], {
+        config: d1Config(),
+        input: JSON.stringify(statement),
+      });
+      expect(result.status, statement.sql).toBe(0);
+    }
+  });
+
+  it.each([
+    'SELECT body FROM chat_messages JOIN users ON users.id = chat_messages.sender_id',
+    'DELETE FROM chat_messages WHERE sender_id IN (SELECT id FROM users)',
+    'INSERT INTO chat_archives (id) SELECT id FROM profile_contacts',
+  ])('R-CHAT-14 chat statements still refuse other tables: %s', async (sql) => {
+    writeValidEnv();
+    const result = await runApi(['d1-query', databaseId], {
+      config: d1Config(),
+      input: JSON.stringify({ sql, params: [] }),
+    });
+    expect(result.status).not.toBe(0);
+    expect(api.requests).toEqual([]);
   });
 
   it.each([
