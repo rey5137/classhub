@@ -6,10 +6,12 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { siteDefaults } from '../../site.config.ts';
 import { normalizeName } from '../../src/lib/shared/normalize.ts';
+import { DESTRUCTIVE_MIGRATION } from './backup-gate.mjs';
 import { apiGet, apiLookup, d1Remote, reason } from './cf-child.mjs';
 import { readEnvFile } from './env-file.mjs';
 import { normalizeEmail, quote, validEmail } from './invite.mjs';
 import { parseJsonc } from './jsonc.mjs';
+import { compareMigrations, localMigrations, remoteMigrations } from './migrations.mjs';
 import {
   readWorkerConfig,
   renderWorkerConfig,
@@ -283,6 +285,7 @@ export async function runSetup(deps) {
   // 3. D1 and R2: listed first, created only when missing, never deleted.
   const dbName = `${slug}-db`;
   let databaseId = findDatabase(run, dbName);
+  const reused = Boolean(databaseId);
   if (databaseId) out(`D1 ${dbName}: exists, reused.`);
   else {
     must(run, ['d1', 'create', dbName, '--update-config=false'], `creating D1 ${dbName}`);
@@ -320,7 +323,26 @@ export async function runSetup(deps) {
     out(`Secret ${name}: created.`);
   }
 
-  // 6. Remote migrations, then the defaults (never demo content).
+  // 6. Remote migrations, then the defaults (never demo content). On a database already in
+  // use a destructive step waits for db:migrate:remote and its backup gate (INV-7, R-DB-11).
+  const local = localMigrations(
+    root,
+    config.d1_databases?.find((/** @type {{ binding?: string }} */ db) => db.binding === 'DB')
+      ?.migrations_dir,
+  );
+  if (reused && local.some((name) => DESTRUCTIVE_MIGRATION.test(name))) {
+    let pending;
+    try {
+      pending = compareMigrations(local, await remoteMigrations(run)).pending;
+    } catch {
+      pending = local;
+    }
+    const destructive = pending.filter((name) => DESTRUCTIVE_MIGRATION.test(name));
+    if (destructive.length > 0)
+      throw new SetupError(
+        `${destructive.join(', ')} is destructive; setup never applies it. Run npm run backup, then npm run db:migrate:remote.`,
+      );
+  }
   must(run, ['d1', 'migrations', 'apply', 'DB', '--remote'], 'applying remote migrations');
   out('Remote migrations: applied.');
   const admin = await seed(deps, { themes, locales });

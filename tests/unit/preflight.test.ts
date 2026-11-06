@@ -460,6 +460,72 @@ describe('preflight admin rule and probe (R-OPS-10, R-AUTH-12)', () => {
     });
   });
 
+  describe('AC-DB-05 a pending destructive migration', () => {
+    const deployedAt = Date.parse('2026-11-01T00:00:00.000Z');
+    const pendingDestructive = () =>
+      writeFileSync(join(box.dir, 'migrations', '0099_drop_x_destructive.sql'), 'select 1;\n');
+    const deployed = () =>
+      box.writeState({
+        ...box.readState(),
+        deployments: [{ id: 'd1', created_on: new Date(deployedAt).toISOString() }],
+      });
+    const backupAt = (at: number) =>
+      sql(
+        `insert into backup_runs (id, kind, manifest_sha256, object_count, total_bytes, verified_at) values ('b${at}', 'full', 'x', 0, 0, ${at})`,
+      );
+    const destructive = async () => {
+      const checks = await preflight();
+      return {
+        failing: failing(checks),
+        check: checks.find((c) => c.id === 'destructive-migration'),
+      };
+    };
+
+    it('AC-DB-05 refuses without any verified backup, with its own message', async () => {
+      pendingDestructive();
+      deployed();
+      const { failing: ids, check } = await destructive();
+      expect(ids).toEqual(['migrations', 'destructive-migration']);
+      expect(check?.detail).toBe(
+        'pending destructive migration 0099_drop_x_destructive.sql needs a verified backup newer than the last deploy: no verified backup exists.',
+      );
+      expect(check?.fix).toContain('npm run db:migrate:remote');
+    });
+
+    it('AC-DB-05 refuses when the newest verified backup is older than the last deploy', async () => {
+      pendingDestructive();
+      deployed();
+      backupAt(deployedAt - 1);
+      const { check } = await destructive();
+      expect(check).toMatchObject({ status: 'fail' });
+      expect(check?.detail).toContain(
+        'is not newer than the last deploy (2026-11-01T00:00:00.000Z)',
+      );
+    });
+
+    it('AC-DB-05 refuses when the last deploy time cannot be read', async () => {
+      pendingDestructive();
+      backupAt(deployedAt + 1);
+      box.writeState({ ...box.readState(), failures: { 'deployments list': 'auth error' } });
+      const { check } = await destructive();
+      expect(check).toMatchObject({ status: 'fail' });
+      expect(check?.detail).toContain('cannot read the last deploy time');
+    });
+
+    it('AC-DB-05 a newer verified backup clears the destructive item (the pending one still fails)', async () => {
+      pendingDestructive();
+      deployed();
+      backupAt(deployedAt + 1);
+      const { failing: ids, check } = await destructive();
+      expect(ids).toEqual(['migrations']);
+      expect(check).toMatchObject({ status: 'pass' });
+    });
+
+    it('AC-DB-05 is not checked when no destructive migration is pending', async () => {
+      expect((await destructive()).check).toBeUndefined();
+    });
+  });
+
   it('N2 warns, without failing, while vars.WS_PROBE is set', async () => {
     expect((await preflight()).some((check) => check.id === 'ws-probe')).toBe(false);
     writeConfig({ ...config(), vars: { ...(config().vars as object), WS_PROBE: '1' } });

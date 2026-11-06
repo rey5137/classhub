@@ -1,4 +1,7 @@
 import { createHash, createHmac } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
 
 const credentialsSchema = z.object({
@@ -29,7 +32,20 @@ const unescapeXml = (value) =>
       ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" })[entity] ?? entity,
   );
 
-/** Minimal R-BAK-17 shared S3 client: housekeeping needs only list and delete. */
+/**
+ * A final object key backup may copy into its snapshot: `media/` or `avatars/`, no empty,
+ * `.` or `..` segment, no backslash (never `staging/`, R-BAK-04).
+ * @param {string} key
+ */
+export function validObjectKey(key) {
+  return (
+    /^(?:media|avatars)\//.test(key) &&
+    !key.split('/').some((part) => !part || part === '.' || part === '..') &&
+    !key.includes('\\')
+  );
+}
+
+/** Minimal R-BAK-17 shared S3 client: housekeeping lists and deletes, backup lists and GETs. */
 export function createS3Client(
   /** @type {z.input<typeof credentialsSchema>} */ credentials,
   /** @type {{ fetch?: typeof fetch; now?: () => Date }} */ options = {},
@@ -37,8 +53,11 @@ export function createS3Client(
   const { account, bucket, accessKey, secretKey } = credentialsSchema.parse(credentials);
   const host = `${account}.r2.cloudflarestorage.com`;
   const fetcher = options.fetch ?? fetch;
-  /** @param {string} method @param {string} key @param {Record<string, string>} query */
-  async function request(method, key, query) {
+  /**
+   * @param {string} method @param {string} key @param {Record<string, string>} query
+   * @param {{ allowNotFound?: boolean; timeoutMs?: number }} [options]
+   */
+  async function request(method, key, query, { allowNotFound = false, timeoutMs = 30_000 } = {}) {
     const date = (options.now?.() ?? new Date()).toISOString().replace(/[:-]|\.\d{3}/g, '');
     const day = date.slice(0, 8);
     const path = `/${bucket}${key ? `/${key.split('/').map(encode).join('/')}` : ''}`;
@@ -67,9 +86,13 @@ export function createS3Client(
         ...headers,
         authorization: `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
       },
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(timeoutMs),
       redirect: 'error',
     });
+    if (allowNotFound && response.status === 404) {
+      await response.body?.cancel();
+      return null;
+    }
     if (!response.ok) {
       await response.body?.cancel();
       throw new Error(`S3 ${method} failed: HTTP ${response.status}`);
@@ -87,7 +110,7 @@ export function createS3Client(
         ...(cursor ? { 'continuation-token': cursor } : {}),
       });
       // A 100-key page is small; refuse a broken or hostile response before buffering it.
-      const reader = response.body?.getReader();
+      const reader = response?.body?.getReader();
       if (!reader) throw new Error('Empty S3 listing');
       const chunks = [];
       let size = 0;
@@ -140,8 +163,40 @@ export function createS3Client(
         )
           throw new Error('Invalid media object key');
         const response = await request('DELETE', key, {});
-        await response.body?.cancel();
+        await response?.body?.cancel();
       }
+    },
+    /**
+     * R-BAK-03: streams one final object (never `staging/`) to a new file, byte for byte.
+     * Returns null when the object is gone (R-BAK-16 decides what that means).
+     * @param {string} key @param {string} destination @param {number} expectedSize
+     * @returns {Promise<{ size: number; sha256: string } | null>}
+     */
+    async get(key, destination, expectedSize) {
+      if (!validObjectKey(key)) throw new Error('Invalid media object key');
+      // A whole photo, not a 100-key page: allow more time, bounded all the same.
+      const response = await request('GET', key, {}, { allowNotFound: true, timeoutMs: 300_000 });
+      if (!response) return null;
+      if (!response.body) throw new Error('Empty S3 object');
+      const digest = createHash('sha256');
+      let size = 0;
+      const meter = new Transform({
+        transform(chunk, _encoding, done) {
+          size += chunk.length;
+          if (size > expectedSize) done(new Error('S3 object larger than listed'));
+          else {
+            digest.update(chunk);
+            done(null, chunk);
+          }
+        },
+      });
+      await pipeline(
+        Readable.fromWeb(/** @type {import('node:stream/web').ReadableStream} */ (response.body)),
+        meter,
+        createWriteStream(destination, { flags: 'wx', mode: 0o600 }),
+      );
+      if (size !== expectedSize) throw new Error('S3 object size differs from the listing');
+      return { size, sha256: digest.digest('hex') };
     },
   };
 }

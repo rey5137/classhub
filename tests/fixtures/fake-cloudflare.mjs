@@ -20,6 +20,8 @@ import { pathToFileURL } from 'node:url';
  *   devUrl?: Record<string, boolean>;
  *   customDomains?: Record<string, string[]>;
  *   failures?: Record<string, string>;
+ *   deployments?: { id: string; created_on: string }[];
+ *   workerCreatedAt?: string;
  * }} FakeState
  * @typedef {{ stateDir: string; cwd: string; account: string; input?: string }} FakeContext
  * @typedef {{ status: number; stdout: string; stderr: string }} FakeResult
@@ -90,6 +92,16 @@ function dispatch(args, context, state) {
 
   if (args[0] === 'whoami') return JSON.stringify({ accounts: [{ id: context.account }] });
   if (command === 'd1 list') return JSON.stringify(state.databases);
+  if (command === 'deployments list') {
+    if (state.deployments) return JSON.stringify(state.deployments);
+    // As the real API answers before the Worker's first upload…
+    if (!state.worker)
+      throw new Failure(
+        'A request to the Cloudflare API failed.\n\n  This Worker does not exist on your account. [code: 10007]',
+      );
+    // …and after it: `secret put` on a missing Worker uploads one, which is a deployment.
+    return JSON.stringify([{ id: 'secret-put-upload', created_on: state.workerCreatedAt }]);
+  }
   if (command === 'd1 create') {
     const name = args[2] ?? '';
     if (state.databases.some((db) => db.name === name)) {
@@ -152,6 +164,7 @@ function dispatch(args, context, state) {
     config();
     if (!context.input) throw new Failure('empty secret');
     state.secrets[args[2] ?? ''] = context.input;
+    if (!state.worker) state.workerCreatedAt = new Date().toISOString();
     state.worker = true;
     return `✨ Success! Uploaded secret ${args[2]}\n`;
   }

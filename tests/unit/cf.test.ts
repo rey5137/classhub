@@ -320,6 +320,35 @@ describe('scripts/cf.mjs', () => {
     }
   });
 
+  it('R-BAK-03 d1 export reaches wrangler only as one whole export of the DB binding', () => {
+    writeValidEnv();
+    writeWranglerConfig(account);
+    const allowed = run(['d1', 'export', 'DB', '--remote', '--output', join(dir, 'dump.sql')], {
+      whoami: whoami(account),
+    });
+    expect(allowed.result.status).toBe(0);
+    expect(allowed.invocations.map((entry) => entry.args.slice(0, 3))).toEqual([
+      ['whoami', '--json'],
+      ['d1', 'export', 'DB'],
+    ]);
+    const out = join(dir, 'dump.sql');
+    for (const argv of [
+      ['d1', 'export', 'other-db', '--remote', '--output', out],
+      ['d1', 'export', '--remote', 'DB', '--output', out],
+      ['d1', 'export', 'DB', '--output', out],
+      ['d1', 'export', 'DB', '--remote', '--output', out, '--table', 'users'],
+      ['d1', 'export', 'DB', '--remote', '--output', out, '--no-data'],
+      ['d1', 'export', 'DB', '--remote', '--output', '--no-schema'],
+      ['d1', 'export', 'DB', '--remote', `--output=${out}`],
+    ]) {
+      rmSync(logPath, { force: true });
+      const refused = run(argv, { whoami: whoami(account) });
+      expect(refused.result.status, argv.join(' ')).not.toBe(0);
+      expect(refused.result.stderr).toContain('d1 export may only run as');
+      expect(refused.invocations.map((entry) => entry.args[0])).toEqual(['whoami']);
+    }
+  });
+
   it('AC-PLAT-06 a non-deploy command is refused when only env.x.account_id names another account', () => {
     writeValidEnv();
     writeWranglerConfigSource(
@@ -659,6 +688,7 @@ describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
     "UPDATE storage_usage SET reserved_bytes = (SELECT coalesce(sum(reserved_bytes), 0) FROM upload_reservations WHERE state = 'open') WHERE singleton_id = ?",
     'DELETE FROM media WHERE media.id = ?',
     'INSERT INTO schema_meta (key, value) VALUES (?, ?)',
+    'INSERT INTO backup_runs (id, kind, manifest_sha256, object_count, total_bytes, verified_at) VALUES (?, ?, ?, ?, ?, ?)',
   ])('AC-MEM-09 allows parameterized maintenance SQL: %s', async (sql) => {
     writeValidEnv();
     expect(
@@ -688,6 +718,12 @@ describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
     'SELECT * FROM media /* comment */',
     'SELECT * FROM main.media',
     'WITH x AS (SELECT * FROM users) SELECT * FROM x',
+    // R-BAK-09: backup_runs takes one plain INSERT, nothing else.
+    'SELECT * FROM backup_runs',
+    'UPDATE backup_runs SET verified_at = ?',
+    'DELETE FROM backup_runs',
+    'INSERT INTO backup_runs (id) SELECT id FROM media',
+    'INSERT INTO media (id) SELECT id FROM backup_runs',
   ])('AC-MEM-09 refuses SQL outside the housekeeping subset: %s', async (sql) => {
     writeValidEnv();
     const result = await runApi(['d1-query', databaseId], {

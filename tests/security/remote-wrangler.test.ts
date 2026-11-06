@@ -84,6 +84,21 @@ describe('remote wrangler calls', () => {
     ).not.toMatch(endpoint);
   });
 
+  it('AC-PLAT-07 names rclone nowhere: R2 is reached only by scripts/lib/s3.mjs (R-BAK-17)', () => {
+    const rclone = /rclone/i;
+    // All of package.json (a dependency counts too), not only its scripts.
+    const scanned = [
+      { file: 'package.json', source: readFileSync(join(repoRoot, 'package.json'), 'utf8') },
+      ...sources(),
+    ];
+    // The S3 client must be in the scan, or an empty scan would pass vacuously.
+    expect(scanned.map((source) => source.file)).toContain('scripts/lib/s3.mjs');
+    expect(
+      scanned.filter((source) => rclone.test(source.source)).map((source) => source.file),
+    ).toEqual([]);
+    expect(rclone.test("spawnSync('rclone', ['copy', 'r2:bucket', 'out'])")).toBe(true);
+  });
+
   it.each([
     "spawnSync('wrangler', ['deploy'])",
     'spawnSync("wrangler", ["deploy"])',

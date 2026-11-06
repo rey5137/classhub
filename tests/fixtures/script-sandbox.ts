@@ -54,6 +54,10 @@ export interface FakeState {
   customDomains?: Record<string, string[]>;
   /** `<command> <subcommand>` → the error the fake CLI fails with */
   failures?: Record<string, string>;
+  /** `deployments list --json`, newest last or not: the gate takes the max. */
+  deployments?: { id: string; created_on: string }[];
+  /** When the first `secret put` uploaded the Worker; `deployments list` reports it. */
+  workerCreatedAt?: string;
 }
 
 export interface RunResult {

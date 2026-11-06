@@ -21,8 +21,8 @@ free-tier budget `docs/spec/platform/14-free-tier-budget.md` (§14).
 ## 1. Prerequisites (R-OPS-01)
 
 - Node.js 24 or newer (`node --version`), npm and Git.
-- `age`, for encrypted backups (mandatory once backups arrive; install it now: `brew install age` or your package
-  manager).
+- `age` 1.x, for encrypted backups (mandatory: `npm run backup` refuses without it; `brew install age` or your
+  package manager).
 - A Cloudflare account on **Workers Free** with a **Zero Trust Free** organization (created in GOOGLE_ACCESS.md).
 - **R2 activated** in that account: Dashboard → R2 Object Storage → Purchase / Activate (asks for a payment method).
   > screenshot: the R2 activation screen
@@ -153,7 +153,8 @@ when anything fails:
 | `bucket` | the bucket has no public `r2.dev` URL and no custom domain |
 | `admin` | an admin is active (before the first unlock: the bootstrap admin has signed in once) |
 | `seats` | fewer than 50 Zero Trust seats are used |
-| `backup` | a verified backup exists (until `npm run backup` arrives this is a **warning**, never a failure) |
+| `backup` | a verified backup exists (none yet is a **warning**, never a failure) |
+| `destructive-migration` | shown only while a `*_destructive.sql` migration is pending: fails until a verified backup is newer than the last deploy (INV-7) |
 | `ws-probe` | a **warning** only while `WS_PROBE` is still in `vars` (remove it after the WebSocket check) |
 | `release` | information only: the newest GitHub release compared with your version |
 
@@ -175,19 +176,65 @@ test a specific hostname. A `/health` that redirects to Access means the `/healt
 ```bash
 git pull --ff-only
 npm ci
-npm run backup             # must pass (arrives in a later release)
-npm run db:migrate:remote  # refuses without a backup newer than the last deploy (arrives with backups)
+npm run backup             # must pass: a verified, encrypted backup recorded in backup_runs
+npm run db:migrate:remote  # refuses unless the newest verified backup is newer than the last deploy
 npm run deploy
 npm run smoke:test
 ```
 
-Until `backup` and `db:migrate:remote` exist, run `npm run preflight` after `npm ci`: a pending migration shows as a
-failure with the exact command, and no destructive migration exists yet. Nothing updates itself; `preflight` tells you
-when a newer release exists.
+The order matters (INV-7): `db:migrate:remote` reads the Worker's newest deployment time and the newest verified
+`backup_runs` row, and applies nothing unless the backup is newer. It names every pending migration before applying
+it, a destructive one (`*_destructive.sql`, R-DB-11) as `DESTRUCTIVE`. It is the only command that applies a
+destructive migration to a database in use: `npm run setup` refuses one, and `npm run preflight` fails while one is
+pending without that backup. Nothing updates itself; `preflight` tells you when a newer release exists.
 
 Rerun `npm run setup` after an update that changes `wrangler.jsonc.example`: it takes the release keys (`main`,
 compatibility settings, `assets`) and any new Durable Object binding or migration tag from it, and keeps your own
 values.
+
+## Backups (R-BAK-03, R-BAK-04, R-BAK-05)
+
+One-time preparation:
+
+1. Install `age` (prerequisites) and create a key pair **on another machine or a password manager**, not next to the
+   archives: `age-keygen -o classhub-backup-key.txt`. It prints the public key (`age1…`).
+2. Put that public key in `.env.cloudflare` as `AGE_RECIPIENT`. The private key file (the *identity*) never goes
+   into the repo, `.env.cloudflare` or the folder that holds the archives: whoever has both can read every member's
+   data.
+3. Create an R2 API token with **Object Read only**, scoped to the `<slug>-media` bucket (Dashboard → R2 → Manage
+   API tokens), and put its pair in `.env.cloudflare` as `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`. Backups never
+   use the housekeeping pair.
+
+Run a backup at least weekly and before every update:
+
+```bash
+npm run backup                      # → backups/classhub-backup-<time>.tar.age
+npm run backup -- --out /Volumes/x  # another folder; --recipient age1… overrides AGE_RECIPIENT
+```
+
+`backup` takes the backup lock (`.wrangler/backup.lock`; a second run, `export-chat` or `prune-chat` refuses while it
+is held), exports D1 through the account guard, copies every photo and avatar in full over the S3 API, writes
+`manifest.json`, `checksums.sha256` and `RESTORE.md`, verifies the snapshot, and only then encrypts it. The plaintext
+staging folder is private to your user and removed whether the run succeeds or fails; the `.tar.age` is the only file
+left. A verified run is recorded in D1 (`backup_runs`: the time of the database export, object count and size, no
+content), which `preflight`,
+`db:migrate:remote` and `/admin` read. Without `age` or a recipient it refuses before reading anything.
+
+A photo deleted between the database export and the object copy is listed in the manifest as skipped; any other
+missing object fails the backup. If a run was killed and the lock remains, `backup` names the file: remove it once you
+are sure no backup is running.
+
+Copy the archive somewhere outside Cloudflare (a USB disk, another cloud); `backups/` is gitignored. Check an
+archive at any time, on the machine that has the identity:
+
+```bash
+npm run verify-backup -- backups/classhub-backup-<time>.tar.age --identity ~/classhub-backup-key.txt
+```
+
+It decrypts into a private temporary folder (removed afterwards) and checks the `completed` flag, every checksum,
+that `database.sql` loads into SQLite with the manifest's row counts, and that every photo's object has the size and
+SHA-256 its database row records. `AGE_IDENTITY_FILE` may stand in for `--identity`; an extracted folder needs no
+identity. Each archive's `RESTORE.md` names the app version and the restore commands.
 
 ## 10. The WebSocket probe (R-OPS-16)
 

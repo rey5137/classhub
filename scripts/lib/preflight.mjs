@@ -4,6 +4,7 @@
 // fetch, each with a timeout. Unit tests break one item per fixture (AC-OPS-04).
 
 import { spawnSync } from 'node:child_process';
+import { backupGate, DESTRUCTIVE_MIGRATION } from './backup-gate.mjs';
 import { apiGet, apiLookup, d1Remote, reason } from './cf-child.mjs';
 import { SEAT_LIMIT, seatsUsedSql } from './invite.mjs';
 import { compareMigrations, localMigrations } from './migrations.mjs';
@@ -170,10 +171,24 @@ export async function runPreflight(deps) {
           ? fail(
               'migrations',
               `pending: ${pending.join(', ')}.`,
-              'node scripts/cf.mjs d1 migrations apply DB --remote (npm run setup does the same).',
+              'npm run backup, then npm run db:migrate:remote (R-OPS-12).',
             )
           : pass('migrations', `${remote.length} applied, none pending.`),
     );
+    // R-DB-11 / AC-DB-05: a pending destructive step also needs the INV-7 backup.
+    const destructive = pending.filter((name) => DESTRUCTIVE_MIGRATION.test(name));
+    if (destructive.length > 0) {
+      const gate = await backupGate(run);
+      checks.push(
+        gate.ok
+          ? pass('destructive-migration', `${destructive.join(', ')} may apply: ${gate.detail}`)
+          : fail(
+              'destructive-migration',
+              `pending destructive migration ${destructive.join(', ')} needs a verified backup newer than the last deploy: ${gate.detail}`,
+              `${gate.fix} Apply it only with npm run db:migrate:remote (INV-7).`,
+            ),
+      );
+    }
   } else checks.push(unreadable('migrations'));
 
   // Access vars in the deployed config, the same as .env.cloudflare, and the JWKS (R-AUTH-03/05).
@@ -331,7 +346,7 @@ export async function runPreflight(deps) {
               id: 'backup',
               status: 'warn',
               detail: 'no backup yet; nothing can be restored if the database is lost.',
-              fix: 'npm run backup arrives in a later release (R-BAK); keep this warning in mind.',
+              fix: 'run npm run backup (docs/DEPLOY_CLOUDFLARE.md, "Backups").',
             },
     );
   } else checks.push(unreadable('admin'), unreadable('seats'), unreadable('backup'));

@@ -93,6 +93,21 @@ if (isCheckDeploy) {
   process.exit(0);
 }
 
+// R-BAK-03: `backup` exports the bound database only, whole, in exactly one shape; no other
+// flag (a table filter, a schema-only dump) reaches wrangler.
+if (
+  args[0] === 'd1' &&
+  args[1] === 'export' &&
+  (args.length !== 6 ||
+    args[2] !== 'DB' ||
+    args[3] !== '--remote' ||
+    args[4] !== '--output' ||
+    !args[5] ||
+    args[5].startsWith('-'))
+) {
+  fail('d1 export may only run as: d1 export DB --remote --output <file>.');
+}
+
 if (isD1Query) {
   await d1Query(args, /** @type {string} */ (accountId), /** @type {string} */ (token));
 }
@@ -504,8 +519,14 @@ async function d1Query(argv, account, apiToken) {
     commaJoin ||
     !tables.length ||
     tables.some(
-      (table) => !['upload_reservations', 'media', 'storage_usage', 'schema_meta'].includes(table),
-    )
+      (table) =>
+        !['upload_reservations', 'media', 'storage_usage', 'schema_meta', 'backup_runs'].includes(
+          table,
+        ),
+    ) ||
+    // R-BAK-09: backup_runs takes one plain INSERT from backup, nothing else.
+    (tables.includes('backup_runs') &&
+      (tables.length !== 1 || !/^insert\s+into\s+backup_runs\s*\(/i.test(sql)))
   )
     fail('d1-query permits SELECT/UPDATE/DELETE/INSERT on housekeeping tables only.');
   let response;
