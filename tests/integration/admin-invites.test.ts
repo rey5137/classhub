@@ -325,7 +325,7 @@ describe('setup lock on D1 (R-AUTH-12)', () => {
       headers: await harness.as(PEOPLE.admin.email),
     });
     expect(setup.status).toBe(200);
-    expect(await setup.json()).toEqual({ unlocked: false });
+    expect(await setup.json()).toEqual({ unlocked: false, secondAdmin: false });
     const api = await send(PEOPLE.admin.email, 'GET', '/api/v1/admin/invites');
     expect(api.status).toBe(423);
     await setSetupState(database, 'unlocked');
