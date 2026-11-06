@@ -11,7 +11,7 @@ or a recurring hosting bill, as long as usage stays inside Cloudflare's free all
 - **Portable:** every Cloudflare integration sits behind a port with a local adapter (SQLite file, filesystem, in-process
   WebSocket hub, dev identity), and an encrypted backup is restorable without Cloudflare through `--target local`
   (§2.4, §13); a production Node deployment is deferred (§D).
-- **Not here:** a public social network, several classes per deployment, video, originals archive, push notifications,
+- **Not here:** a public social network, several classes per deployment, video, originals archive, email notifications,
   full-text search (§1, §D).
 
 > **Provenance.** Written 2026-11-05 from the owner's architecture brief *Class Hub: Open-Source Architecture and
@@ -46,6 +46,7 @@ what it covers, when to read it and which ids it owns, so `head -6` decides whet
 | Prerequisites, setup wizard, Access + Google setup, deploy, unlock, update, preflight | `ops/12` |
 | Backup format, mandatory encryption, backup and restore CLI, schedule, disaster recovery, leaving Cloudflare | `ops/13` |
 | Free allowances, guardrails, graceful failure | `platform/14` |
+| Push notifications, VAPID, per-device consent, kinds and mute | `features/16` |
 | Named risks and trade-offs | `reference/15` |
 | Features parked for after v1.0 (incl. production Node server and OIDC adapter, older-schema importers, OpenAPI) | `reference/D` |
 
@@ -64,7 +65,7 @@ needs.
 | `0a`, `1b`, `4c`, … | plan phase or slice | `docs/plan/plan.md` §4 |
 
 Areas: `PLAT` 02 · `NAV` 03 · `PROF` 04 · `DB` 05 · `AUTH` 06 · `MEM` 07 · `BRD` 08 · `CHAT` 09 · `UI` 10 ·
-`API` 11 · `OPS` 12 · `BAK` 13 · `BUD` 14. The `reference/` files own no rules.
+`API` 11 · `OPS` 12 · `BAK` 13 · `BUD` 14 · `NTF` 16. The `reference/` files own no rules.
 
 Ids are stable: a new rule or criterion takes its area's next free number wherever it sits in the file, and a removed
 one's number is never reused (strike it through with the reason). Each child file's header names the ids it **Owns**.
@@ -92,7 +93,7 @@ contradict.
   checks its own membership list as a second layer (§6). No application passwords (R-AUTH-15).
 - **Features:** Home with pinned notices and reunion details; Memories (photo wall, albums, years, captions); a
   discussion board with one-level comments; one live chat room; a private member directory with per-field contact
-  visibility; an admin page (§3).
+  visibility; an admin page (§3); opt-in push notifications per device, with per-member kinds and a temporary mute (§16).
 - **Zero recurring cost under normal small-class use**, not a guaranteed zero bill: R2 needs billing activation,
   overage is billable, and a custom domain costs money. The app warns at 8 GB of media and stops uploads at 9 GB
   (§7.6, §14).
@@ -101,7 +102,7 @@ contradict.
 - **Open source.** MIT-licensed application code; the repo ships synthetic demo data only. Real members' data, photos,
   account ids and secrets never enter Git (INV-6).
 - **Not in scope:** a public social network, timeline algorithm, email marketing, mobile app, several classes per
-  deployment, AI moderation, video, originals, chat attachments, full-text search, paid subscriptions, push
+  deployment, AI moderation, video, originals, chat attachments, full-text search, paid subscriptions, email
   notifications, a zero-dashboard one-click install (Access and Google OAuth need manual setup, §12.4).
 
 ### 1.1 Locked decisions

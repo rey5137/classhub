@@ -48,6 +48,8 @@
 | `GET` | `/api/v1/chat/messages` | `?before=` or `?after=`, 50 per page |
 | `DELETE` | `/api/v1/chat/messages/:id` | tombstone (sender/admin) |
 | `GET` (upgrade) | `/api/v1/chat/ws` | WebSocket (R-CHAT-04) |
+| `GET` · `PATCH` | `/api/v1/notifications` | own kinds, mute, devices (labels only), VAPID public key · set kinds or mute (R-NTF-07, 09) |
+| `POST` · `DELETE` | `/api/v1/notifications/subscriptions[/:id]` | store this device's subscription · remove one of own devices (R-NTF-08, 10) |
 | `GET` · `PATCH` | `/api/v1/admin/settings` | site settings (§10.1) |
 | `GET` · `POST` · `DELETE` | `/api/v1/admin/invites` | list with Access sync status · invite · revoke |
 | `GET` · `POST` · `DELETE` | `/api/v1/admin/join-requests[/:id]` | pending requests · approve · reject (R-AUTH-30) |
@@ -82,6 +84,12 @@ export interface RealtimeHub {
   connect(request: Request, member: { id: string; role: 'member' | 'admin'; displayName: string }): Promise<Response>;
   disconnectMember(memberId: string): Promise<void>;
   notify(event: { type: 'message.deleted'; id: string }): Promise<void>;
+}
+
+export interface PushTransport {
+  // R-NTF-05: payloads already encrypted and VAPID-signed; returns one status per delivery for R-NTF-06
+  send(deliveries: { subscriptionId: string; endpoint: string; headers: Record<string, string>; body: Uint8Array }[]):
+    Promise<{ subscriptionId: string; status: number | 'network_error' }[]>;
 }
 ```
 

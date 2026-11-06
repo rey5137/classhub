@@ -58,7 +58,8 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
   named by flags. It refuses a database with any table row, a **non-empty bucket**, and any database id or bucket name
   equal to the live binding in `wrangler.jsonc`. Order: verify (R-BAK-04), import the SQL, copy the objects,
   re-verify hashes and references, run integrity checks (every foreign key resolves; every media row has its objects),
-  clear `users.access_sub` (the new Access application issues new subjects; accounts re-link by verified email on first login, R-AUTH-25, R-BAK-14), then set `setup_state='locked'` so `preflight` and `unlock` must run on the new instance before it serves anyone.
+  empty `push_subscriptions` (they belong to the old site's VAPID key and devices; members turn push on again,
+  R-NTF-11), clear `users.access_sub` (the new Access application issues new subjects; accounts re-link by verified email on first login, R-AUTH-25, R-BAK-14), then set `setup_state='locked'` so `preflight` and `unlock` must run on the new instance before it serves anyone.
   The backup's `schemaVersion` must equal the restoring app's; `RESTORE.md` names the app version to check out. Older
   schemas are not migrated in v1.0 (§D); the same-version rule is the whole compatibility contract.
 - **R-BAK-07** `npm run restore -- <dir> --target local` restores into `data/` for the local adapters, so a backup can

@@ -50,7 +50,8 @@
 ## 4.4 Own data, deletion and retention
 
 - **R-PROF-09** **Own export:** `/profile` offers *Download my data*: a JSON file with the member's own profile,
-  contacts, posts, comments, chat messages and media metadata, plus links to their own photos. It contains no other
+  contacts, posts, comments, chat messages and media metadata, plus links to their own photos, and their notification
+  kinds, mute and device labels (never push endpoints or keys, R-NTF-02). It contains no other
   member's contact data.
 - **R-PROF-10** **Clear my profile:** the member can empty every optional field and remove the avatar at once: it leaves every view and every byte route immediately, and its stored objects are purged after the deleted-media grace period (R-MEM-20).
 - **R-PROF-11** **Deletion request:** the member can ask for account deletion from `/profile`; it is recorded and shown

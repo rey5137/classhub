@@ -12,13 +12,14 @@
 - **R-UI-01** **Level A, admin settings (no code), stored in D1 `site_settings`:** site name, class years,
   description, welcome message, banner photo, logo and favicon (uploaded through §7 as `media_type = "site"`, kept
   out of the gallery), theme preset, display mode (light, dark, system), accent colour, card density (comfortable,
-  compact), default language, feature toggles for memories, discussions and chat, and join requests on or off (`join`,
+  compact), default language, feature toggles for memories, discussions, chat and push notifications (`notifications`, default on, R-NTF-07), and join requests on or off (`join`,
   default off, R-AUTH-27). A save merges feature toggles into the stored row key by key, so two admins toggling at
   once both stick, and the reply shows the stored settings.
 - **R-UI-02** **Level B, project configuration (`site.config.ts`, one validated object):** navigation order,
   default locale, default time zone, visible profile fields, app name, the installed app's `shortName` (R-NAV-07),
   upload limits, quota thresholds, default
-  theme, chat retention, messaging-host allow-list. Every service reads it through `src/lib/config/` only; no default
+  theme, chat retention, messaging-host allow-list, push tuning (`push.chatCoalesceSeconds`, `push.quietAfter`, `push.summaryHours`,
+  `push.endpointHosts`, R-NTF-02, 07, 13). Every service reads it through `src/lib/config/` only; no default
   is duplicated elsewhere.
 - **R-UI-03** **Level C, developer themes:** a new `src/lib/themes/<id>.css` that sets only contract tokens (§10.2)
   under `[data-theme='<id>']`, registered in `src/lib/themes/registry.ts`. Pages are never forked for styling.

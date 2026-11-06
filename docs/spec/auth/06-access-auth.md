@@ -116,12 +116,12 @@
   microphone and geolocation off, and `X-Robots-Tag: noindex, nofollow`; **every private HTML page and JSON response also carries `Cache-Control: private, no-store`** (static assets excepted). `robots.txt` disallows everything as a
   secondary measure only.
 - **R-AUTH-21** **Server-side rate limits:** posts and comments 10 per minute per member; uploads 25 photos per day and
-  2 concurrent per member (R-MEM-13); chat 1 per second, burst 5 (R-CHAT-05); profile writes 20 per hour; invite
-  changes 30 per hour per admin. Exceeding one returns `429 rate_limited` with `Retry-After`.
+  2 concurrent per member (R-MEM-13); chat 1 per second, burst 5 (R-CHAT-05); profile writes 20 per hour; notification settings and
+  subscription writes 30 per hour per member (R-NTF-10); invite changes 30 per hour per admin. Exceeding one returns `429 rate_limited` with `Retry-After`.
 - **R-AUTH-22** **Bodies are bounded** before parsing: 64 KB for JSON, the media limits for uploads (R-MEM-08), 4 KB
   for a chat frame.
 - **R-AUTH-23** **Logs** carry a request id, route, status and a salted member-id hash, never emails, contact
-  fields, message bodies, captions or JWTs. The salt is the Worker secret `LOG_HASH_SALT` (created by `setup`); when
+  fields, message bodies, captions, JWTs or push endpoints and keys (R-NTF-02). The salt is the Worker secret `LOG_HASH_SALT` (created by `setup`); when
   it is unset (dev, tests) each isolate draws a random salt, and a production build logs one `config` warning without
   any value. Errors use `{ error: { code, message, requestId } }` (§11.1).
 - **R-AUTH-24** No third-party analytics, embeds, fonts or scripts by default. The one exception is Turnstile on

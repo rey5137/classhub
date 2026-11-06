@@ -21,6 +21,7 @@
 | `/members/[id]` | Member | name, avatar, short bio, contact fields visible to the viewer; display name only when the owner isn't `active` (R-PROF-13) |
 | `/profile` | My profile | names, avatar, contact fields, per-field visibility, my data export, deletion request |
 | `/install` | Install the app | the install guide for the viewer's device (R-NAV-10); linked from Home's install card and from `/profile` |
+| `/notifications` | Notifications | this device's push on/off, kinds, mute, own devices (R-NTF-10, 11); linked from `/profile` and the member menu |
 | `/admin` | Administration | invites, suspension, info pages, pinned posts, site settings and theme, usage, backup status |
 | `/locked` | Setup locked | shown to everyone while `site_settings.setup_state` is not `unlocked` (R-AUTH-12); no data |
 | `/denied` | No access | uniform screen for a valid Google account with no active membership (R-AUTH-11) |
@@ -58,6 +59,7 @@
 | Invite, revoke, suspend, reactivate, change role | — | ✓ |
 | Edit info pages, site settings, theme, feature flags | — | ✓ |
 | See usage, backup and archive status | — | ✓ |
+| Turn push on for own devices, choose kinds, mute | ✓ | ✓ (plus the `join` kind) |
 | Export own data | ✓ | ✓ |
 | Export everyone's chat or member contacts | — | CLI only (§13) |
 
@@ -85,7 +87,8 @@ Android can build a real installed app.
   network. Only when a **navigation** fails with a network error does it answer with the offline page; an HTTP
   response of any status, a redirect to the Access login included, is passed through untouched, so an expired Access
   session always reaches the login. It never caches another response, never handles non-GET, `/api/`, WebSocket or
-  cross-origin requests, and has no push, sync or periodic handlers (push is §D).
+  cross-origin requests, and has no sync or periodic handlers; its only other handlers are `push`, `notificationclick` and
+  `pushsubscriptionchange` (R-NTF-12).
 - **R-NAV-09** **Device detection.** One pure function (`src/lib/install/detect.ts`) maps the user agent,
   `maxTouchPoints`, the standalone state and whether a `beforeinstallprompt` event was captured to one kind:
   `installed` (`display-mode: standalone`, `fullscreen` or `minimal-ui`, or `navigator.standalone`), `in-app` (Zalo,

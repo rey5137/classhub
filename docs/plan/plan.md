@@ -30,7 +30,7 @@ commit is on `main` and tagged `pN-verified`. The gate approval goes in that tag
 | 1 — Identity and members | 1a · 1b · 1c · 1d | allowed vs denied Gmail in the second account; visibility tests |
 | 2 — Memories | 2a · 2b · 2c | upload / view / delete, quota stop, private media |
 | 3 — Home and discussions | 3a · 3b | pinned threads, pagination over thousands, moderation |
-| 4 — Live chat | 4a · 4b · 4c · 4d · 4e | two live sessions in production, persistence, verified-archive pruning |
+| 4 — Live chat | 4a · 4b · 4c · 4d · 4e · 4f · 4g | two live sessions in production, persistence, verified-archive pruning, push on installed phones |
 | 5 — Portability | 5a · 5b · 5c | an independent restore of the production site, `restore --target local` opening it offline |
 | 6 — Open-source release | 6a · 6b | a second person deploys from a clean clone; v1.0.0 tag |
 
@@ -302,7 +302,34 @@ successful independent restore. Deploying is not enough.
   `worker-src` fall back to `'self'`). Screens: `/install` and Home with the card.
 - Model: Sonnet · medium.
 
-**Manual Verification Checklist (4c, 4d, 4e, phase gate)**
+#### Slice 4f — push core and chat pushes
+- **Covers:** AC-NTF-01, 02, 03 (chat kind), 04, 06, 07, 08, 10, 11, 12, 14, AC-NTF-13 (chat half).
+- Builds after 4e (needs `src/service-worker.ts`). `src/lib/server/push/` (VAPID ES256 JWT and RFC 8291 `aes128gcm`
+  on WebCrypto, endpoint allow-list, payload renderer), the `PushTransport` port with the Cloudflare adapter
+  (`PushDelivery` named entrypoint in `src/worker.ts`, the `PUSH` self service binding, batches of 40; add the export to
+  `check-worker-exports.mjs`), the local and recording adapters; `push_subscriptions` and `notification_prefs`
+  (additive migration); the `notifications` site setting and Level B `push.*`; the notifications API and the
+  `/notifications` screen with the `/profile` and member-menu links; the service worker's `push`,
+  `notificationclick` and `pushsubscriptionchange` handlers; the chat trigger in `src/lib/server/services/chat-room.ts`
+  after the broadcast (recipients exclude every member the broadcast reached; conditional coalesce `UPDATE`); quiet
+  mode and summaries (R-NTF-13, its reset joined into the membership read); `setup`
+  generating the VAPID pair and the binding; `restore` emptying `push_subscriptions`; own export;
+  both dictionaries; the `docs/PRIVACY.md` push section (what is stored, what push services see, how to turn it off).
+  Screens: `/notifications` (on, off, blocked, muted, iPhone outside the Home Screen app).
+- Risk: whether service-binding calls count against the 50 external subrequests on Workers Free is not stated
+  clearly in Cloudflare's docs; the batching keeps each batch's fetches ≤ 40 either way, and the 32-invocation cap
+  allows the ≤ 7 batches. Confirm on the live site at checklist item 8 with all devices subscribed.
+- Model: Opus · high (a member-supplied URL the Worker fetches, crypto, privacy of the payload).
+
+#### Slice 4g — discussion and join pushes
+- **Covers:** AC-NTF-03 (thread, reply, join kinds), 05, 09, AC-NTF-13 (reply half).
+- `thread_followers` (additive migration, backfilled from existing posts and comments in the migration), written with
+  `INSERT OR IGNORE` in the post and comment batches; `thread` and `reply` pushes after commit through `waitUntil`;
+  the `join` push from 4d's request path, admins only; the device cap, endpoint move and deletion cleanup (R-NTF-08); the kind toggles
+  for these kinds on `/notifications`. No new screen beyond the toggles.
+- Model: Sonnet · medium.
+
+**Manual Verification Checklist (4c, 4d, 4e, 4f, 4g, phase gate)**
 1. Two phones on the live site: messages arrive instantly both ways, the online count is 2.
 2. Turn one phone's network off, send from the other, turn it back on: the missed messages appear in order.
 3. Suspend the second account from `/admin`: its chat disconnects and it can't send.
@@ -314,6 +341,13 @@ successful independent restore. Deploying is not enough.
    class icon (no Chrome badge), signs in and reaches chat.
 7. iPhone Safari: follow `/install` (Share → Add to Home Screen); the app opens standalone, asks to sign in once, then
    reaches chat. Open the site link from Zalo or Messenger: the card shows the open-in-Safari steps and Copy link.
+8. Turn push on in both installed apps (Android, iPhone) and in one desktop browser. Close the apps; send a chat
+   message from a third member: each device shows the sender's name and the message within a minute; two more
+   messages a minute apart merge into one "3 new messages" notification. With `/chat` open on one phone, that phone
+   gets no push. Leave one phone unopened through 10 pushes: further messages stop arriving one by one and a summary
+   comes instead; opening the app brings normal pushes back.
+9. Mute for 1 hour on one phone: no push from a new thread; *Unmute*, start another thread: the push arrives. Comment
+   on a thread the other phone's member started: their phone shows the reply push and tapping it opens the thread.
 
 ### Phase 5 — Portability
 
