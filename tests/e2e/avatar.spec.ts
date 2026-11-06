@@ -71,8 +71,7 @@ test('R-MEM-13 R-PROF-10 an avatar is cropped to one 512 px square, shown, and r
   await expect(page.locator(`main img[src="${src}"]`)).toBeVisible();
 
   await page.goto('/profile');
-  // Only a hydrated page submits through `enhance`: a native form POST carries `Origin: null`
-  // under `no-referrer` and meets R-AUTH-17. The editor's button opens a chooser once hydrated.
+  // The editor's button opens a chooser only once the page is hydrated.
   await expect(async () => {
     const chooser = page.waitForEvent('filechooser', { timeout: 500 });
     await page.getByRole('button', { name: copy['prof.avatar.change'] }).click();

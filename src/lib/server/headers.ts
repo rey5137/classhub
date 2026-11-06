@@ -51,7 +51,7 @@ export function withStyleNonce(csp: string): string {
 }
 
 export const securityHeaders = {
-  'referrer-policy': 'no-referrer',
+  'referrer-policy': 'same-origin',
   'x-content-type-options': 'nosniff',
   'strict-transport-security': 'max-age=31536000',
   'permissions-policy': 'camera=(), microphone=(), geolocation=()',

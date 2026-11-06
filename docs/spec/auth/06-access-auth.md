@@ -109,7 +109,9 @@
 - **R-AUTH-20** **Headers on every response:** `Content-Security-Policy` (`default-src 'self'`; `img-src 'self' blob:
   data:`; `connect-src 'self'` plus the same-origin WebSocket; `script-src 'self'` with SvelteKit's nonce mode;
   `style-src 'self'` plus the page nonce (the inline theme `<style>` in `app.html`), never `'unsafe-inline'`;
-  `style-src-attr 'unsafe-inline'` for component `style=` attributes; `frame-ancestors 'none'`; `form-action 'self'`; `base-uri 'none'`), `Referrer-Policy: no-referrer`,
+  `style-src-attr 'unsafe-inline'` for component `style=` attributes; `frame-ancestors 'none'`; `form-action 'self'`; `base-uri 'none'`), `Referrer-Policy: same-origin`
+  (no referrer leaves the site; `no-referrer` would make browsers send `Origin: null` on a native form `POST`, which
+  R-AUTH-17 refuses, so forms would need JavaScript),
   `X-Content-Type-Options: nosniff`, `Strict-Transport-Security: max-age=31536000`, `Permissions-Policy` with camera,
   microphone and geolocation off, and `X-Robots-Tag: noindex, nofollow`; **every private HTML page and JSON response also carries `Cache-Control: private, no-store`** (static assets excepted). `robots.txt` disallows everything as a
   secondary measure only.

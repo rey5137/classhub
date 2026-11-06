@@ -17,3 +17,17 @@ test('R-PROF-10 R-PROF-11 clear and deletion ask for confirmation before submitt
     await expect(button).toBeVisible();
   }
 });
+
+// R-AUTH-17 with R-AUTH-20's `Referrer-Policy: same-origin`: a native form POST, sent before
+// (or without) hydration, carries the real Origin and is accepted. Saves the profile unchanged.
+test('R-AUTH-17 a profile save without JavaScript is accepted', async ({ browser }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const page = await context.newPage();
+    await page.goto('http://127.0.0.1:5173/profile');
+    await page.getByRole('button', { name: 'Lưu', exact: true }).click();
+    await expect(page.getByText('Đã lưu trang cá nhân.')).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});

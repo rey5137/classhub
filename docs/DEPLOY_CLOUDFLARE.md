@@ -227,7 +227,7 @@ built. Do this after the site is unlocked.
 
    | Date | Browser | Signed in | Without session | Result |
    |---|---|---|---|---|
-   | _owner fills in_ | | 101 + echo? | 302/403? | pass / fail |
+   | 2026-11-06 | Orca (Chromium) | 101 + echo | 302 | pass |
 
 **If the signed-in probe fails** (a `403`, or the socket never opens): stop and take the custom-domain decision before
 Phase 2. Nothing built so far depends on the outcome; chat (4a/4b) does.

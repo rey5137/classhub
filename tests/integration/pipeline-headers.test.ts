@@ -34,7 +34,7 @@ const STATIC_CSP =
   "base-uri 'none'";
 
 const EXPECTED = {
-  'referrer-policy': 'no-referrer',
+  'referrer-policy': 'same-origin',
   'x-content-type-options': 'nosniff',
   'strict-transport-security': 'max-age=31536000',
   'permissions-policy': 'camera=(), microphone=(), geolocation=()',
