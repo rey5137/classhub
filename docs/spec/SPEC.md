@@ -84,7 +84,8 @@ contradict.
 - **One private site for one class.** One deployment serves one class or reunion group of up to 50 identities,
   administrators included (the Cloudflare Zero Trust Free seat limit, §14). Multi-tenant hosting is out of scope.
 - **Everything is private.** No anonymous read API, public gallery, public member endpoint, public R2 bucket or search
-  indexing. The only unauthenticated responses are `/health` (non-identifying), the opt-in `/join` form (R-AUTH-27; off by
+  indexing. The only unauthenticated responses are `/health` (non-identifying), the install manifest and icons (the site name, theme
+  colours and icons; R-NAV-07), the opt-in `/join` form (R-AUTH-27; off by
   default) and the Access login itself.
 - **Invited email addresses only.** Members sign in through Cloudflare Access with Google or with Access's one-time
   email PIN (for addresses without a Google account); only explicitly approved email addresses get in, and the app
@@ -124,7 +125,7 @@ A custom domain, if used, shares the one Access application and AUD (R-OPS-16).
 ### 1.2 Invariants
 
 - **INV-1 Fail closed on identity.** No private data, page data or media leaves the server without a verified Access
-  JWT (signature, issuer, audience, expiry) **and** an `active` membership row, except `/health` and, while the `join` setting is on, the `/join` form
+  JWT (signature, issuer, audience, expiry) **and** an `active` membership row, except `/health`, the install manifest and icons (R-NAV-07) and, while the `join` setting is on, the `/join` form
   (R-AUTH-27), which carry no member data, media or counts. A missing, forged or unverifiable
   assertion gets the uniform denial (R-AUTH-03, R-AUTH-11). No debug identity header or query exists in a production
   build (R-AUTH-13).

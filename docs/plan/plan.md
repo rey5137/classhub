@@ -292,14 +292,12 @@ successful independent restore. Deploying is not enough.
 
 #### Slice 4e — installable app and install guide
 - **Covers:** AC-NAV-06, 07, 08, 09, 10.
-- `/manifest.webmanifest` route, the default icon set in `static/icons/` drawn from `favicon.svg`, the head links and
+- Public `/manifest.webmanifest` route and `/icons/` (an Access Bypass application like `/health`, added to the
+  deploy step and `docs/DEPLOY_CLOUDFLARE.md`; the pipeline skips identity for exactly these paths), the default icon set in `static/icons/` drawn from `favicon.svg`, the head links and
   meta in `app.html`/the root layout, `src/service-worker.ts` with `static/offline.html`, `src/lib/install/detect.ts`,
   the `/install` page, the Home card and the `/profile` link, both dictionaries, the Level B `shortName`, the
   icon-replacing step in the customization docs. No D1 change, no new dependency, CSP unchanged (`manifest-src` and
   `worker-src` fall back to `'self'`). Screens: `/install` and Home with the card.
-- Risk: Android's WebAPK minting may fail to fetch icons behind Access and install a plain shortcut instead. Record it
-  at checklist item 6; the fix (an Access Bypass for the manifest and icons, which makes the site name public) is an
-  owner decision, not part of this slice.
 - Model: Sonnet · medium.
 
 **Manual Verification Checklist (4c, 4d, 4e, phase gate)**
@@ -311,7 +309,7 @@ successful independent restore. Deploying is not enough.
    that Google account signs in and lands on Home. A second request for the same address shows the same
    confirmation and stores nothing. With the queue full, `/join` shows the closed notice.
 6. On the live site, Android Chrome: the Home card's Install button installs the app; it opens standalone with the
-   class icon (note whether the icon carries a Chrome badge, see 4e's risk), signs in and reaches chat.
+   class icon (no Chrome badge), signs in and reaches chat.
 7. iPhone Safari: follow `/install` (Share → Add to Home Screen); the app opens standalone, asks to sign in once, then
    reaches chat. Open the site link from Zalo or Messenger: the card shows the open-in-Safari steps and Copy link.
 

@@ -9,7 +9,7 @@
 
 ## 11.1 Conventions
 
-- **R-API-01** Every endpoint except `GET /health` and `GET`/`POST /join` (R-AUTH-27) requires a verified identity and an active membership (INV-1);
+- **R-API-01** Every endpoint except `GET /health`, `GET /manifest.webmanifest` (R-NAV-07) and `GET`/`POST /join` (R-AUTH-27) requires a verified identity and an active membership (INV-1);
   admin endpoints also require `role = admin`.
 - **R-API-02** Errors are `{ error: { code, message, requestId } }` with a stable `code`: `unauthenticated`,
   `forbidden`, `locked`, `not_found`, `validation` (plus `fields`), `rate_limited` (an upload refusal adds `reason`: `daily` or `concurrent`, R-MEM-13), `storage_full`,

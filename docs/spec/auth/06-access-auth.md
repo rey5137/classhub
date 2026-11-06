@@ -20,7 +20,7 @@
 
 ## 6.2 Verifying identity in the app
 
-- **R-AUTH-03** On every request except `/health`, `/join` (R-AUTH-27) and static assets, the Access identity adapter reads the
+- **R-AUTH-03** On every request except `/health`, `/manifest.webmanifest` and `/icons/` (R-NAV-07), `/join` (R-AUTH-27) and static assets, the Access identity adapter reads the
   `Cf-Access-Jwt-Assertion` header (falling back to the `CF_Authorization` cookie only for the WebSocket upgrade, where
   some clients don't forward the header) and verifies it with `jose`: RS256 signature against the team JWKS
   (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`), `iss` equal to the team domain, `aud` containing the
@@ -129,8 +129,8 @@
 
 ## 6.8 Join requests
 
-- **R-AUTH-27** **Request to join.** `GET` and `POST /join` are the only app paths outside the Access policy (a Bypass
-  Access application, like `/health`), and only while the `join` site setting is on (§10.1; default off); off, both
+- **R-AUTH-27** **Request to join.** `GET` and `POST /join` sit outside the Access policy (a Bypass Access application, like `/health` and
+  the install manifest and icons, R-NAV-07), and only while the `join` site setting is on (§10.1; default off); off, both
   answer 404. The page shows the site name and a form: name (1–80), email, a note (≤ 300, e.g. "class and year"). It
   renders no member data, no site media and no counts. A submission needs a valid Turnstile token, verified on the
   server; the Turnstile script and frame are allowed in the CSP of `/join` only.

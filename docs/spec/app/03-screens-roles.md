@@ -64,17 +64,20 @@
 ## 3.4 Installable app
 
 The site installs to a phone's Home Screen as an app (a PWA). Installing changes nothing about access: every request
-still goes through Access and the membership check, and nothing private is stored on the device.
+still goes through Access and the membership check, and nothing private is stored on the device. The one exception
+is the manifest and its icons, which are public (owner decision 2026-11-06: the site name may be public) so that
+Android can build a real installed app.
 
 - **R-NAV-07** **Manifest.** `GET /manifest.webmanifest` (`application/manifest+json`, `Cache-Control: private,
-  no-store`) is an ordinary member route behind Access and the membership check (no Bypass; a non-member gets the
-  uniform denial). It carries `id`, `start_url` and `scope` `/`, `display: standalone`, `name` the site name
+  no-store`) is public: it and `/icons/` sit in an Access Bypass application (like
+  `/health`, created by the same deploy step) and skip the identity and membership check, so Android's WebAPK service
+  can fetch them. It carries only `id`, `start_url` and `scope` `/`, `display: standalone`, `name` the site name
   (R-UI-01), `short_name` the Level B `shortName` or else the site name, `lang` the default language, and
-  `theme_color`/`background_color` from the active theme's registry entry (`src/lib/themes/registry.ts`). Icons are
+  `theme_color`/`background_color` from the active theme's registry entry (`src/lib/themes/registry.ts`), and the
+  icons: never a member, a count or another setting. Icons are
   Level B static files (`static/icons/`: 192 and 512 px `any`, 512 px `maskable`, a 180 px `apple-touch-icon`),
   shipped as a default set drawn from `favicon.svg` and replaced by a forker; the admin-uploaded logo (R-UI-01) isn't
-  used for install icons in v1. Every page head links it with `crossorigin="use-credentials"` (so the browser sends
-  the Access cookie) and carries `theme-color`, `apple-touch-icon`, `apple-mobile-web-app-title` and
+  used for install icons in v1. Every page head links it (no `crossorigin` attribute needed) and carries `theme-color`, `apple-touch-icon`, `apple-mobile-web-app-title` and
   `mobile-web-app-capable`.
 - **R-NAV-08** **Service worker.** `src/service-worker.ts` (SvelteKit's built-in registration) precaches only a
   static, bilingual (vi and en, no member data, its own stylesheet, no inline style) `static/offline.html` and the
@@ -114,8 +117,8 @@ still goes through Access and the membership check, and nothing private is store
 | AC-NAV-03 | An `invited` or `suspended` user gets the uniform denial on every page and API | R-NAV-04 | integration |
 | AC-NAV-04 | Disabling chat hides it, returns `feature_disabled`, and re-enabling shows the same history | R-NAV-02 | integration |
 | AC-NAV-05 | Suspending or demoting the last active admin is refused | R-NAV-06 | unit |
-| AC-NAV-06 | A member gets a manifest with the R-NAV-07 fields and icons, linked with `crossorigin="use-credentials"` from every page; a non-member gets the uniform denial | R-NAV-07 | integration; e2e head check |
+| AC-NAV-06 | Without any identity, the manifest returns exactly the R-NAV-07 fields and the icons load; every page links it; nothing else under the Bypass paths answers without identity | R-NAV-07 | integration (security route sweep); e2e head check |
 | AC-NAV-07 | In Chromium, after one visit, an offline navigation shows the offline page, an online one shows live data, and Cache Storage holds only the offline page and icons; a redirecting navigation is passed through | R-NAV-08 | e2e (`context.setOffline`); unit for the fetch handler |
 | AC-NAV-08 | The detection table maps each fixture user agent (iPhone Safari and Chrome, iPad desktop UA, Android Chrome, Firefox and Samsung, Zalo, Messenger and Facebook on iOS and Android, desktop Chrome, Safari and Firefox, standalone) to its kind | R-NAV-09 | unit |
 | AC-NAV-09 | At 390 px the Home card shows; dismissing hides it across reloads until 30 days pass; a stubbed `beforeinstallprompt` shows the Install button and calls `prompt()`; standalone and desktop show no card; `/install` and the `/profile` link render | R-NAV-10, 11 | e2e |
-| AC-NAV-10 | On the live site through Access, Android Chrome installs the app and iOS Safari adds it to the Home Screen; each opens standalone, signs in and reaches chat | R-NAV-07, 08, 10 | manual (plan 4e checklist) |
+| AC-NAV-10 | On the live site through Access, Android Chrome installs the app (no Chrome badge on the icon) and iOS Safari adds it to the Home Screen; each opens standalone, signs in and reaches chat | R-NAV-07, 08, 10 | manual (plan 4e checklist) |
