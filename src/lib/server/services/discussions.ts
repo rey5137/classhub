@@ -48,6 +48,7 @@ import {
 } from '../repositories/discussions';
 import { parse, type AdminFailure, type AdminResult } from './admin';
 import { projectProfile } from './projection';
+import { pushAfterCommit, sendItemPush } from './push-service';
 import { takeRateLimit } from './rate-limit';
 
 // R-BRD-03..09, R-AUTH-21: board and thread services shared by `/api/v1/posts` and `/api/v1/comments`.
@@ -256,6 +257,15 @@ export async function createPost(
     return { ok: false, code: 'rate_limited', retryAfterSeconds: taken.retryAfterSeconds };
   }
   const row = await insertPost(context.database, member.id, parsed.data, now);
+  await pushAfterCommit(context, 'thread', (ctx) =>
+    sendItemPush(ctx, 'thread', {
+      postId: row.id,
+      threadTitle: row.title,
+      actorId: member.id,
+      actorName: member.displayName,
+      now,
+    }),
+  );
   const photos = await lookupPhotos(context, view, extractPhotoIds([row.bodyMd]));
   return {
     ok: true,
@@ -450,6 +460,17 @@ export async function createComment(
   const outcome = await insertComment(context.database, post.id, member.id, parsed.data.body, now);
   if (outcome === 'locked') return threadLocked;
   if (outcome === 'not_found') return denied;
+  await pushAfterCommit(context, 'reply', (ctx) =>
+    sendItemPush(ctx, 'reply', {
+      postId: post.id,
+      threadTitle: post.title,
+      actorId: member.id,
+      actorName: member.displayName,
+      priorityUserId: post.authorId,
+      commentText: outcome.bodyMd,
+      now,
+    }),
+  );
   const photos = await lookupPhotos(context, view, extractPhotoIds([outcome.bodyMd]));
   return {
     ok: true,

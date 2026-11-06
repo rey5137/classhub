@@ -12,6 +12,7 @@ import type { DatabaseHandle } from '../ports/database';
 import { auditInsertWhere, type AuditEvent } from '../repositories/audit';
 import { forbidden, parse, rateLimit, refused, type AdminResult } from './admin';
 import { inviteMember, pendingInviteFor, seatsUsed, type MemberServices } from './members';
+import { pushAfterCommit, sendJoinPush } from './push-service';
 import { takeRateLimit } from './rate-limit';
 
 // §6.8: the public `/join` form (R-AUTH-27..29) and the admins' queue (R-AUTH-30).
@@ -78,7 +79,10 @@ export async function submitJoinRequest(
       .onConflictDoNothing(),
   ]);
   if ((written?.changes ?? 0) > 0) {
-    // Slice 4g: the admins' `join` push is sent from here, for a stored request only.
+    // R-NTF-07: only a stored request pushes; the duplicate and full-queue paths stay silent.
+    await pushAfterCommit(context, 'join', (ctx) =>
+      sendJoinPush(ctx, { requestedName: name, now }),
+    );
   }
   return { kind: 'accepted' };
 }

@@ -6,7 +6,7 @@ import { createSecurityHandle, handleServerError } from '$lib/server/pipeline';
 export const handle = sequence(
   appearance,
   createSecurityHandle({
-    getContext: (event) => createContext(event.platform),
+    getContext: (event) => createContext(event.platform, event.url.origin),
     production: !import.meta.env.DEV,
     onSettings: applyAppearance,
   }),

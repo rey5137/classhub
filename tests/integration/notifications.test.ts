@@ -7,6 +7,7 @@ import { createRecordingPushTransport } from '../../src/lib/server/adapters/reco
 import {
   chatMessages,
   comments,
+  joinRequests,
   notificationPrefs,
   posts,
   pushSubscriptions,
@@ -31,6 +32,9 @@ import {
   ChatRoomCore,
   type RoomSocket,
 } from '../../src/lib/server/services/chat-room';
+import type { AppContext } from '../../src/lib/server/context';
+import { createPost, createComment } from '../../src/lib/server/services/discussions';
+import { submitJoinRequest } from '../../src/lib/server/services/join';
 import { completeDeletion } from '../../src/lib/server/services/members';
 import {
   getNotifications,
@@ -975,5 +979,452 @@ describe('notifications integration (§16)', () => {
     );
     expect(transport.deliveries).toHaveLength(1);
     expect(transport.deliveries[0]?.headers.Topic).toBe('chat');
+  });
+
+  describe('discussion and join pushes (AC-NTF-05)', () => {
+    const view = { locale: 'en' as const, memories: false };
+
+    async function subscribed(name: string, role: 'member' | 'admin' = 'member') {
+      const user = await createActiveUser(name, role);
+      const endpoint = `https://fcm.googleapis.com/fcm/send/${user.id}`;
+      await upsertSubscription(database, {
+        userId: user.id,
+        endpoint,
+        p256dh: VALID_P256DH,
+        auth: VALID_AUTH,
+        locale: 'en',
+        deviceLabel: 'Phone',
+        now: clock,
+      });
+      return { ...user, endpoint };
+    }
+
+    async function enableFeatures(over: Partial<Record<'join' | 'discussions', boolean>>) {
+      await database.db.delete(siteSettings).where(eq(siteSettings.key, 'features'));
+      await database.db.insert(siteSettings).values({
+        key: 'features',
+        valueJson: JSON.stringify({
+          memories: true,
+          discussions: true,
+          chat: true,
+          join: false,
+          notifications: true,
+          ...over,
+        }),
+        updatedAt: clock,
+      });
+    }
+
+    function contextWith(push: ReturnType<typeof createRecordingPushTransport>): AppContext {
+      return {
+        database,
+        push,
+        vapid,
+        turnstile: { siteKey: 'k', verify: async () => true },
+      } as unknown as AppContext;
+    }
+
+    const endpointsOf = (t: ReturnType<typeof createRecordingPushTransport>) =>
+      t.deliveries.map((d) => d.endpoint).sort();
+
+    it('AC-NTF-05 a new thread pushes every eligible recipient but the author', async () => {
+      const transport = createRecordingPushTransport(201);
+      const author = await subscribed('Thread Author');
+      const eligible = await subscribed('Eligible');
+      const kindOff = await subscribed('Kind Off');
+      await updateKinds(database.db, kindOff.id, { thread: false }, clock);
+      const muted = await subscribed('Muted');
+      await setMute(database.db, muted.id, '1h', 'Asia/Ho_Chi_Minh', clock);
+      const suspended = await subscribed('Suspended');
+      await database.db
+        .update(users)
+        .set({ status: 'suspended' })
+        .where(eq(users.id, suspended.id));
+      await createActiveUser('No Subscription');
+
+      const result = await createPost(
+        contextWith(transport),
+        { id: author.id, role: 'member', displayName: author.displayName },
+        { title: 'Reunion plans', body: 'Who is coming?' },
+        view,
+        clock,
+      );
+      expect(result.ok).toBe(true);
+      expect(endpointsOf(transport)).toEqual([eligible.endpoint]);
+      expect(transport.deliveries[0]?.headers.Topic).toMatch(/^thread-/);
+      const [follower] = await database.db
+        .select()
+        .from(threadFollowers)
+        .where(eq(threadFollowers.userId, author.id));
+      expect(follower).toBeTruthy();
+
+      // Discussions feature off: the post is stored, nobody is pushed.
+      await database.db.insert(siteSettings).values({
+        key: 'features',
+        valueJson: JSON.stringify({
+          memories: true,
+          discussions: false,
+          chat: true,
+          join: true,
+          notifications: true,
+        }),
+        updatedAt: clock,
+      });
+      transport.clear();
+      await createPost(
+        contextWith(transport),
+        { id: author.id, role: 'member', displayName: author.displayName },
+        { title: 'Second', body: 'Hidden feature' },
+        view,
+        clock,
+      );
+      expect(transport.deliveries).toHaveLength(0);
+    });
+
+    it('AC-NTF-05 a comment pushes the thread author and earlier commenters, not the commenter or non-followers', async () => {
+      const transport = createRecordingPushTransport(201);
+      const ctx = contextWith(transport);
+      const author = await subscribed('Author');
+      const first = await subscribed('First Commenter');
+      const second = await subscribed('Second Commenter');
+      const outsider = await subscribed('Outsider');
+      const asMember = (u: { id: string; displayName: string }) => ({
+        id: u.id,
+        role: 'member' as const,
+        displayName: u.displayName,
+      });
+
+      const post = await createPost(
+        ctx,
+        asMember(author),
+        { title: 'Thread', body: 'Body' },
+        view,
+        clock,
+      );
+      if (!post.ok) throw new Error('post');
+      const params = { id: post.body.id };
+
+      transport.clear();
+      await createComment(ctx, asMember(first), params, { body: 'one' }, view, clock + 1);
+      expect(endpointsOf(transport)).toEqual([author.endpoint]);
+      expect(transport.deliveries[0]?.headers.Topic).toMatch(/^reply-/);
+
+      transport.clear();
+      await createComment(ctx, asMember(second), params, { body: 'two' }, view, clock + 2);
+      expect(endpointsOf(transport)).toEqual([author.endpoint, first.endpoint].sort());
+      expect(endpointsOf(transport)).not.toContain(outsider.endpoint);
+      expect(endpointsOf(transport)).not.toContain(second.endpoint);
+
+      // Deleting a comment does not unfollow; a reply kind switch off drops the member.
+      await database.db
+        .update(comments)
+        .set({ deletedAt: clock })
+        .where(eq(comments.authorId, first.id));
+      await updateKinds(database.db, author.id, { reply: false }, clock);
+      transport.clear();
+      await createComment(ctx, asMember(second), params, { body: 'three' }, view, clock + 3);
+      expect(endpointsOf(transport)).toEqual([first.endpoint]);
+    });
+
+    it('AC-NTF-05 a stored join request pushes admins with join on; a duplicate pushes nobody', async () => {
+      const transport = createRecordingPushTransport(201);
+      const ctx = contextWith(transport);
+      const adminOn = await subscribed('Admin On', 'admin');
+      const adminOff = await subscribed('Admin Off', 'admin');
+      await updateKinds(database.db, adminOff.id, { join: false }, clock);
+      await subscribed('Plain Member');
+      await database.db.delete(joinRequests);
+      // R-NTF-07: `join` pushes only while the /join feature is on (off by default).
+      await database.db.insert(siteSettings).values({
+        key: 'features',
+        valueJson: JSON.stringify({
+          memories: true,
+          discussions: true,
+          chat: true,
+          join: true,
+          notifications: true,
+        }),
+        updatedAt: clock,
+      });
+
+      const input = {
+        name: 'Newcomer',
+        email: 'newcomer@example.test',
+        note: 'Class of 2012',
+        token: 'ok',
+      };
+      const client = { address: '198.51.100.7', salt: 'salt' };
+      expect((await submitJoinRequest(ctx, input, client, clock)).kind).toBe('accepted');
+      expect(endpointsOf(transport)).toEqual([adminOn.endpoint]);
+      expect(transport.deliveries[0]?.headers.Topic).toBe('join');
+
+      transport.clear();
+      expect((await submitJoinRequest(ctx, input, client, clock + 1)).kind).toBe('accepted');
+      expect(transport.deliveries).toHaveLength(0);
+    });
+
+    it('AC-NTF-07 a failing push transport does not fail the post, comment or join request', async () => {
+      const sends: string[] = [];
+      const throwing = {
+        deliveries: [],
+        clear() {},
+        setNextStatus() {},
+        send: async (batch: { headers: Record<string, string> }[]) => {
+          sends.push(batch[0]?.headers.Topic ?? '');
+          throw new Error('boom');
+        },
+      } as unknown as ReturnType<typeof createRecordingPushTransport>;
+      const ctx = contextWith(throwing);
+      await enableFeatures({ join: true });
+      const author = await subscribed('Author');
+      await subscribed('Reader');
+      await subscribed('Admin', 'admin');
+      const me = { id: author.id, role: 'member' as const, displayName: author.displayName };
+      const post = await createPost(ctx, me, { title: 'T', body: 'B' }, view, clock);
+      expect(post.ok).toBe(true);
+      expect(sends.filter((t) => t.startsWith('thread-'))).toHaveLength(1);
+      if (!post.ok) return;
+      const reader = await subscribed('Replier');
+      const comment = await createComment(
+        ctx,
+        { id: reader.id, role: 'member', displayName: reader.displayName },
+        { id: post.body.id },
+        { body: 'hi' },
+        view,
+        clock + 1,
+      );
+      expect(comment.ok).toBe(true);
+      expect(sends.filter((t) => t.startsWith('reply-'))).toHaveLength(1);
+      await database.db.delete(joinRequests);
+      const joined = await submitJoinRequest(
+        ctx,
+        { name: 'N', email: 'fail.join@example.test', note: 'x', token: 'ok' },
+        { address: '198.51.100.8', salt: 'salt' },
+        clock + 2,
+      );
+      expect(joined.kind).toBe('accepted');
+      expect(sends.filter((t) => t === 'join')).toHaveLength(1);
+    });
+
+    it('AC-NTF-07 under waitUntil the write returns before the push settles and a rejection is swallowed', async () => {
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let attempted = false;
+      const gated = {
+        deliveries: [],
+        clear() {},
+        setNextStatus() {},
+        send: async () => {
+          attempted = true;
+          await gate;
+          throw new Error('late boom');
+        },
+      } as unknown as ReturnType<typeof createRecordingPushTransport>;
+      const captured: Promise<unknown>[] = [];
+      const ctx = {
+        ...contextWith(gated),
+        waitUntil: (work: Promise<unknown>) => void captured.push(work),
+      } as AppContext;
+      const author = await subscribed('Author');
+      await subscribed('Reader');
+      const result = await createPost(
+        ctx,
+        { id: author.id, role: 'member', displayName: author.displayName },
+        { title: 'T', body: 'B' },
+        view,
+        clock,
+      );
+      expect(result.ok).toBe(true);
+      expect(captured).toHaveLength(1);
+      let settled = false;
+      const watched = captured[0]!.then(() => (settled = true));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(attempted).toBe(true);
+      expect(settled).toBe(false);
+      release();
+      await expect(watched).resolves.toBe(true);
+    });
+
+    it('AC-NTF-01 web-route pushes sign the VAPID sub with the request origin', async () => {
+      const transport = createRecordingPushTransport(201);
+      const author = await subscribed('Author');
+      await subscribed('Reader');
+      await createPost(
+        { ...contextWith(transport), siteOrigin: SITE_ORIGIN } as AppContext,
+        { id: author.id, role: 'member', displayName: author.displayName },
+        { title: 'T', body: 'B' },
+        view,
+        clock,
+      );
+      expect(transport.deliveries).toHaveLength(1);
+      const signed = await verifyVapidAuthorization(
+        transport.deliveries[0]!.headers.Authorization!,
+        vapid.publicKey,
+        clock,
+      );
+      expect(signed.claims?.sub).toBe(SITE_ORIGIN);
+    });
+
+    it('AC-NTF-05 a reply puts the thread author devices first, then the other followers', async () => {
+      const transport = createRecordingPushTransport(201);
+      const ctx = contextWith(transport);
+      const author = await subscribed('Author');
+      // Newer subscriptions sort first by default, so the follower would lead without priority.
+      clock += 100;
+      const follower = await subscribed('Follower');
+      const commenter = await subscribed('Commenter');
+      const asMember = (u: { id: string; displayName: string }) => ({
+        id: u.id,
+        role: 'member' as const,
+        displayName: u.displayName,
+      });
+      const post = await createPost(ctx, asMember(author), { title: 'T', body: 'B' }, view, clock);
+      if (!post.ok) throw new Error('post');
+      await createComment(
+        ctx,
+        asMember(follower),
+        { id: post.body.id },
+        { body: 'f' },
+        view,
+        clock,
+      );
+      transport.clear();
+      await createComment(
+        ctx,
+        asMember(commenter),
+        { id: post.body.id },
+        { body: 'c' },
+        view,
+        clock + 1,
+      );
+      expect(transport.deliveries.map((d) => d.endpoint)).toEqual([
+        author.endpoint,
+        follower.endpoint,
+      ]);
+    });
+
+    async function setUnseen(userId: string, unseenPushes: number) {
+      await database.db
+        .insert(notificationPrefs)
+        .values({ userId, unseenPushes, updatedAt: clock })
+        .onConflictDoUpdate({ target: notificationPrefs.userId, set: { unseenPushes } });
+    }
+
+    async function unseenOf(userId: string) {
+      return (await getPrefs(database.db, userId)).unseenPushes;
+    }
+
+    it('AC-NTF-14 a thread push at 9 unseen counts to 10 and sets quiet_since; the next event sends one summary and no item', async () => {
+      const transport = createRecordingPushTransport(201);
+      const ctx = contextWith(transport);
+      const author = await subscribed('Author');
+      const member = await subscribed('Nine');
+      await setUnseen(member.id, 9);
+      const me = { id: author.id, role: 'member' as const, displayName: author.displayName };
+
+      await createPost(ctx, me, { title: 'Ninth', body: 'B' }, view, clock);
+      expect(transport.deliveries.map((d) => d.endpoint)).toEqual([member.endpoint]);
+      const prefs = await getPrefs(database.db, member.id);
+      expect(prefs.unseenPushes).toBe(10);
+      expect(prefs.quietSince).toBe(clock);
+
+      transport.clear();
+      clock += 7 * 3_600_000; // past the 6 h summary interval
+      await createPost(ctx, me, { title: 'Tenth', body: 'B' }, view, clock);
+      expect(transport.deliveries).toHaveLength(1);
+      expect(transport.deliveries[0]?.headers.Topic).toBe('summary');
+      expect(transport.deliveries[0]?.endpoint).toBe(member.endpoint);
+      expect(await unseenOf(member.id)).toBe(10);
+    });
+
+    it('AC-NTF-14 muted, kind-off and non-follower members keep their counter on a reply; join leaves the admin counter', async () => {
+      const transport = createRecordingPushTransport(201);
+      const ctx = contextWith(transport);
+      await enableFeatures({ join: true });
+      const author = await subscribed('Author');
+      const sent = await subscribed('Follower');
+      const muted = await subscribed('Muted');
+      const kindOff = await subscribed('KindOff');
+      const outsider = await subscribed('Outsider');
+      const admin = await subscribed('Admin', 'admin');
+      const commenter = await subscribed('Commenter');
+      for (const u of [sent, muted, kindOff, outsider, admin]) {
+        await setUnseen(u.id, 3);
+      }
+      await setMute(database.db, muted.id, '1h', 'Asia/Ho_Chi_Minh', clock);
+      await updateKinds(database.db, kindOff.id, { reply: false }, clock);
+      const post = await createPost(
+        ctx,
+        { id: author.id, role: 'member', displayName: author.displayName },
+        { title: 'T', body: 'B' },
+        view,
+        clock,
+      );
+      if (!post.ok) throw new Error('post');
+      for (const u of [sent, muted, kindOff]) {
+        await database.db.insert(threadFollowers).values({ postId: post.body.id, userId: u.id });
+      }
+      // The thread push above already counted for non-muted, kind-on members; read the baseline.
+      const baseline = new Map<string, number>();
+      for (const u of [sent, muted, kindOff, outsider, admin])
+        baseline.set(u.id, await unseenOf(u.id));
+
+      await createComment(
+        ctx,
+        { id: commenter.id, role: 'member', displayName: commenter.displayName },
+        { id: post.body.id },
+        { body: 'hi' },
+        view,
+        clock + 1,
+      );
+      expect(await unseenOf(sent.id)).toBe(baseline.get(sent.id)! + 1);
+      for (const u of [muted, kindOff, outsider]) {
+        expect(await unseenOf(u.id)).toBe(baseline.get(u.id));
+      }
+
+      const before = await unseenOf(admin.id);
+      await database.db.delete(joinRequests);
+      transport.clear();
+      await submitJoinRequest(
+        ctx,
+        { name: 'N', email: 'quiet.join@example.test', note: 'x', token: 'ok' },
+        { address: '198.51.100.9', salt: 'salt' },
+        clock + 2,
+      );
+      expect(transport.deliveries.map((d) => d.endpoint)).toEqual([admin.endpoint]);
+      expect(await unseenOf(admin.id)).toBe(before);
+    });
+
+    it('AC-NTF-05 the 0006 backfill makes every post and comment author follow the thread', async () => {
+      const a = await createActiveUser('Backfill A');
+      const b = await createActiveUser('Backfill B');
+      const postId = uuidv7(clock);
+      await database.db.insert(posts).values({
+        id: postId,
+        authorId: a.id,
+        title: 'Old',
+        bodyMd: 'old',
+        createdAt: clock,
+        updatedAt: clock,
+        lastActivityAt: clock,
+      });
+      await database.db.insert(comments).values({
+        id: uuidv7(clock + 1),
+        postId,
+        authorId: b.id,
+        bodyMd: 'deleted reply',
+        createdAt: clock + 1,
+        deletedAt: clock + 2,
+      });
+      expect(await database.db.select().from(threadFollowers)).toHaveLength(0);
+
+      const migration = env.TEST_MIGRATIONS.find((m) =>
+        m.name.includes('thread_followers_backfill'),
+      );
+      expect(migration).toBeTruthy();
+      for (const query of migration!.queries) await env.DB.exec(query.replace(/\s+/g, ' ').trim());
+      const rows = await database.db.select().from(threadFollowers);
+      expect(rows.map((r) => r.userId).sort()).toEqual([a.id, b.id].sort());
+    });
   });
 });

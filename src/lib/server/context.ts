@@ -21,6 +21,10 @@ export interface AppContext {
   vapid?: VapidKeys;
   /** R-AUTH-23: the `LOG_HASH_SALT` secret; unset in dev and tests (see log.ts). */
   logHashSalt?: string;
+  /** R-NTF-04: the request's `ctx.waitUntil`, when the runtime offers one; push work runs under it. */
+  waitUntil?: (work: Promise<unknown>) => void;
+  /** R-NTF-01: the request's `https://` origin, the VAPID `sub` of web-route pushes. */
+  siteOrigin?: string;
   /** R-AUTH-27: absent while the Turnstile keys are unset, and then no `/join` submission passes. */
   turnstile?: TurnstileVerifier;
 }
@@ -48,7 +52,25 @@ function getLocalContext(): Promise<AppContext> {
  * `vite dev` (R-PLAT-10); a dev build with no binding also uses the local adapters.
  * The context is memoised so one process keeps one SQLite connection.
  */
-export async function createContext(platform: App.Platform | undefined): Promise<AppContext> {
+export async function createContext(
+  platform: App.Platform | undefined,
+  origin?: string,
+): Promise<AppContext> {
+  const base = await baseContext(platform);
+  const ctx = platform?.ctx as { waitUntil?: unknown } | undefined;
+  const hasWaitUntil = typeof ctx?.waitUntil === 'function';
+  if (!hasWaitUntil && !origin) return base;
+  const waitUntil = (work: Promise<unknown>) =>
+    (ctx!.waitUntil as (work: Promise<unknown>) => void).call(ctx, work);
+  return {
+    ...base,
+    ...(hasWaitUntil ? { waitUntil } : {}),
+    // The push `sub` must be https (R-NTF-01); a plain-http dev origin keeps the default.
+    ...(origin?.startsWith('https://') ? { siteOrigin: origin } : {}),
+  };
+}
+
+async function baseContext(platform: App.Platform | undefined): Promise<AppContext> {
   const env = platform?.env;
   if (import.meta.env.DEV && process.env.CLASSHUB_OFFLINE === '1') return getLocalContext();
   if (env?.DB) return createCloudflareContext(env);

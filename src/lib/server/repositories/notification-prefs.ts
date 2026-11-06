@@ -206,6 +206,67 @@ export async function getChatPushRecipients(
   return updated.map((row) => row.userId);
 }
 
+/**
+ * R-NTF-07, 13: the recipients of a `thread` or `reply` push. Like the chat selection, one
+ * conditional UPDATE counts the push (`unseen_pushes + 1`) only for members it is sent to;
+ * quiet members are skipped here and handled by the summary path. `reply` is limited to
+ * the followers of `followersOfPostId`; the actor is always excluded.
+ */
+export async function getItemPushRecipients(
+  db: DatabaseHandle,
+  options: {
+    kind: 'thread' | 'reply';
+    actorId: string;
+    now: number;
+    quietAfter: number;
+    followersOfPostId?: string;
+  },
+): Promise<string[]> {
+  const { kind, actorId, now, quietAfter, followersOfPostId } = options;
+  const subscribedUsers = await db
+    .selectDistinct({ userId: pushSubscriptions.userId })
+    .from(pushSubscriptions)
+    .innerJoin(users, eq(users.id, pushSubscriptions.userId))
+    .where(
+      and(
+        eq(users.status, 'active'),
+        ne(users.id, actorId),
+        followersOfPostId === undefined
+          ? undefined
+          : sql`exists (select 1 from ${threadFollowers} where ${threadFollowers.postId} = ${followersOfPostId} and ${threadFollowers.userId} = ${users.id})`,
+      ),
+    )
+    .limit(SEAT_LIMIT);
+  if (subscribedUsers.length === 0) return [];
+  const candidateIds = subscribedUsers.map((r) => r.userId);
+
+  await db
+    .insert(notificationPrefs)
+    .values(candidateIds.map((userId) => ({ userId, updatedAt: now })))
+    .onConflictDoNothing();
+
+  const updated = await db
+    .update(notificationPrefs)
+    .set({
+      lastPushAt: now,
+      unseenPushes: sql`${notificationPrefs.unseenPushes} + 1`,
+      quietSince: sql`CASE WHEN ${notificationPrefs.unseenPushes} + 1 >= ${quietAfter} AND ${notificationPrefs.quietSince} IS NULL THEN ${now} ELSE ${notificationPrefs.quietSince} END`,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        inArray(notificationPrefs.userId, candidateIds),
+        or(isNull(notificationPrefs.muteUntil), lte(notificationPrefs.muteUntil, now)),
+        sql`coalesce(json_extract(${notificationPrefs.kindsJson}, ${`$.${kind}`}), 1) = 1`,
+        sql`${notificationPrefs.unseenPushes} < ${quietAfter}`,
+        sql`exists (select 1 from ${users} where ${users.id} = ${notificationPrefs.userId} and ${users.status} = 'active')`,
+        sql`exists (select 1 from ${pushSubscriptions} where ${pushSubscriptions.userId} = ${notificationPrefs.userId})`,
+      ),
+    )
+    .returning({ userId: notificationPrefs.userId });
+  return updated.map((row) => row.userId);
+}
+
 /** R-NTF-13: finds active, non-muted subscribed candidates who are in quiet mode (`unseen_pushes >= quietAfter`). */
 export async function getQuietModeRecipients(
   db: DatabaseHandle,
@@ -214,9 +275,11 @@ export async function getQuietModeRecipients(
     kind: 'chat' | 'thread' | 'reply';
     now: number;
     quietAfter: number;
+    /** `reply`: only the followers of this thread (R-NTF-07). */
+    followersOfPostId?: string;
   },
 ): Promise<StoredNotificationPrefs[]> {
-  const { excludeUserIds, kind, now, quietAfter } = options;
+  const { excludeUserIds, kind, now, quietAfter, followersOfPostId } = options;
   const rows = await db
     .select({ prefs: notificationPrefs })
     .from(notificationPrefs)
@@ -234,6 +297,9 @@ export async function getQuietModeRecipients(
         sql`coalesce(json_extract(${notificationPrefs.kindsJson}, ${`$.${kind}`}), 1) = 1`,
         sql`${notificationPrefs.unseenPushes} >= ${quietAfter}`,
         sql`exists (select 1 from ${pushSubscriptions} where ${pushSubscriptions.userId} = ${notificationPrefs.userId})`,
+        followersOfPostId === undefined
+          ? undefined
+          : sql`exists (select 1 from ${threadFollowers} where ${threadFollowers.postId} = ${followersOfPostId} and ${threadFollowers.userId} = ${notificationPrefs.userId})`,
       ),
     )
     .limit(SEAT_LIMIT);

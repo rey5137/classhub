@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { PostPatchInput } from '../../contracts/discussions';
-import { comments, media, posts, profileContacts, users } from '../db/schema';
+import { comments, media, posts, profileContacts, threadFollowers, users } from '../db/schema';
 import { uuidv7 } from '../ids';
 import type { ReferencedPhoto } from '../markdown';
 import type { Database } from '../ports/database';
@@ -226,19 +226,26 @@ export async function insertPost(
   now: number,
 ): Promise<PostRow> {
   const id = uuidv7(now);
-  await database.db.insert(posts).values({
-    id,
-    authorId,
-    title: input.title,
-    bodyMd: input.body,
-    isPinned: false,
-    isLocked: false,
-    commentCount: 0,
-    createdAt: now,
-    updatedAt: now,
-    lastActivityAt: now,
-    deletedAt: null,
-  });
+  // R-NTF-07: the author follows their own thread, written in the same batch.
+  await database.batch([
+    database.db.insert(posts).values({
+      id,
+      authorId,
+      title: input.title,
+      bodyMd: input.body,
+      isPinned: false,
+      isLocked: false,
+      commentCount: 0,
+      createdAt: now,
+      updatedAt: now,
+      lastActivityAt: now,
+      deletedAt: null,
+    }),
+    database.db
+      .insert(threadFollowers)
+      .values({ postId: id, userId: authorId })
+      .onConflictDoNothing(),
+  ]);
   const created = await findLivePost(database, id);
   if (!created) throw new Error('inserted post missing');
   return created;
@@ -465,6 +472,11 @@ export async function insertComment(
         lastActivityAt: now,
       })
       .where(postUnlocked),
+    // R-NTF-07: the commenter follows the thread; guarded like the comment, never undone by a delete.
+    database.db
+      .insert(threadFollowers)
+      .select(sql`select ${postId}, ${authorId} where ${guardSql}`)
+      .onConflictDoNothing(),
   ]);
 
   if ((inserted?.changes ?? 0) === 0) {
