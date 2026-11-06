@@ -5,10 +5,12 @@
     open?: boolean;
     title: string;
     onclose?: () => void;
+    /** Escape asks first; `preventDefault` keeps the dialog open while work can't be dropped. */
+    oncancel?: (event: Event) => void;
     children: Snippet;
   }
 
-  let { open = false, title, onclose, children }: Props = $props();
+  let { open = false, title, onclose, oncancel, children }: Props = $props();
 
   let dialog: HTMLDialogElement;
 
@@ -19,7 +21,7 @@
   });
 </script>
 
-<dialog bind:this={dialog} aria-label={title} {onclose}>
+<dialog bind:this={dialog} aria-label={title} {onclose} {oncancel}>
   <h2>{title}</h2>
   {@render children()}
 </dialog>

@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, sql } from 'drizzle-orm';
 import type { ReservationInput, CompleteInput } from '../../contracts/media';
 import { siteConfig } from '../../config';
 import {
@@ -221,6 +221,17 @@ export async function releaseReservation(database: Database, row: Reservation, n
       })
       .where(eq(storageUsage.singletonId, 1)),
   ]);
+}
+
+/** Bounded: the upload sheet's album select lists at most this many, by name. */
+export const ALBUM_CHOICES = 200;
+
+export async function listAlbumChoices(database: Database) {
+  return database.db
+    .select({ id: albums.id, name: albums.name, yearTag: albums.yearTag })
+    .from(albums)
+    .orderBy(asc(albums.name), asc(albums.id))
+    .limit(ALBUM_CHOICES);
 }
 
 export async function findAlbum(database: Database, id: string) {

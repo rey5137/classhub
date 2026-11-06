@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql, type AnyColumn, type SQL } from 'drizzle-orm';
+import { and, asc, eq, exists, isNull, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 import { chatMessages, comments, media, posts, profileContacts, users } from '../db/schema';
 import type { DatabaseHandle } from '../ports/database';
 import type { ProfileOwner } from '../services/projection';
@@ -103,6 +103,33 @@ export function deleteAvatarMedia(db: DatabaseHandle, userId: string, now: numbe
     .where(
       and(eq(media.ownerId, userId), eq(media.mediaType, 'avatar'), isNull(media.deletedAt), guard),
     );
+}
+
+/** R-MEM-13: `id` is a live avatar picture of `userId`; a media row exists only after `complete` (INV-8). */
+export function ownLiveAvatar(db: DatabaseHandle, userId: string, id: string): SQL {
+  return exists(
+    db
+      .select({ id: media.id })
+      .from(media)
+      .where(
+        and(
+          eq(media.id, id),
+          eq(media.ownerId, userId),
+          eq(media.mediaType, 'avatar'),
+          isNull(media.deletedAt),
+        ),
+      ),
+  );
+}
+
+/** Whether `id` is a live avatar picture of `userId`, read now; a batch re-checks with `ownLiveAvatar`. */
+export async function findOwnAvatar(db: DatabaseHandle, userId: string, id: string) {
+  const rows = await db
+    .select({ live: sql<number>`1` })
+    .from(users)
+    .where(and(eq(users.id, userId), ownLiveAvatar(db, userId, id)))
+    .limit(1);
+  return rows.length > 0;
 }
 
 /** `%`, `_` and the escape itself are literal in a search term. */

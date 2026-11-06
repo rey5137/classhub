@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, ne, sql, type SQL } from 'drizzle-orm';
 import {
   deletionRequestSchema,
   directoryQuerySchema,
@@ -11,13 +11,15 @@ import {
 import { normalizeName } from '../../shared/normalize';
 import type { Member } from '../auth/membership';
 import { can } from '../auth/permissions';
-import { profileContacts, users } from '../db/schema';
+import { media, profileContacts, users } from '../db/schema';
 import { auditInsertWhere } from '../repositories/audit';
 import {
   deleteAvatarMedia,
+  findOwnAvatar,
   findOwnContent,
   findProfile,
   listActiveProfiles,
+  ownLiveAvatar,
   type StoredProfile,
 } from '../repositories/profiles';
 import { parse, rateLimit, type AdminFailure, type AdminResult } from './admin';
@@ -142,6 +144,13 @@ export async function listMembers(
   };
 }
 
+/** Each value bound as a selected column, keeping the object's key order. */
+function selectedRow<T extends Record<string, unknown>>(row: T) {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [key, sql`${value}`.as(key)]),
+  ) as { [K in keyof T]: SQL.Aliased<T[K]> };
+}
+
 /**
  * Writes the fields present in `patch`. The first save creates the contacts row with the
  * R-PROF-02 defaults the member was already shown, merged with any visibility change.
@@ -149,9 +158,9 @@ export async function listMembers(
 async function writeProfile(
   context: MemberServices,
   member: Member,
-  patch: ProfilePatch & { avatarMediaId?: null },
+  patch: ProfilePatch,
   now: number,
-): Promise<StoredProfile | null> {
+): Promise<StoredProfile | null | 'avatar_gone'> {
   const { database } = context;
   const stored = await findProfile(database.db, member.id);
   if (!stored) return null;
@@ -176,20 +185,66 @@ async function writeProfile(
   contactSet.visibilityJson = JSON.stringify(visibility);
   contactSet.updatedAt = now;
 
-  await database.batch([
+  // A new picture checked before may be gone by now (a removal in another tab): every
+  // write waits on it inside the batch, and nothing is written when it is.
+  const live =
+    typeof patch.avatarMediaId === 'string'
+      ? ownLiveAvatar(database.db, member.id, patch.avatarMediaId)
+      : undefined;
+  const [written] = await database.batch([
     database.db
       .update(users)
       .set({ ...userSet, updatedAt: now })
-      .where(eq(users.id, member.id)),
-    database.db
-      .insert(profileContacts)
-      .values({ userId: member.id, ...contactSet })
-      .onConflictDoUpdate({ target: profileContacts.userId, set: contactSet }),
-    // R-PROF-10: removing the avatar removes its pictures, not just the reference.
-    ...(patch.avatarMediaId === null ? [deleteAvatarMedia(database.db, member.id, now)] : []),
+      .where(and(eq(users.id, member.id), live)),
+    live
+      ? database.db
+          .insert(profileContacts)
+          .select(
+            database.db
+              .select(
+                // An insert-select names every column in table order; a new row's
+                // unset fields start empty, as `values` would leave them.
+                selectedRow({
+                  userId: member.id,
+                  contactEmail: contactSet.contactEmail ?? null,
+                  phone: contactSet.phone ?? null,
+                  messagingUrl: contactSet.messagingUrl ?? null,
+                  city: contactSet.city ?? null,
+                  bio: contactSet.bio ?? null,
+                  visibilityJson: contactSet.visibilityJson,
+                  updatedAt: now,
+                }),
+              )
+              .from(users)
+              .where(and(eq(users.id, member.id), live)),
+          )
+          .onConflictDoUpdate({ target: profileContacts.userId, set: contactSet })
+      : database.db
+          .insert(profileContacts)
+          .values({ userId: member.id, ...contactSet })
+          .onConflictDoUpdate({ target: profileContacts.userId, set: contactSet }),
+    // R-PROF-10: removing the avatar removes its pictures, not just the reference; a new
+    // one retires the pictures before it in the same batch (R-MEM-20 purges the objects).
+    ...(patch.avatarMediaId === undefined
+      ? []
+      : [
+          deleteAvatarMedia(
+            database.db,
+            member.id,
+            now,
+            patch.avatarMediaId === null ? undefined : and(ne(media.id, patch.avatarMediaId), live),
+          ),
+        ]),
   ]);
+  if (live && (written?.changes ?? 0) === 0) return 'avatar_gone';
   return findProfile(database.db, member.id);
 }
+
+const invalidAvatar: AdminFailure = {
+  ok: false,
+  code: 'validation',
+  fields: { avatarMediaId: 'invalid' },
+};
 
 /** `PATCH /api/v1/me` (R-PROF-01..06): validated, rate-limited, then written. */
 export async function updateOwnProfile(
@@ -201,9 +256,14 @@ export async function updateOwnProfile(
   if (!can(member, 'profile.edit')) return forbidden;
   const parsed = parse(profilePatchSchema, input);
   if (!parsed.ok) return parsed;
+  // A foreign, photo, deleted or unknown id reads alike, so nothing leaks about it.
+  const avatar = parsed.data.avatarMediaId;
+  if (avatar && !(await findOwnAvatar(context.database.db, member.id, avatar)))
+    return invalidAvatar;
   const limited = await rateLimit(context, member, 'profile');
   if (limited) return limited;
   const stored = await writeProfile(context, member, parsed.data, now);
+  if (stored === 'avatar_gone') return invalidAvatar;
   return stored ? { ok: true, status: 200, body: ownView(member, stored) } : notFound;
 }
 
@@ -230,6 +290,7 @@ export async function clearOwnProfile(
     },
     now,
   );
+  if (stored === 'avatar_gone') return invalidAvatar;
   return stored ? { ok: true, status: 200, body: ownView(member, stored) } : notFound;
 }
 

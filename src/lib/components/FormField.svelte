@@ -16,12 +16,13 @@
     required?: boolean;
     autocomplete?: HTMLInputAttributes['autocomplete'];
     maxlength?: number;
+    inputmode?: HTMLInputAttributes['inputmode'];
   }
 
   let {
     id,
     label,
-    value = '',
+    value = $bindable(''),
     placeholder = '',
     type = 'text',
     hint,
@@ -32,6 +33,7 @@
     required = false,
     autocomplete,
     maxlength,
+    inputmode,
   }: Props = $props();
 
   const describedBy = $derived(
@@ -50,18 +52,19 @@
       {maxlength}
       aria-describedby={describedBy}
       aria-invalid={error ? true : undefined}
-      rows="3">{value}</textarea
-    >
+      rows="3"
+      bind:value></textarea>
   {:else}
     <input
       {id}
       name={name ?? id}
       {type}
-      {value}
+      bind:value
       {placeholder}
       {required}
       {autocomplete}
       {maxlength}
+      {inputmode}
       aria-describedby={describedBy}
       aria-invalid={error ? true : undefined}
     />

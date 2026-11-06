@@ -62,6 +62,13 @@ export const actions: Actions = {
     if (!result.ok) return formFailure('clear', locals, result);
     return { action: 'clear', done: 'cleared' };
   },
+  // R-PROF-10: the picture alone, through the same path as `PATCH /api/v1/me`.
+  removeAvatar: async ({ locals }) => {
+    const { member, context } = guarded(locals);
+    const result = await updateOwnProfile(context, member, { avatarMediaId: null });
+    if (!result.ok) return formFailure('removeAvatar', locals, result);
+    return { action: 'removeAvatar', done: 'avatarRemoved' };
+  },
   deletion: async ({ locals, request }) => {
     const { member, context } = guarded(locals);
     const form = await request.formData();

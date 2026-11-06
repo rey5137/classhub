@@ -12,10 +12,17 @@ const channel =
 // R-PLAT-11: e2e runs against dev:offline (local adapters), so no build step is needed.
 export default defineConfig({
   testDir: 'tests/e2e',
-  use: {
-    baseURL: 'http://127.0.0.1:5173',
-    ...channel,
-  },
+  use: { baseURL: 'http://127.0.0.1:5173' },
+  projects: [
+    { name: 'chromium', use: { browserName: 'chromium', ...channel } },
+    // Risk 4: Safari can't encode WebP and decodes differently, so the browser encoder
+    // (AC-MEM-01, AC-MEM-02) and the avatar crop also run in WebKit.
+    {
+      name: 'webkit',
+      use: { browserName: 'webkit' },
+      testMatch: /(memories-upload|avatar)\.spec\.ts$/,
+    },
+  ],
   // The dev identity lets nobody in by itself: seed the demo data and sign in as its admin.
   webServer: {
     command: 'npm run db:seed:demo && npm run dev:offline',

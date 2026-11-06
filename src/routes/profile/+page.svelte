@@ -2,6 +2,7 @@
   import { enhance } from '$app/forms';
   import { resolve } from '$app/paths';
   import Avatar from '$lib/components/Avatar.svelte';
+  import AvatarEditor from '$lib/components/AvatarEditor.svelte';
   import Banner from '$lib/components/Banner.svelte';
   import Button from '$lib/components/Button.svelte';
   import Card from '$lib/components/Card.svelte';
@@ -98,12 +99,19 @@
               saved: 'prof.saved',
               cleared: 'prof.cleared',
               requested: 'prof.deleteRequested',
+              avatarRemoved: 'prof.avatar.removed',
             } as const
           )[form.done as 'saved'],
         )
       : null,
   );
   const failure = $derived(form && 'message' in form ? form.message : null);
+  // Set by the avatar editor, which saves outside the form actions; any later action result replaces it.
+  let avatarSaved = $state(false);
+  $effect(() => {
+    void form;
+    avatarSaved = false;
+  });
 
   const dateFormat = $derived(
     new Intl.DateTimeFormat(i18n.locale === 'vi' ? 'vi-VN' : 'en-GB', { dateStyle: 'medium' }),
@@ -155,7 +163,8 @@
 {/snippet}
 
 <div class="profile-page">
-  {#if notice}<Banner>{notice}</Banner>{/if}
+  {#if avatarSaved}<Banner>{i18n.t('prof.avatar.saved')}</Banner>
+  {:else if notice}<Banner>{notice}</Banner>{/if}
   {#if failure}<Banner tone="danger">{failure}</Banner>{/if}
   {#if data.deletionRequestedAt !== null}
     <Banner tone="warning">
@@ -167,7 +176,19 @@
     <Card class="sheet" aria-labelledby="about-head">
       <h2 id="about-head">{i18n.t('prof.section.about')}</h2>
       <div class="identity">
-        <Avatar name={data.profile.displayName} size="lg" />
+        <div class="picture">
+          <Avatar name={data.profile.displayName} size="lg" mediaId={data.profile.avatarMediaId} />
+          <AvatarEditor
+            hasAvatar={Boolean(data.profile.avatarMediaId)}
+            onsaved={() => (avatarSaved = true)}
+          />
+          {#if data.profile.avatarMediaId}
+            <!-- R-PROF-10: the picture alone, through its own form, so Enter in a field never removes it. -->
+            <Button type="submit" variant="ghost" form="avatar-remove">
+              {i18n.t('prof.avatar.remove')}
+            </Button>
+          {/if}
+        </div>
         <div class="fields">
           <FormField
             id="profile-name"
@@ -202,6 +223,7 @@
       <Button type="submit" variant="primary">{i18n.t('prof.save')}</Button>
     </div>
   </form>
+  <form id="avatar-remove" method="POST" action="?/removeAvatar" use:enhance hidden></form>
 
   <Card class="sheet" aria-labelledby="data-head">
     <h2 id="data-head">{i18n.t('prof.section.data')}</h2>
@@ -261,6 +283,12 @@
   .identity {
     display: grid;
     gap: calc(var(--space-unit) * 4);
+  }
+
+  .picture {
+    display: grid;
+    justify-items: start;
+    gap: calc(var(--space-unit) * 2);
   }
 
   @media (min-width: 768px) {

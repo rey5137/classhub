@@ -9,6 +9,7 @@ import {
   chatMessages,
   comments,
   invites,
+  media,
   posts,
   profileContacts,
   users,
@@ -141,6 +142,164 @@ describe('/api/v1/me (R-PROF-01..07)', () => {
       .from(profileContacts)
       .where(eq(profileContacts.userId, owner.id));
     expect(row?.city).toBe('City 19');
+  });
+});
+
+describe('avatar via /api/v1/me (R-MEM-13, R-PROF-10)', () => {
+  /** A completed media row; a row exists only after `complete` (INV-8). */
+  async function addPicture(
+    ownerId: string,
+    tag: string,
+    options: { mediaType?: 'photo' | 'avatar'; deleted?: boolean } = {},
+  ) {
+    const id = `${ownerId.slice(0, -4)}${tag}`;
+    await database.db.insert(media).values({
+      id,
+      ownerId,
+      mediaType: options.mediaType ?? 'avatar',
+      objectKey: `avatars/v1/${ownerId}/${id}.webp`,
+      thumbKey: '',
+      mimeType: 'image/webp',
+      width: 512,
+      height: 512,
+      sizeBytes: 100,
+      thumbSizeBytes: 0,
+      sha256: 'a'.repeat(64),
+      thumbSha256: 'b'.repeat(64),
+      createdAt: Date.now(),
+      deletedAt: options.deleted ? Date.now() : null,
+    });
+    return id;
+  }
+
+  async function avatarOf(userId: string) {
+    const [row] = await database.db
+      .select({ avatarMediaId: users.avatarMediaId })
+      .from(users)
+      .where(eq(users.id, userId));
+    return row?.avatarMediaId;
+  }
+
+  async function deletedById(ownerId: string) {
+    const rows = await database.db
+      .select({ id: media.id, deletedAt: media.deletedAt })
+      .from(media)
+      .where(eq(media.ownerId, ownerId));
+    return Object.fromEntries(rows.map((row) => [row.id, row.deletedAt !== null]));
+  }
+
+  it('sets the caller’s own avatar, retires the one before it, and a repeat changes nothing', async () => {
+    const owner = await addMember(database, 'Avatar Setter');
+    const photo = await addPicture(owner.id, 'f001', { mediaType: 'photo' });
+    const first = await addPicture(owner.id, 'a001');
+
+    const set = await send(owner.email, 'PATCH', '/api/v1/me', { avatarMediaId: first });
+    expect(set.status).toBe(200);
+    expect(((await json(set)).profile as Record<string, unknown>).avatarMediaId).toBe(first);
+    expect(await avatarOf(owner.id)).toBe(first);
+
+    // Uploaded after the first was set, as the profile screen does.
+    const second = await addPicture(owner.id, 'a002');
+    expect((await send(owner.email, 'PATCH', '/api/v1/me', { avatarMediaId: second })).status).toBe(
+      200,
+    );
+    expect(await avatarOf(owner.id)).toBe(second);
+    expect(await deletedById(owner.id)).toEqual({ [photo]: false, [first]: true, [second]: false });
+
+    // The same id again keeps the picture it names.
+    expect((await send(owner.email, 'PATCH', '/api/v1/me', { avatarMediaId: second })).status).toBe(
+      200,
+    );
+    expect(await avatarOf(owner.id)).toBe(second);
+    expect(await deletedById(owner.id)).toEqual({ [photo]: false, [first]: true, [second]: false });
+  });
+
+  it('refuses a foreign, photo, deleted or unknown id alike and changes nothing', async () => {
+    const owner = await addMember(database, 'Avatar Refused');
+    const other = await addMember(database, 'Avatar Other');
+    const current = await addPicture(owner.id, 'a001');
+    expect(
+      (await send(owner.email, 'PATCH', '/api/v1/me', { avatarMediaId: current })).status,
+    ).toBe(200);
+    const candidates = {
+      foreign: await addPicture(other.id, 'a001'),
+      photo: await addPicture(owner.id, 'f001', { mediaType: 'photo' }),
+      deleted: await addPicture(owner.id, 'a002', { deleted: true }),
+      unknown: `${owner.id.slice(0, -4)}a0ff`,
+    };
+    const before = await deletedById(owner.id);
+    for (const [label, id] of Object.entries(candidates)) {
+      const refused = await send(owner.email, 'PATCH', '/api/v1/me', {
+        avatarMediaId: id,
+        city: 'Huế',
+      });
+      expect([label, refused.status]).toEqual([label, 400]);
+      const body = errorBodySchema.parse(await refused.json());
+      expect([label, body.error.code, body.error.fields]).toEqual([
+        label,
+        'validation',
+        { avatarMediaId: 'invalid' },
+      ]);
+    }
+    expect(
+      await errorCode(await send(owner.email, 'PATCH', '/api/v1/me', { avatarMediaId: 'x' })),
+    ).toBe('validation');
+    expect(await avatarOf(owner.id)).toBe(current);
+    expect(await deletedById(owner.id)).toEqual(before);
+    expect(await deletedById(other.id)).toEqual({ [candidates.foreign]: false });
+    const contacts = await database.db
+      .select()
+      .from(profileContacts)
+      .where(eq(profileContacts.userId, owner.id));
+    expect(contacts[0]?.city ?? null).toBeNull();
+  });
+
+  it('refuses a picture a removal in another tab retired after the check, writing nothing', async () => {
+    const owner = await addMember(database, 'Avatar Raced');
+    const current = await addPicture(owner.id, 'a001');
+    expect(
+      (await send(owner.email, 'PATCH', '/api/v1/me', { avatarMediaId: current })).status,
+    ).toBe(200);
+    const fresh = await addPicture(owner.id, 'a002');
+
+    // The removal commits between the service's check and its batch.
+    const batch = database.batch.bind(database);
+    const spy = vi.spyOn(database, 'batch').mockImplementationOnce(async (queries) => {
+      await batch([
+        database.db.update(users).set({ avatarMediaId: null }).where(eq(users.id, owner.id)),
+        database.db.update(media).set({ deletedAt: Date.now() }).where(eq(media.ownerId, owner.id)),
+      ]);
+      return batch(queries);
+    });
+    const raced = await send(owner.email, 'PATCH', '/api/v1/me', {
+      avatarMediaId: fresh,
+      city: 'Huế',
+    });
+    spy.mockRestore();
+
+    expect(raced.status).toBe(400);
+    expect(errorBodySchema.parse(await raced.json()).error.fields).toEqual({
+      avatarMediaId: 'invalid',
+    });
+    expect(await avatarOf(owner.id)).toBeNull();
+    expect(await deletedById(owner.id)).toEqual({ [current]: true, [fresh]: true });
+    const contacts = await database.db
+      .select()
+      .from(profileContacts)
+      .where(eq(profileContacts.userId, owner.id));
+    expect(contacts[0]?.city ?? null).toBeNull();
+  });
+
+  it('R-PROF-10 null removes the avatar and its pictures, photos stay', async () => {
+    const owner = await addMember(database, 'Avatar Remover');
+    const photo = await addPicture(owner.id, 'f001', { mediaType: 'photo' });
+    const avatar = await addPicture(owner.id, 'a001');
+    await send(owner.email, 'PATCH', '/api/v1/me', { avatarMediaId: avatar });
+    expect((await send(owner.email, 'PATCH', '/api/v1/me', { avatarMediaId: null })).status).toBe(
+      200,
+    );
+    expect(await avatarOf(owner.id)).toBeNull();
+    expect(await deletedById(owner.id)).toEqual({ [photo]: false, [avatar]: true });
   });
 });
 
@@ -618,6 +777,31 @@ describe('/profile form actions (R-PROF-10, R-PROF-11)', () => {
     });
     // The visibility choices survive a clear.
     expect(JSON.parse(contacts!.visibilityJson).city).toBe('members');
+  });
+
+  it('R-PROF-10 removeAvatar takes the picture away and keeps every other field', async () => {
+    const owner = await addMember(database, 'Form Avatar', { contacts: { city: 'Đà Lạt' } });
+    await addMedia(database, owner.id);
+    const avatar = `${owner.id.slice(0, -4)}0b01`;
+    expect((await send(owner.email, 'PATCH', '/api/v1/me', { avatarMediaId: avatar })).status).toBe(
+      200,
+    );
+    expect(await post(owner.email, 'removeAvatar', {})).toEqual({
+      status: 200,
+      body: { action: 'removeAvatar', done: 'avatarRemoved' },
+    });
+    const [user] = await database.db.select().from(users).where(eq(users.id, owner.id));
+    expect(user?.avatarMediaId).toBeNull();
+    expect(await mediaDeleted(database, owner.id)).toEqual({
+      photo: false,
+      avatar: true,
+      site: false,
+    });
+    const [contacts] = await database.db
+      .select()
+      .from(profileContacts)
+      .where(eq(profileContacts.userId, owner.id));
+    expect(contacts?.city).toBe('Đà Lạt');
   });
 
   it('records a deletion request with the chosen content handling', async () => {

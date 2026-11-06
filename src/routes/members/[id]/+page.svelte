@@ -28,7 +28,7 @@
 
 <div class="member-page">
   <Card class="member">
-    <Avatar name={person.displayName} size="lg" />
+    <Avatar name={person.displayName} size="lg" mediaId={person.avatarMediaId} />
     <div class="about">
       {#if person.preferredName}
         <p class="muted">{i18n.t('member.called', { name: person.preferredName })}</p>

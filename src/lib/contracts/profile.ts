@@ -94,6 +94,8 @@ export const profilePatchSchema = z
         .max(500)
         .refine((value) => !CONTROL_BUT_NEWLINE.test(value), 'control characters are not allowed'),
     ),
+    // R-MEM-13: the id of one of the caller's own avatar pictures, or null to remove it.
+    avatarMediaId: z.uuid().nullable().optional(),
     visibility: z
       .object(
         Object.fromEntries(PROFILE_FIELDS.map((field) => [field, visibilitySchema.optional()])) as {

@@ -40,7 +40,12 @@
       {#each data.items as person, index (person.id)}
         <Card class="person">
           <a class="link" href={resolve('/members/[id]', { id: person.id })}>
-            <Avatar name={person.displayName} size="lg" tone={index} />
+            <Avatar
+              name={person.displayName}
+              size="lg"
+              tone={index}
+              mediaId={person.avatarMediaId}
+            />
             <b>{person.displayName}</b>
             {#if person.preferredName}<small>{person.preferredName}</small>{/if}
             {#if person.city}<small>{person.city}</small>{/if}

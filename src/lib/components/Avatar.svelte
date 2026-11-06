@@ -4,9 +4,11 @@
     size?: 'sm' | 'md' | 'lg';
     tone?: number;
     showInitials?: boolean;
+    /** The 512 px avatar picture, present only when the projection shows it (R-PROF-04, 13). */
+    mediaId?: string;
   }
 
-  let { name, size = 'md', tone, showInitials = true }: Props = $props();
+  let { name, size = 'md', tone, showInitials = true, mediaId }: Props = $props();
 
   const initials = $derived(
     name
@@ -23,7 +25,13 @@
   class="avatar {size}"
   style:--avatar-bg={tone === undefined ? undefined : `var(--avatar-${(tone % 10) + 1})`}
   style:--avatar-fg={tone === undefined ? undefined : 'var(--avatar-ink)'}
-  aria-hidden="true">{showInitials ? initials : ''}</span
+  aria-hidden="true"
+  >{#if mediaId}<img
+      src="/api/v1/media/{mediaId}/image"
+      alt=""
+      loading="lazy"
+      decoding="async"
+    />{:else if showInitials}{initials}{/if}</span
 >
 
 <style>
@@ -36,6 +44,13 @@
     color: var(--avatar-fg, var(--color-accent));
     font-weight: 700;
     line-height: 1;
+    overflow: hidden;
+  }
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
   .sm {

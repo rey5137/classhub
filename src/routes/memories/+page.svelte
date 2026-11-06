@@ -5,9 +5,13 @@
   import Rail from '$lib/components/Rail.svelte';
   import Row from '$lib/components/Row.svelte';
   import Tile from '$lib/components/Tile.svelte';
+  import UploadSheet from '$lib/components/UploadSheet.svelte';
   import { useI18n } from '$lib/i18n/context';
+  import type { PageProps } from './$types';
 
+  let { data }: PageProps = $props();
   const i18n = useI18n();
+  let uploading = $state(false);
 
   const years = ['2004', '2005', '2006', '2007'];
   const albums = $derived([
@@ -41,9 +45,15 @@
 
 <PageHeader title={i18n.t('mem.title')} lede={i18n.t('mem.lede')}>
   {#snippet actions()}
-    <Button variant="primary">{i18n.t('mem.add')}</Button>
+    {#if data.canUpload}
+      <Button variant="primary" aria-haspopup="dialog" onclick={() => (uploading = true)}
+        >{i18n.t('mem.add')}</Button
+      >
+    {/if}
   {/snippet}
 </PageHeader>
+
+<UploadSheet open={uploading} albums={data.albums} onclose={() => (uploading = false)} />
 
 <div class="controls">
   <div class="chips" role="group" aria-label={i18n.t('mem.yearChips')}>
