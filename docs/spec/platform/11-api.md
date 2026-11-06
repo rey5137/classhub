@@ -50,6 +50,7 @@
 | `GET` (upgrade) | `/api/v1/chat/ws` | WebSocket (R-CHAT-04) |
 | `GET` · `PATCH` | `/api/v1/admin/settings` | site settings (§10.1) |
 | `GET` · `POST` · `DELETE` | `/api/v1/admin/invites` | list with Access sync status · invite · revoke |
+| `GET` · `POST` · `DELETE` | `/api/v1/admin/join-requests[/:id]` | pending requests · approve · reject (R-AUTH-30) |
 | `PATCH` | `/api/v1/admin/members/:id` | role, suspend, reactivate, complete deletion |
 | `POST` | `/api/v1/admin/info` | create an info page (R-BRD-02) |
 | `PATCH` · `DELETE` | `/api/v1/admin/info/:id` | edit, pin, order · delete an info page |

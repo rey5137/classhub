@@ -12,7 +12,8 @@
 - **R-UI-01** **Level A, admin settings (no code), stored in D1 `site_settings`:** site name, class years,
   description, welcome message, banner photo, logo and favicon (uploaded through §7 as `media_type = "site"`, kept
   out of the gallery), theme preset, display mode (light, dark, system), accent colour, card density (comfortable,
-  compact), default language, and feature toggles for memories, discussions and chat.
+  compact), default language, feature toggles for memories, discussions and chat, and join requests on or off (`join`,
+  default off, R-AUTH-27).
 - **R-UI-02** **Level B, project configuration (`site.config.ts`, one validated object):** navigation order,
   default locale, default time zone, visible profile fields, app name, upload limits, quota thresholds, default
   theme, chat retention, messaging-host allow-list. Every service reads it through `src/lib/config/` only; no default
@@ -35,7 +36,8 @@ export const siteDefaults = {
   theme: 'yearbook',
   features: { memories: true, discussions: true, chat: true },
   limits: { mediaWarnBytes: 8_000_000_000, mediaStopBytes: 9_000_000_000, photosPerDay: 25 },
-  chat: { retainDays: 365, maxMessages: 30_000 }
+  chat: { retainDays: 365, maxMessages: 30_000 },
+  join: { maxPending: 20 }
 } as const;
 ```
 

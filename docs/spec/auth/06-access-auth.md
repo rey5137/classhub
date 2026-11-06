@@ -20,7 +20,7 @@
 
 ## 6.2 Verifying identity in the app
 
-- **R-AUTH-03** On every request except `/health` and static assets, the Access identity adapter reads the
+- **R-AUTH-03** On every request except `/health`, `/join` (R-AUTH-27) and static assets, the Access identity adapter reads the
   `Cf-Access-Jwt-Assertion` header (falling back to the `CF_Authorization` cookie only for the WebSocket upgrade, where
   some clients don't forward the header) and verifies it with `jose`: RS256 signature against the team JWKS
   (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`), `iss` equal to the team domain, `aud` containing the
@@ -124,7 +124,28 @@
   fields, message bodies, captions or JWTs. The salt is the Worker secret `LOG_HASH_SALT` (created by `setup`); when
   it is unset (dev, tests) each isolate draws a random salt, and a production build logs one `config` warning without
   any value. Errors use `{ error: { code, message, requestId } }` (§11.1).
-- **R-AUTH-24** No third-party analytics, embeds, fonts or scripts by default.
+- **R-AUTH-24** No third-party analytics, embeds, fonts or scripts by default. The one exception is Turnstile on
+  `/join`, and only while join requests are on (R-AUTH-27).
+
+## 6.8 Join requests
+
+- **R-AUTH-27** **Request to join.** `GET` and `POST /join` are the only app paths outside the Access policy (a Bypass
+  Access application, like `/health`), and only while the `join` site setting is on (§10.1; default off); off, both
+  answer 404. The page shows the site name and a form: name (1–80), email, a note (≤ 300, e.g. "class and year"). It
+  renders no member data, no site media and no counts. A submission needs a valid Turnstile token, verified on the
+  server; the Turnstile script and frame are allowed in the CSP of `/join` only.
+- **R-AUTH-28** **Uniform reply.** Every accepted submission, whether the email is new, already requested, a member,
+  invited, suspended or revoked, gets the same confirmation page. Only a normalised email with no `users` row, no
+  pending invite and no pending request creates a `join_requests` row; nothing else is written. The app sends no email.
+- **R-AUTH-29** **Limits.** 3 submissions per IP hash per hour, 20 per hour site-wide. At most `join.maxPending`
+  pending requests (Level B, default 20, 1–50) and never more than the free seats (R-AUTH-19: 50 − active members −
+  pending invites). While the queue is full, `/join` shows a closed notice instead of the form (site-wide state; it
+  reveals nothing about any email), stores nothing, and `/admin` shows the queue as full. Housekeeping deletes
+  requests older than 30 days; a rejected one is deleted at once.
+- **R-AUTH-30** **Review.** Admins see pending requests (name, email, note, time) on `/admin`. Approve runs the invite
+  path (R-AUTH-08, R-AUTH-18: invite row, Access policy sync or the manual step, the seat count of R-AUTH-19) and
+  deletes the request in the same batch; reject deletes it. Both write an `audit_events` row without the email, name
+  or note. Approval activates no one: the first verified login does (R-AUTH-08).
 
 ## Acceptance criteria
 
@@ -145,3 +166,7 @@
 | AC-AUTH-13 | A login with a revoked or expired invite, whose `users` row was removed or suspended, never becomes `active`; the guarded activation changes zero rows | R-AUTH-08 | integration |
 | AC-AUTH-14 | A same-email login with a different `sub` is matched by email and records an audit event; a restore then re-links by email | R-AUTH-25 | integration |
 | AC-AUTH-15 | `last_seen_at` is written at most once per hour per member; private HTML and JSON responses carry `Cache-Control: private, no-store` | R-AUTH-26, 20 | integration |
+| AC-AUTH-16 | `/join` responses for a new, already requested, member, suspended and revoked email are identical after removing the request id and the CSP nonce | R-AUTH-28 | `test:security` |
+| AC-AUTH-17 | Without a valid Turnstile token, over the IP or site-wide rate, or with the queue full (cap or seats), nothing is stored, and a full queue shows the closed notice | R-AUTH-27, 29 | integration |
+| AC-AUTH-18 | Approve creates a pending invite and deletes the request in one batch, and the requester stays denied until their first verified login; reject deletes it; both write an audit row without content | R-AUTH-30 | integration |
+| AC-AUTH-19 | With `join` off, `/join` answers 404; on, it shows no member data or private media, and every other path still requires Access | R-AUTH-27 | integration + e2e |

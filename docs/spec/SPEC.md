@@ -84,7 +84,8 @@ contradict.
 - **One private site for one class.** One deployment serves one class or reunion group of up to 50 identities,
   administrators included (the Cloudflare Zero Trust Free seat limit, §14). Multi-tenant hosting is out of scope.
 - **Everything is private.** No anonymous read API, public gallery, public member endpoint, public R2 bucket or search
-  indexing. The only unauthenticated responses are `/health` (non-identifying) and the Access login itself.
+  indexing. The only unauthenticated responses are `/health` (non-identifying), the opt-in `/join` form (R-AUTH-27; off by
+  default) and the Access login itself.
 - **Invited email addresses only.** Members sign in through Cloudflare Access with Google or with Access's one-time
   email PIN (for addresses without a Google account); only explicitly approved email addresses get in, and the app
   checks its own membership list as a second layer (§6). No application passwords (R-AUTH-15).

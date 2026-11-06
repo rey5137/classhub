@@ -30,7 +30,7 @@ commit is on `main` and tagged `pN-verified`. The gate approval goes in that tag
 | 1 — Identity and members | 1a · 1b · 1c · 1d | allowed vs denied Gmail in the second account; visibility tests |
 | 2 — Memories | 2a · 2b · 2c | upload / view / delete, quota stop, private media |
 | 3 — Home and discussions | 3a · 3b | pinned threads, pagination over thousands, moderation |
-| 4 — Live chat | 4a · 4b · 4c | two live sessions in production, persistence, verified-archive pruning |
+| 4 — Live chat | 4a · 4b · 4c · 4d | two live sessions in production, persistence, verified-archive pruning |
 | 5 — Portability | 5a · 5b · 5c | an independent restore of the production site, `restore --target local` opening it offline |
 | 6 — Open-source release | 6a · 6b | a second person deploys from a clean clone; v1.0.0 tag |
 
@@ -282,11 +282,22 @@ successful independent restore. Deploying is not enough.
 - **Covers:** AC-CHAT-09, 10.
 - `export-chat`, `prune-chat`, `chat_archives`, the over-retention admin banner.
 
-**Manual Verification Checklist (4c, phase gate)**
+#### Slice 4d — join requests
+- **Covers:** AC-AUTH-16, 17, 18, 19.
+- Public `/join` form behind an Access Bypass application (like `/health`), Turnstile, `join_requests` (additive
+  migration), the `join` site setting (off by default) and Level B `join.maxPending`, the admin queue card on `/admin`
+  (approve = the invite path, R-AUTH-08/18; reject), housekeeping deletes requests older than 30 days, the
+  `docs/PRIVACY.md` section, the Bypass app and Turnstile keys in `docs/DEPLOY_CLOUDFLARE.md`.
+- Model: Opus · high (identity and the Access boundary).
+
+**Manual Verification Checklist (4c, 4d, phase gate)**
 1. Two phones on the live site: messages arrive instantly both ways, the online count is 2.
 2. Turn one phone's network off, send from the other, turn it back on: the missed messages appear in order.
 3. Suspend the second account from `/admin`: its chat disconnects and it can't send.
 4. Locally, with a seed of 31,000 messages: `npm run prune-chat` refuses; `npm run export-chat` then `prune-chat` removes only the archived oldest 1,000.
+5. Turn join requests on in `/admin`. In a private window open `/join` and submit a request; approve it on `/admin`;
+   that Google account signs in and lands on Home. A second request for the same address shows the same
+   confirmation and stores nothing. With the queue full, `/join` shows the closed notice.
 
 ### Phase 5 — Portability
 
