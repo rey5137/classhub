@@ -96,6 +96,18 @@ describe('route sweep', () => {
     );
   });
 
+  it('AC-API-01 sweeps the Home, board and thread pages and their form actions', () => {
+    expect(fileRoutes().map(key)).toEqual(
+      expect.arrayContaining([
+        'GET /',
+        'GET /discussions',
+        'POST /discussions',
+        'GET /discussions/[id]',
+        'POST /discussions/[id]',
+      ]),
+    );
+  });
+
   it('AC-API-01 every route except GET /health and /denied refuses a request with no identity', async () => {
     const reached: string[] = [];
     for (const route of unique) {

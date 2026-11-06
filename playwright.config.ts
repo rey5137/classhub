@@ -13,6 +13,8 @@ const uploadSpecs = /(memories-upload|avatar|memories)\.spec\.ts$/;
 // R-UI-01: these change the site's own settings (theme, feature flags), which every
 // other spec sees, so they run alone after the others and restore what they change.
 const settingsSpecs = /site-settings\.spec\.ts$/;
+// board.spec.ts starts its own two dev servers over a scratch database (ports 5174, 5175).
+const boardSpecs = /board\.spec\.ts$/;
 
 // R-PLAT-11: e2e runs against dev:offline (local adapters), so no build step is needed.
 export default defineConfig({
@@ -22,7 +24,7 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { browserName: 'chromium', ...channel },
-      testIgnore: [uploadSpecs, settingsSpecs],
+      testIgnore: [uploadSpecs, settingsSpecs, boardSpecs],
     },
     // Every worker signs in as the one demo admin, who may hold 2 open uploads (AC-MEM-01),
     // so the specs that upload run in a project limited to one worker.
@@ -38,6 +40,15 @@ export default defineConfig({
       testMatch: settingsSpecs,
       workers: 1,
       dependencies: ['chromium', 'chromium-uploads'],
+    },
+    {
+      name: 'chromium-board',
+      use: { browserName: 'chromium', ...channel },
+      testMatch: boardSpecs,
+      workers: 1,
+      // A hard ceiling per test (and for beforeAll's server start), so a stuck server
+      // fails the run instead of hanging it.
+      timeout: 360_000,
     },
     // Risk 4: Safari can't encode WebP and decodes differently, so the browser encoder
     // (AC-MEM-01, AC-MEM-02) and the avatar crop also run in WebKit.

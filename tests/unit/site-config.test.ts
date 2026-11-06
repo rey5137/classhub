@@ -23,6 +23,15 @@ describe('AC-UI-04 site configuration', () => {
     expect(() => validateSiteConfig(siteDefaults)).not.toThrow();
   });
 
+  it('R-UI-11 defaults the time zone to Asia/Ho_Chi_Minh and refuses one Intl does not know', () => {
+    expect(siteConfig.timeZone).toBe('Asia/Ho_Chi_Minh');
+    expect(validateSiteConfig({ ...siteDefaults, timeZone: 'Europe/Paris' }).timeZone).toBe(
+      'Europe/Paris',
+    );
+    for (const timeZone of ['Mars/Olympus', '', 'UTC+7; drop', 7])
+      expect(() => validateSiteConfig({ ...siteDefaults, timeZone })).toThrow(SiteConfigError);
+  });
+
   it('refuses an unknown theme id', () => {
     expect(() => validateSiteConfig({ ...siteDefaults, theme: 'neon' })).toThrow(SiteConfigError);
     expect(() => validateSiteConfig({ ...siteDefaults, theme: 'neon' })).toThrow(/theme/i);

@@ -18,6 +18,21 @@ export function t(locale: Locale, key: MessageKey, params?: Params): string {
   );
 }
 
+/** A count string's base: the key without its `.one` / `.other` ending. */
+export type PluralBase = {
+  [K in MessageKey]: K extends `${infer Base}.one`
+    ? `${Base}.other` extends MessageKey
+      ? Base
+      : never
+    : never;
+}[MessageKey];
+
+/** R-UI-10: the `.one` or `.other` key the locale's plural rules pick for `count` ("1 reply"). */
+export function pluralKey(locale: Locale, base: PluralBase, count: number): MessageKey {
+  const category = new Intl.PluralRules(locale).select(count);
+  return `${base}.${category === 'one' ? 'one' : 'other'}`;
+}
+
 export function isLocale(value: string | null | undefined): value is Locale {
   return value === 'vi' || value === 'en';
 }

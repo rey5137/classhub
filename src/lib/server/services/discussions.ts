@@ -34,7 +34,9 @@ import {
   insertComment,
   insertPost,
   listBoardPosts,
+  listCommentKeysBefore,
   listPostComments,
+  listRecentPosts,
   softDeleteComment,
   softDeletePost,
   updateLiveComment,
@@ -52,6 +54,7 @@ import { takeRateLimit } from './rate-limit';
 
 export const POSTS_PAGE = 20;
 export const COMMENTS_PAGE = 20;
+export const HOME_ACTIVE_THREADS = 5;
 
 const denied: AdminFailure = { ok: false, code: 'forbidden' };
 const threadLocked: AdminFailure = {
@@ -59,6 +62,25 @@ const threadLocked: AdminFailure = {
   code: 'locked',
   messageKey: 'brd.threadLocked',
 };
+
+/** How a body renders: the reader's locale, and whether gallery photos may be shown. */
+export interface BodyView {
+  locale: Locale;
+  memories: boolean;
+}
+
+/**
+ * R-BRD-04 photo references for a set of bodies. R-NAV-02: with memories off nothing is
+ * looked up, so every reference renders as the placeholder (no caption, no link).
+ */
+function lookupPhotos(
+  context: AppContext,
+  view: BodyView,
+  ids: string[],
+): Promise<ReadonlyMap<string, ReferencedPhoto>> {
+  if (!view.memories || ids.length === 0) return Promise.resolve(new Map());
+  return findReferencedPhotos(context.database, ids);
+}
 
 function toPostSummary(viewer: Member, row: PostRow): PostSummary {
   const { id, displayName, avatarMediaId } = projectProfile(viewer, row.author);
@@ -193,12 +215,35 @@ export async function listPosts(
   };
 }
 
+/**
+ * R-BRD-01: Home's pinned threads (the board's first page, pinned rows only) and the most
+ * recently active unpinned threads (the pinned ones are already listed above them).
+ */
+export async function homeThreads(
+  context: AppContext,
+  viewer: Member,
+): Promise<{ pinned: PostSummary[]; active: PostSummary[] }> {
+  if (!can(viewer, 'content.read')) return { pinned: [], active: [] };
+  const [board, recent] = await Promise.all([
+    listBoardPosts(context.database, { after: null, limit: POSTS_PAGE }),
+    listRecentPosts(context.database, {
+      after: null,
+      limit: HOME_ACTIVE_THREADS,
+      unpinnedOnly: true,
+    }),
+  ]);
+  return {
+    pinned: board.rows.filter((row) => row.isPinned).map((row) => toPostSummary(viewer, row)),
+    active: recent.rows.map((row) => toPostSummary(viewer, row)),
+  };
+}
+
 /** `POST /api/v1/posts` (R-BRD-05, R-AUTH-21). */
 export async function createPost(
   context: AppContext,
   member: Member,
   input: unknown,
-  locale: Locale = 'vi',
+  view: BodyView,
   now = Date.now(),
 ): Promise<AdminResult<PostItem>> {
   if (!can(member, 'content.create')) return denied;
@@ -209,11 +254,11 @@ export async function createPost(
     return { ok: false, code: 'rate_limited', retryAfterSeconds: taken.retryAfterSeconds };
   }
   const row = await insertPost(context.database, member.id, parsed.data, now);
-  const photos = await findReferencedPhotos(context.database, extractPhotoIds([row.bodyMd]));
+  const photos = await lookupPhotos(context, view, extractPhotoIds([row.bodyMd]));
   return {
     ok: true,
     status: 201,
-    body: toPostItem(member, row, locale, photos),
+    body: toPostItem(member, row, view.locale, photos),
   };
 }
 
@@ -222,18 +267,18 @@ export async function getPost(
   context: AppContext,
   viewer: Member,
   params: unknown,
-  locale: Locale = 'vi',
+  view: BodyView,
 ): Promise<AdminResult<PostItem>> {
   if (!can(viewer, 'content.read')) return denied;
   const path = parse(postIdSchema, params);
   if (!path.ok) return denied;
   const row = await findLivePost(context.database, path.data.id);
   if (!row) return denied;
-  const photos = await findReferencedPhotos(context.database, extractPhotoIds([row.bodyMd]));
+  const photos = await lookupPhotos(context, view, extractPhotoIds([row.bodyMd]));
   return {
     ok: true,
     status: 200,
-    body: toPostItem(viewer, row, locale, photos),
+    body: toPostItem(viewer, row, view.locale, photos),
   };
 }
 
@@ -246,7 +291,7 @@ export async function getThreadWithComments(
   viewer: Member,
   params: unknown,
   query: unknown = {},
-  locale: Locale = 'vi',
+  view: BodyView,
 ): Promise<AdminResult<{ post: PostItem; comments: CommentPage }>> {
   if (!can(viewer, 'content.read')) return denied;
   const path = parse(postIdSchema, params);
@@ -268,15 +313,15 @@ export async function getThreadWithComments(
     postRow.bodyMd,
     ...commentRows.filter((c) => c.deletedAt === null).map((c) => c.bodyMd),
   ]);
-  const photos = await findReferencedPhotos(context.database, photoIds);
+  const photos = await lookupPhotos(context, view, photoIds);
   const last = commentRows.at(-1);
   return {
     ok: true,
     status: 200,
     body: {
-      post: toPostItem(viewer, postRow, locale, photos),
+      post: toPostItem(viewer, postRow, view.locale, photos),
       comments: commentPageSchema.parse({
-        items: commentRows.map((row) => toCommentItem(viewer, row, locale, photos)),
+        items: commentRows.map((row) => toCommentItem(viewer, row, view.locale, photos)),
         nextCursor: more && last ? encodeCommentCursor(last) : null,
       }),
     },
@@ -289,7 +334,7 @@ export async function editPost(
   member: Member,
   params: unknown,
   input: unknown,
-  locale: Locale = 'vi',
+  view: BodyView,
   now = Date.now(),
 ): Promise<AdminResult<PostItem>> {
   const path = parse(postIdSchema, params);
@@ -304,13 +349,24 @@ export async function editPost(
   ) {
     return denied;
   }
-  const updated = await updateLivePost(context.database, row, member.id, parsed.data, now);
+  // A Save that sends the title and body back unchanged is no edit: no *edited* marker and
+  // no admin `post.edit` audit row (R-BRD-08).
+  const { title, body, ...flags } = parsed.data;
+  const patch = {
+    ...flags,
+    ...(title !== undefined && title !== row.title ? { title } : {}),
+    ...(body !== undefined && body !== row.bodyMd ? { body } : {}),
+  };
+  const updated =
+    Object.keys(patch).length === 0
+      ? row
+      : await updateLivePost(context.database, row, member.id, patch, now);
   if (!updated) return denied;
-  const photos = await findReferencedPhotos(context.database, extractPhotoIds([updated.bodyMd]));
+  const photos = await lookupPhotos(context, view, extractPhotoIds([updated.bodyMd]));
   return {
     ok: true,
     status: 200,
-    body: toPostItem(member, updated, locale, photos),
+    body: toPostItem(member, updated, view.locale, photos),
   };
 }
 
@@ -335,7 +391,7 @@ export async function listComments(
   viewer: Member,
   params: unknown,
   input: unknown,
-  locale: Locale = 'vi',
+  view: BodyView,
 ): Promise<AdminResult<CommentPage>> {
   if (!can(viewer, 'content.read')) return denied;
   const path = parse(postIdSchema, params);
@@ -356,13 +412,13 @@ export async function listComments(
   const photoIds = extractPhotoIds(
     rows.filter((row) => row.deletedAt === null).map((row) => row.bodyMd),
   );
-  const photos = await findReferencedPhotos(context.database, photoIds);
+  const photos = await lookupPhotos(context, view, photoIds);
   const last = rows.at(-1);
   return {
     ok: true,
     status: 200,
     body: commentPageSchema.parse({
-      items: rows.map((row) => toCommentItem(viewer, row, locale, photos)),
+      items: rows.map((row) => toCommentItem(viewer, row, view.locale, photos)),
       nextCursor: more && last ? encodeCommentCursor(last) : null,
     }),
   };
@@ -374,7 +430,7 @@ export async function createComment(
   member: Member,
   params: unknown,
   input: unknown,
-  locale: Locale = 'vi',
+  view: BodyView,
   now = Date.now(),
 ): Promise<AdminResult<LiveComment>> {
   if (!can(member, 'content.create')) return denied;
@@ -392,12 +448,28 @@ export async function createComment(
   const outcome = await insertComment(context.database, post.id, member.id, parsed.data.body, now);
   if (outcome === 'locked') return threadLocked;
   if (outcome === 'not_found') return denied;
-  const photos = await findReferencedPhotos(context.database, extractPhotoIds([outcome.bodyMd]));
+  const photos = await lookupPhotos(context, view, extractPhotoIds([outcome.bodyMd]));
   return {
     ok: true,
     status: 201,
-    body: toCommentItem(member, outcome, locale, photos) as LiveComment,
+    body: toCommentItem(member, outcome, view.locale, photos) as LiveComment,
   };
+}
+
+/**
+ * R-BRD-07: the `?cursor=` of the comments page that starts at a live `comment`, or null
+ * when it is on the first page.
+ */
+export async function commentPageCursor(
+  context: AppContext,
+  comment: Pick<LiveComment, 'postId' | 'createdAt' | 'id'>,
+): Promise<string | null> {
+  const before = await listCommentKeysBefore(context.database, {
+    postId: comment.postId,
+    before: comment,
+    limit: COMMENTS_PAGE,
+  });
+  return before.length < COMMENTS_PAGE ? null : encodeCursor([before[0]!.createdAt, before[0]!.id]);
 }
 
 /** `PATCH /api/v1/comments/:id` (R-BRD-05, R-BRD-08). */
@@ -406,7 +478,7 @@ export async function editComment(
   member: Member,
   params: unknown,
   input: unknown,
-  locale: Locale = 'vi',
+  view: BodyView,
   now = Date.now(),
 ): Promise<AdminResult<LiveComment>> {
   const path = parse(commentIdSchema, params);
@@ -417,11 +489,11 @@ export async function editComment(
   if (!parsed.ok) return parsed;
   const updated = await updateLiveComment(context.database, row, member.id, parsed.data.body, now);
   if (!updated) return denied;
-  const photos = await findReferencedPhotos(context.database, extractPhotoIds([updated.bodyMd]));
+  const photos = await lookupPhotos(context, view, extractPhotoIds([updated.bodyMd]));
   return {
     ok: true,
     status: 200,
-    body: toCommentItem(member, updated, locale, photos) as LiveComment,
+    body: toCommentItem(member, updated, view.locale, photos) as LiveComment,
   };
 }
 

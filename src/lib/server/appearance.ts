@@ -1,7 +1,8 @@
 import type { Handle, RequestEvent } from '@sveltejs/kit';
 import { siteDefaults } from '../../../site.config';
-import { validateSiteConfig } from '../config';
+import { siteConfig, validateSiteConfig } from '../config';
 import { LOCALE_STORAGE_KEY, parseLocaleCookie } from '../i18n';
+import { parseTimeZone, TIME_ZONE_COOKIE } from '../shared/time';
 import { accentCss, type AccentConfig } from '../themes/accent';
 import { isThemeId, resolveMode } from '../themes/registry';
 import type { RenderedMode, ThemeId } from '../themes/theme-tokens';
@@ -71,6 +72,8 @@ export function applyAppearance(event: RequestEvent): void {
     event.cookies.get(LOCALE_STORAGE_KEY),
     event.locals.settings.locale,
   );
+  // R-UI-11: the browser's own zone once the layout has stored it; an unknown one is ignored.
+  event.locals.timeZone = parseTimeZone(event.cookies.get(TIME_ZONE_COOKIE), siteConfig.timeZone);
 }
 
 // Appearance first so a denial is localized: until the pipeline reads the settings it

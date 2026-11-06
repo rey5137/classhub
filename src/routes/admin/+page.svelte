@@ -10,6 +10,7 @@
   import SiteSettingsCard from './SiteSettingsCard.svelte';
   import { useI18n } from '$lib/i18n/context';
   import type { MessageKey } from '$lib/i18n';
+  import { mediumDate } from '$lib/shared/time';
   import type { PageProps } from './$types';
 
   let { data, form }: PageProps = $props();
@@ -19,9 +20,8 @@
   const seatsFull = $derived(data.seats.used >= data.seats.limit);
   const seatsWarn = $derived(!seatsFull && data.seats.used >= data.seats.warnAt);
 
-  const dateFormat = $derived(
-    new Intl.DateTimeFormat(i18n.locale === 'vi' ? 'vi-VN' : 'en-GB', { dateStyle: 'medium' }),
-  );
+  // R-UI-11: in the viewer's time zone, the same as every other date on the page.
+  const formatDate = (at: number | Date) => mediumDate(at, i18n.locale, data.timeZone);
 
   function statusKey(invite: (typeof data.invites)[number]): MessageKey {
     if (invite.userStatus === 'suspended') return 'admin.status.suspended';
@@ -148,7 +148,7 @@
                 <span>{i18n.t(`admin.role.${invite.role}`)}</span>
                 {#if invite.status === 'pending' && invite.expiresAt}
                   <span class="tnum"
-                    >{i18n.t('admin.expires', { date: dateFormat.format(invite.expiresAt) })}</span
+                    >{i18n.t('admin.expires', { date: formatDate(invite.expiresAt) })}</span
                   >
                 {/if}
                 {#if invite.deletionRequestedAt !== null && invite.status === 'accepted'}
@@ -272,7 +272,7 @@
           <dd class="tnum">
             {usage.lastReconciledAt === null
               ? i18n.t('admin.usage.never')
-              : dateFormat.format(usage.lastReconciledAt)}
+              : formatDate(usage.lastReconciledAt)}
           </dd>
         </div>
         <div>

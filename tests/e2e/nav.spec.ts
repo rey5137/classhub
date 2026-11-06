@@ -1,13 +1,13 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { MEMBER_DEMO, PHOTO_DEMO, demoMemberPath, routePath } from './demo';
+import { MEMBER_DEMO, PHOTO_DEMO, THREAD_DEMO, demoMemberPath, routePath } from './demo';
 
 const routes = [
   '/',
   '/memories',
   PHOTO_DEMO,
   '/discussions',
-  '/discussions/thread-demo',
+  THREAD_DEMO,
   '/chat',
   '/members',
   MEMBER_DEMO,

@@ -4,6 +4,7 @@ import { apiError } from './errors';
 import { fail } from '@sveltejs/kit';
 import { t } from '../i18n';
 import type { AdminFailure, AdminResult } from './services/admin';
+import type { BodyView } from './services/discussions';
 
 /**
  * R-PLAT-01: a guarded route's member and adapters. The pipeline sets both before
@@ -12,6 +13,11 @@ import type { AdminFailure, AdminResult } from './services/admin';
 export function guarded(locals: App.Locals): { member: Member; context: AppContext } {
   if (!locals.member || !locals.context) throw new Error('route reached without the guard');
   return { member: locals.member, context: locals.context };
+}
+
+/** How this request renders Markdown bodies: its locale and the memories flag (R-NAV-02). */
+export function bodyView(locals: App.Locals): BodyView {
+  return { locale: locals.locale, memories: locals.settings.features.memories };
 }
 
 /** A body that is not JSON reads as `undefined`, which every schema refuses (`validation`). */
@@ -55,9 +61,13 @@ export function formFailure(
   result: AdminFailure,
   target?: string,
 ) {
-  const status = { validation: 400, forbidden: 403, not_found: 404, rate_limited: 429 }[
-    result.code as 'validation'
-  ];
+  const status = {
+    validation: 400,
+    forbidden: 403,
+    not_found: 404,
+    locked: 423,
+    rate_limited: 429,
+  }[result.code as 'validation'];
   return fail(status ?? 409, {
     action,
     message: t(locals.locale, result.messageKey ?? `error.${result.code}`),

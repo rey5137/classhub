@@ -11,6 +11,7 @@
   import type { ProfileField, Visibility } from '$lib/contracts/profile';
   import type { MessageKey } from '$lib/i18n';
   import { useI18n } from '$lib/i18n/context';
+  import { mediumDate } from '$lib/shared/time';
   import type { SubmitFunction } from '@sveltejs/kit';
   import type { PageProps } from './$types';
 
@@ -113,9 +114,8 @@
     avatarSaved = false;
   });
 
-  const dateFormat = $derived(
-    new Intl.DateTimeFormat(i18n.locale === 'vi' ? 'vi-VN' : 'en-GB', { dateStyle: 'medium' }),
-  );
+  // R-UI-11: in the viewer's time zone, the same as every other date on the page.
+  const formatDate = (at: number | Date) => mediumDate(at, i18n.locale, data.timeZone);
 
   // Keep what the member typed when the server refuses it.
   const keep: SubmitFunction =
@@ -168,7 +168,7 @@
   {#if failure}<Banner tone="danger">{failure}</Banner>{/if}
   {#if data.deletionRequestedAt !== null}
     <Banner tone="warning">
-      {i18n.t('prof.deletePending', { date: dateFormat.format(data.deletionRequestedAt) })}
+      {i18n.t('prof.deletePending', { date: formatDate(data.deletionRequestedAt) })}
     </Banner>
   {/if}
 

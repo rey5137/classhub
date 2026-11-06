@@ -1,201 +1,223 @@
 <script lang="ts">
-  import Avatar from '$lib/components/Avatar.svelte';
-  import Button from '$lib/components/Button.svelte';
+  import { resolve } from '$app/paths';
   import Card from '$lib/components/Card.svelte';
+  import MarkdownBody from '$lib/components/MarkdownBody.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import PostCard from '$lib/components/PostCard.svelte';
   import Rail from '$lib/components/Rail.svelte';
   import Row from '$lib/components/Row.svelte';
   import Tile from '$lib/components/Tile.svelte';
+  import { pluralKey } from '$lib/i18n';
   import { useI18n } from '$lib/i18n/context';
+  import { shortTime } from '$lib/shared/time';
+  import type { PageProps } from './$types';
 
+  let { data }: PageProps = $props();
   const i18n = useI18n();
 
-  const photos = $derived([
-    { title: i18n.t('demo.copy1'), meta: i18n.t('demo.copy2') },
-    { title: i18n.t('demo.copy3'), meta: i18n.t('demo.copy4') },
-    { title: i18n.t('demo.copy5'), meta: i18n.t('demo.copy6') },
-    { title: i18n.t('demo.copy7'), meta: i18n.t('demo.copy8') },
-    { title: i18n.t('demo.copy9'), meta: i18n.t('demo.copy10') },
-    { title: i18n.t('demo.copy11'), meta: i18n.t('demo.copy12') },
-  ]);
-
-  const posts = $derived([
-    {
-      title: i18n.t('demo.copy13'),
-      meta: i18n.t('demo.copy14'),
-      time: i18n.t('demo.copy15'),
-      isNew: true,
-    },
-    { title: i18n.t('demo.copy16'), meta: i18n.t('demo.copy17'), time: i18n.t('demo.copy18') },
-    { title: i18n.t('demo.copy19'), meta: i18n.t('demo.copy20'), time: i18n.t('demo.copy21') },
-  ]);
-
-  const people = $derived([
-    { name: i18n.t('demo.copy22'), city: i18n.t('demo.copy23') },
-    { name: i18n.t('demo.copy4'), city: i18n.t('demo.copy24') },
-    { name: i18n.t('demo.copy6'), city: i18n.t('demo.copy25') },
-    { name: i18n.t('demo.copy8'), city: i18n.t('demo.copy26') },
-    { name: i18n.t('demo.copy10'), city: i18n.t('demo.copy23') },
-  ]);
-
-  const years = $derived([
-    { title: i18n.t('demo.copy27'), meta: i18n.t('demo.copy28') },
-    { title: i18n.t('demo.copy29'), meta: i18n.t('demo.copy30') },
-    { title: i18n.t('demo.copy5'), meta: i18n.t('demo.copy31') },
-    { title: i18n.t('demo.copy32'), meta: i18n.t('demo.copy33') },
-    { title: i18n.t('demo.copy34'), meta: i18n.t('demo.copy35') },
-  ]);
+  const replies = (count: number) =>
+    i18n.t(pluralKey(i18n.locale, 'brd.replies', count), { count });
+  const threadMeta = (post: { author: { displayName: string }; commentCount: number }) =>
+    `${post.author.displayName} · ${replies(post.commentCount)}`;
 </script>
 
+<!-- R-BRD-01: welcome, pinned, reunion, newest photos, active threads, in that order. -->
 <div class="head">
-  <PageHeader title={i18n.t('home.title')} lede={i18n.t('home.lede')} />
-  <Card class="reunion">
-    <h2>{i18n.t('home.reunion.title')}</h2>
-    <p class="tnum muted">{i18n.t('home.reunion.meta')}</p>
-    <div class="who">
-      {#each people.slice(0, 4) as person, index (person.name)}
-        <Avatar name={person.name} size="sm" tone={index} showInitials={false} />
-      {/each}
-      <span>{i18n.t('home.reunion.who')}</span>
-    </div>
-    <div class="acts">
-      <Button variant="primary">{i18n.t('home.reunion.going')}</Button>
-      <Button>{i18n.t('home.reunion.maybe')}</Button>
-    </div>
-  </Card>
+  <div class="welcome">
+    <PageHeader
+      title={i18n.t('home.greeting', { name: data.greeting })}
+      lede={`${data.site.name} · ${data.site.years}`}
+    />
+    {#if data.welcome.bannerMediaId}
+      <img class="banner" src="/api/v1/media/{data.welcome.bannerMediaId}/image" alt="" />
+    {/if}
+    {#if data.welcome.html}
+      <div class="welcome-body"><MarkdownBody html={data.welcome.html} /></div>
+    {/if}
+  </div>
+
+  <section class="pinned" aria-labelledby="home-pinned">
+    <h2 id="home-pinned">{i18n.t('home.pinned')}</h2>
+    {#if data.pinnedInfo.length || data.threads?.pinned.length}
+      <Card>
+        {#each data.pinnedInfo as info (info.slug)}
+          <a class="info-link" href={resolve('/info/[slug]', { slug: info.slug })}>{info.title}</a>
+        {/each}
+        {#each data.threads?.pinned ?? [] as post (post.id)}
+          <PostCard
+            title={post.title}
+            meta={threadMeta(post)}
+            time={shortTime(post.lastActivityAt, i18n.locale, data.timeZone)}
+            href={`/discussions/${post.id}`}
+            pinned
+            pinnedLabel={i18n.t('brd.pinned')}
+          />
+        {/each}
+      </Card>
+    {:else}
+      <p class="empty">{i18n.t('home.pinnedEmpty')}</p>
+    {/if}
+  </section>
+
+  {#if data.reunion}
+    <Card class="reunion">
+      <h2>{data.reunion.title}</h2>
+      {#if data.reunion.bodyHtml}<MarkdownBody html={data.reunion.bodyHtml} />{/if}
+      <a class="more" href={resolve('/info/[slug]', { slug: 'reunion' })}
+        >{i18n.t('home.reunionMore')}</a
+      >
+    </Card>
+  {/if}
 </div>
 
 <div class="wall">
-  <Row title={i18n.t('home.newPhotos')} href="/memories" linkLabel={i18n.t('home.viewAll')}>
-    <Rail label={i18n.t('home.newPhotos')}>
-      {#each photos as photo, index (photo.title)}
-        <Tile
-          title={photo.title}
-          meta={photo.meta}
-          tone={index + 5}
-          isNew={index === 0}
-          grow={index === 0}
-        />
-      {/each}
-    </Rail>
-  </Row>
+  {#if data.photos}
+    <Row title={i18n.t('home.newPhotos')} href="/memories" linkLabel={i18n.t('home.viewAll')}>
+      {#if data.photos.length}
+        <Rail label={i18n.t('home.newPhotos')}>
+          {#each data.photos as photo, index (photo.id)}
+            <Tile
+              title={photo.caption ?? i18n.t('mem.photoBy', { name: photo.uploader.displayName })}
+              meta={photo.uploader.displayName}
+              href={`/memories/${photo.id}`}
+              image="/api/v1/media/{photo.id}/thumb"
+              grow={index === 0}
+            />
+          {/each}
+        </Rail>
+      {:else}
+        <p class="empty">{i18n.t('home.photosEmpty')}</p>
+      {/if}
+    </Row>
+  {/if}
 
-  <div class="two">
+  {#if data.threads}
     <Row
       title={i18n.t('home.discussing')}
       href="/discussions"
       linkLabel={i18n.t('home.discussions')}
     >
-      <Card>
-        {#each posts as post (post.title)}
-          <PostCard
-            title={post.title}
-            meta={post.meta}
-            time={post.time}
-            isNew={post.isNew}
-            newLabel={i18n.t('brd.new')}
-          />
-        {/each}
-      </Card>
+      {#if data.threads.active.length}
+        <Card class="active">
+          {#each data.threads.active as post (post.id)}
+            <PostCard
+              title={post.title}
+              meta={threadMeta(post)}
+              time={shortTime(post.lastActivityAt, i18n.locale, data.timeZone)}
+              href={`/discussions/${post.id}`}
+            />
+          {/each}
+        </Card>
+      {:else}
+        <p class="empty">{i18n.t('home.threadsEmpty')}</p>
+      {/if}
     </Row>
-
-    <Row
-      title={i18n.t('home.classmates')}
-      meta={i18n.t('home.membersJoined', { joined: 32, total: 41 })}
-      href="/members"
-      linkLabel={i18n.t('home.members')}
-    >
-      <Rail label={i18n.t('home.classmates')}>
-        {#each people as person, index (person.name)}
-          <div class="person">
-            <Avatar name={person.name} size="lg" tone={index} />
-            <b>{person.name}</b>
-            <small>{person.city}</small>
-          </div>
-        {/each}
-      </Rail>
-    </Row>
-  </div>
-
-  <Row
-    title={i18n.t('home.yearHead', { year: 2006 })}
-    meta={i18n.t('home.yearMeta')}
-    href="/memories"
-    linkLabel={i18n.t('home.album')}
-  >
-    <Rail label={i18n.t('home.yearHead', { year: 2006 })}>
-      {#each years as year, index (year.title)}
-        <Tile title={year.title} meta={year.meta} tone={index + 6} />
-      {/each}
-    </Rail>
-  </Row>
+  {/if}
 </div>
 
 <style>
   .head {
+    display: grid;
+    gap: calc(var(--space-unit) * 6);
     margin-bottom: calc(var(--space-unit) * 8);
   }
 
   @media (min-width: 1024px) {
     .head {
-      display: grid;
       grid-template-columns: minmax(0, 1fr) 27.5rem;
+      grid-template-rows: auto 1fr;
       align-items: start;
-      gap: calc(var(--space-unit) * 6);
+    }
+
+    /* The reunion sits beside the title on desktop (§6), the pinned list under it. */
+    .welcome,
+    .pinned {
+      grid-column: 1;
+    }
+
+    .head :global(.reunion) {
+      grid-column: 2;
+      grid-row: 1 / span 2;
     }
 
     .head :global(.page-header) {
-      margin-bottom: 0;
+      margin-bottom: calc(var(--space-unit) * 4);
     }
+  }
+
+  .welcome {
+    display: grid;
+    gap: calc(var(--space-unit) * 4);
+    min-width: 0;
+  }
+
+  .welcome :global(.page-header) {
+    margin-bottom: 0;
+  }
+
+  .banner {
+    display: block;
+    width: 100%;
+    max-height: 18rem;
+    object-fit: cover;
+    border-radius: var(--radius-card);
+    background: var(--color-surface-2);
+  }
+
+  .welcome-body {
+    max-width: 46rem;
+  }
+
+  .pinned {
+    display: grid;
+    gap: calc(var(--space-unit) * 3);
+    min-width: 0;
+  }
+
+  h2 {
+    font: var(--text-title);
+    color: var(--color-heading);
+  }
+
+  .info-link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: calc(var(--space-unit) * 2 * var(--density))
+      calc(var(--space-unit) * 5 * var(--density));
+    border-bottom: 1px solid var(--color-divider);
+    font-weight: 600;
+  }
+
+  .info-link:hover {
+    color: var(--color-accent);
+  }
+
+  .info-link:last-child {
+    border-bottom: 0;
+  }
+
+  .info-link + :global(.post) {
+    border-top: 0;
   }
 
   .head :global(.reunion) {
     display: grid;
-    gap: var(--space-unit);
+    gap: calc(var(--space-unit) * 3);
     padding: calc(var(--space-unit) * 4.5) calc(var(--space-unit) * 5);
+    min-width: 0;
   }
 
   .head :global(.reunion h2) {
     font: var(--text-heading);
   }
 
-  .muted {
-    color: var(--color-muted);
-    font-size: 0.9375rem;
-  }
-
-  .who {
-    display: flex;
+  .more {
+    display: inline-flex;
     align-items: center;
-    margin-top: calc(var(--space-unit) * 2);
-    color: var(--color-muted);
-    font-size: 0.875rem;
-  }
-
-  .who :global(.avatar + .avatar) {
-    margin-left: calc(var(--space-unit) * -2);
-    border: 2px solid var(--color-surface);
-  }
-
-  .who > span {
-    margin-left: calc(var(--space-unit) * 2.5);
-  }
-
-  .acts {
-    display: flex;
-    gap: calc(var(--space-unit) * 2);
-    margin-top: calc(var(--space-unit) * 3);
-  }
-
-  .acts :global(.primary) {
-    flex: 1;
-  }
-
-  @media (min-width: 768px) {
-    .acts :global(.primary) {
-      flex: none;
-    }
+    min-height: 44px;
+    color: var(--color-accent);
+    font-weight: 600;
   }
 
   .wall {
@@ -203,41 +225,7 @@
     gap: calc(var(--space-unit) * 8);
   }
 
-  .two {
-    display: grid;
-    gap: calc(var(--space-unit) * 8);
-  }
-
-  @media (min-width: 1024px) {
-    .two {
-      grid-template-columns: 1.4fr 1fr;
-      align-items: start;
-    }
-  }
-
-  .person {
-    flex: none;
-    width: 96px;
-    text-align: center;
-    font-size: 0.875rem;
-    font-weight: 500;
-  }
-
-  @media (min-width: 768px) {
-    .person {
-      width: 120px;
-    }
-  }
-
-  .person b {
-    display: block;
-    margin-top: calc(var(--space-unit) * 2);
-  }
-
-  .person small {
-    display: block;
+  .empty {
     color: var(--color-muted);
-    font-size: 0.8125rem;
-    font-weight: 400;
   }
 </style>

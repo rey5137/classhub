@@ -38,16 +38,26 @@ const slugTaken: AdminFailure = {
   fields: { slug: 'taken' },
 };
 
+/** Site-written Markdown (an info page, the welcome message) as sanitized HTML (R-BRD-03, 04). */
+export async function renderSiteMarkdown(
+  context: AppContext,
+  markdown: string,
+  features: Features,
+  locale: Locale,
+): Promise<string> {
+  // R-NAV-02: with memories off a photo reference names no gallery photo (no caption, no link).
+  const photos = features.memories
+    ? await findReferencedPhotos(context.database, extractPhotoIds([markdown]))
+    : new Map<string, ReferencedPhoto>();
+  return renderMarkdown(markdown, { locale, photos });
+}
+
 async function toInfoPage(
   context: AppContext,
   row: InfoPageRow,
   features: Features,
   locale: Locale,
 ): Promise<InfoPage> {
-  // R-NAV-02: with memories off a photo reference names no gallery photo (no caption, no link).
-  const photos = features.memories
-    ? await findReferencedPhotos(context.database, extractPhotoIds([row.bodyMd]))
-    : new Map<string, ReferencedPhoto>();
   return infoPageSchema.parse({
     id: row.id,
     slug: row.slug,
@@ -56,7 +66,7 @@ async function toInfoPage(
     sortOrder: row.sortOrder,
     updatedAt: row.updatedAt,
     bodyMd: row.bodyMd,
-    bodyHtml: renderMarkdown(row.bodyMd, { locale, photos }),
+    bodyHtml: await renderSiteMarkdown(context, row.bodyMd, features, locale),
   });
 }
 

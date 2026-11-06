@@ -5,6 +5,8 @@ export const siteDefaults = {
   name: 'Our Class',
   years: '20XX–20YY',
   locale: 'vi',
+  // R-UI-11: the zone times show in until the viewer's browser has sent its own (the `tz` cookie).
+  timeZone: 'Asia/Ho_Chi_Minh',
   theme: 'yearbook',
   mode: 'light',
   accent: null,

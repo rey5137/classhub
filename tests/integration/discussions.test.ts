@@ -379,6 +379,46 @@ describe('posts and comments CRUD, lock, moderation, audit and privacy (R-BRD-03
     expect(serializedAudits).not.toContain('Bình luận');
   });
 
+  it('AC-BRD-04 a Save that sends the title and body back unchanged marks nothing edited and writes no audit row, for the owner and an admin', async () => {
+    const post = postItemSchema.parse(
+      await (
+        await send('/api/v1/posts', 'POST', memberHeaders, {
+          title: 'Bài không đổi',
+          body: 'Nội dung **giữ nguyên**',
+        })
+      ).json(),
+    );
+    const [before] = await database.db.select().from(posts).where(eq(posts.id, post.id));
+    // The forms always send both fields; surrounding spaces trim to the stored text.
+    for (const headers of [memberHeaders, adminHeaders]) {
+      const res = await send(`/api/v1/posts/${post.id}`, 'PATCH', headers, {
+        title: ' Bài không đổi ',
+        body: 'Nội dung **giữ nguyên**',
+      });
+      expect(res.status).toBe(200);
+      const item = postItemSchema.parse(await res.json());
+      expect(item.edited).toBe(false);
+      expect(item.bodyHtml).toBe('<p>Nội dung <strong>giữ nguyên</strong></p>');
+    }
+    const [after] = await database.db.select().from(posts).where(eq(posts.id, post.id));
+    expect(after).toEqual(before);
+    expect(await database.db.select().from(auditEvents)).toEqual([]);
+
+    // One changed field is an edit again: the admin's writes its audit row.
+    const changed = postItemSchema.parse(
+      await (
+        await send(`/api/v1/posts/${post.id}`, 'PATCH', adminHeaders, {
+          title: 'Bài không đổi',
+          body: 'Nội dung đã đổi',
+        })
+      ).json(),
+    );
+    expect(changed.edited).toBe(true);
+    expect((await database.db.select().from(auditEvents)).map((row) => row.action)).toEqual([
+      'post.edit',
+    ]);
+  });
+
   it('AC-AUTH-09 enforces the shared 10/min/member rate limit on post and comment creation while leaving edits unthrottled (R-AUTH-21)', async () => {
     const firstRes = await send('/api/v1/posts', 'POST', memberHeaders, {
       title: 'Bài 1',
@@ -509,7 +549,7 @@ describe('posts and comments CRUD, lock, moderation, audit and privacy (R-BRD-03
         viewerMember,
         { id: created.id },
         {},
-        'vi',
+        { locale: 'vi', memories: true },
       );
       expect(asMember.ok).toBe(true);
       if (!asMember.ok) return;
@@ -654,6 +694,12 @@ describe('query plans and 5,000-row pagination (AC-BRD-02, AC-DB-03, AC-DB-04)',
         expectedIndex: 'posts_activity_idx',
       },
       {
+        name: 'Home active threads (unpinned only)',
+        query: buildRecentPostsQuery(database, { after: null, limit: 5, unpinnedOnly: true }),
+        // `is_pinned = 0` is the leading column of the board index, already in activity order.
+        expectedIndex: 'posts_pinned_activity_idx',
+      },
+      {
         name: 'comments list with cursor',
         query: buildCommentsQuery(database, {
           postId: targetPostId,
@@ -751,7 +797,7 @@ describe('query plans and 5,000-row pagination (AC-BRD-02, AC-DB-03, AC-DB-04)',
         viewerMember,
         { id: threadId },
         commentCursor ? { cursor: commentCursor } : {},
-        'vi',
+        { locale: 'vi', memories: true },
       );
       expect(res.ok).toBe(true);
       if (!res.ok) break;

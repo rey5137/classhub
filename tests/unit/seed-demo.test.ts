@@ -7,9 +7,11 @@ import { createLocalDatabase } from '../../src/lib/server/adapters/local/sqlite-
 import { seedDemo } from '../../src/lib/server/db/seed-demo';
 import {
   albums,
+  comments,
   infoPages,
   invites,
   media,
+  posts,
   storageUsage,
   users,
 } from '../../src/lib/server/db/schema';
@@ -31,8 +33,8 @@ describe('seedDemo', () => {
     try {
       const first = await seedDemo(database, storage);
       const second = await seedDemo(database, storage);
-      expect(first).toEqual({ members: 12, invites: 12, photos: 10 });
-      expect(second).toEqual({ members: 0, invites: 0, photos: 0 });
+      expect(first).toEqual({ members: 12, invites: 12, photos: 10, threads: 4 });
+      expect(second).toEqual({ members: 0, invites: 0, photos: 0, threads: 0 });
 
       const members = await database.db.select().from(users);
       const rows = await database.db.select().from(invites);
@@ -60,8 +62,24 @@ describe('seedDemo', () => {
       }
       // R-BRD-02: the demo info pages, once, with the reunion page pinned.
       const pages = await database.db.select().from(infoPages);
-      expect(pages.map((page) => page.slug).sort()).toEqual(['quy-lop', 'reunion']);
+      expect(pages.map((page) => page.slug).sort()).toEqual(['ban-can-su', 'quy-lop', 'reunion']);
       expect(pages.find((page) => page.slug === 'reunion')?.isPinned).toBe(true);
+      // R-BRD-01, R-BRD-06: demo threads once, one pinned and one locked, their counts and
+      // last activity matching their comments, and a photo reference to a painted photo.
+      const threads = await database.db.select().from(posts);
+      const replies = await database.db.select().from(comments);
+      expect(threads).toHaveLength(4);
+      expect(threads.filter((row) => row.isPinned)).toHaveLength(1);
+      expect(threads.filter((row) => row.isLocked)).toHaveLength(1);
+      for (const thread of threads) {
+        const own = replies.filter((row) => row.postId === thread.id);
+        expect(thread.commentCount).toBe(own.length);
+        expect(thread.lastActivityAt).toBe(
+          Math.max(thread.createdAt, ...own.map((row) => row.createdAt)),
+        );
+      }
+      const referenced = threads.find((row) => row.bodyMd.includes('[[photo:'))!.bodyMd;
+      expect(photos.some((photo) => referenced.includes(`[[photo:${photo.id}]]`))).toBe(true);
     } finally {
       database.close();
     }

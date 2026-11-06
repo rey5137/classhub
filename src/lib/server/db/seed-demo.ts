@@ -6,9 +6,11 @@ import type { ObjectStorage } from '../ports/object-storage';
 import { eq, sql } from 'drizzle-orm';
 import {
   albums,
+  comments,
   infoPages,
   invites,
   media,
+  posts,
   profileContacts,
   siteSettings,
   storageUsage,
@@ -180,7 +182,8 @@ const DEMO_PHOTOS: {
   },
 ];
 
-// R-BRD-02: synthetic class info. `reunion` is the page Home shows as the reunion card.
+// R-BRD-02: synthetic class info. `reunion` is the page Home shows as the reunion card;
+// `ban-can-su` is the pinned page Home lists (R-BRD-01).
 const DEMO_INFO = [
   {
     slug: 'reunion',
@@ -197,6 +200,61 @@ const DEMO_INFO = [
       'Quỹ lớp dùng cho buổi họp lớp và thăm thầy cô.\n\n1. Đóng góp tuỳ tâm\n2. Thủ quỹ báo cáo mỗi quý\n\n> Cảm ơn cả lớp!',
     isPinned: false,
     sortOrder: 1,
+  },
+  {
+    slug: 'ban-can-su',
+    title: 'Ban cán sự lớp',
+    bodyMd: 'Lớp trưởng, thủ quỹ và người giữ album. Có việc gì cứ nhắn trong mục Thảo luận.',
+    isPinned: true,
+    sortOrder: 2,
+  },
+];
+
+// R-BRD-01, R-BRD-06..08: invented threads (INV-6) so Home, the board and a thread page
+// show a pinned and a locked thread, Markdown and a photo reference. `{photo}` is the
+// painted "Lều xanh bên suối" photo's id. Comments are by author email, oldest first.
+const DEMO_THREADS: {
+  author: string;
+  title: string;
+  bodyMd: string;
+  isPinned?: boolean;
+  isLocked?: boolean;
+  comments: { author: string; bodyMd: string }[];
+}[] = [
+  {
+    author: ADMIN_EMAIL,
+    title: 'Đăng ký họp lớp 20 năm',
+    bodyMd:
+      'Cả lớp ơi, **họp lớp 20 năm** sắp đến rồi.\n\n- Ghi tên ở phần bình luận\n- Báo số người đi cùng\n\nChi tiết ở [trang họp lớp](/info/reunion).',
+    isPinned: true,
+    comments: [
+      { author: 'mai.nguyen@example.com', bodyMd: 'Mình đi, cùng chồng nữa là 2 người.' },
+      { author: 'linh.tran@example.com', bodyMd: 'Linh đi một mình nhé.' },
+    ],
+  },
+  {
+    author: 'mai.nguyen@example.com',
+    title: 'Ai còn giữ ảnh chuyến dã ngoại Ba Vì?',
+    bodyMd:
+      'Mình tìm được tấm này, ai còn ảnh nào thì *đăng lên* nhé:\n\n[[photo:{photo}]]\n\n1. Ảnh cắm trại\n2. Ảnh đốt lửa trại',
+    comments: [
+      { author: 'bao.pham@example.com', bodyMd: 'Nhà mình còn một cuộn phim chưa rửa!' },
+      { author: ADMIN_EMAIL, bodyMd: 'Rửa xong nhớ đăng vào album **Dã ngoại Ba Vì** nhé.' },
+      { author: 'mai.nguyen@example.com', bodyMd: '> cuộn phim chưa rửa\n\nHóng quá Bảo ơi.' },
+    ],
+  },
+  {
+    author: 'linh.tran@example.com',
+    title: 'Thầy chủ nhiệm giờ ở đâu?',
+    bodyMd: 'Có ai còn liên lạc với thầy không? Mình muốn mời thầy đến buổi họp lớp.',
+    comments: [{ author: 'bao.pham@example.com', bodyMd: 'Thầy vẫn dạy ở trường cũ đấy.' }],
+  },
+  {
+    author: ADMIN_EMAIL,
+    title: 'Nội quy diễn đàn lớp',
+    bodyMd: 'Viết lịch sự, không đăng số điện thoại của người khác. Chủ đề này đã khoá.',
+    isLocked: true,
+    comments: [],
   },
 ];
 
@@ -226,7 +284,7 @@ async function insertChunked<T>(
 export async function seedDemo(
   database: Database,
   storage: ObjectStorage,
-): Promise<{ members: number; invites: number; photos: number }> {
+): Promise<{ members: number; invites: number; photos: number; threads: number }> {
   const now = Date.now();
   const memberRows = DEMO_MEMBERS.map((member) => ({
     id: uuidv7(),
@@ -302,7 +360,63 @@ export async function seedDemo(
     .onConflictDoNothing();
 
   const photos = await seedPhotos(database, storage, idByEmail, now);
-  return { members: insertedMembers, invites: insertedInvites, photos };
+  const threads = await seedThreads(database, idByEmail, now);
+  return { members: insertedMembers, invites: insertedInvites, photos, threads };
+}
+
+/** Seeded once, while the first demo thread is missing; posts and comments in one batch. */
+async function seedThreads(
+  database: Database,
+  idByEmail: Map<string, string>,
+  now: number,
+): Promise<number> {
+  const [seeded] = await database.db
+    .select({ id: posts.id })
+    .from(posts)
+    .where(eq(posts.title, DEMO_THREADS[0]!.title))
+    .limit(1);
+  if (seeded) return 0;
+  const [photo] = await database.db
+    .select({ id: media.id })
+    .from(media)
+    .where(eq(media.caption, 'Lều xanh bên suối'))
+    .limit(1);
+  const postRows = [];
+  const commentRows = [];
+  for (const [index, thread] of DEMO_THREADS.entries()) {
+    const id = uuidv7();
+    // Older threads first, a day apart; each comment ten minutes after the last.
+    const createdAt = now - (DEMO_THREADS.length - index) * 86_400_000;
+    const times = thread.comments.map((_, at) => createdAt + (at + 1) * 600_000);
+    postRows.push({
+      id,
+      authorId: idByEmail.get(thread.author)!,
+      title: thread.title,
+      bodyMd: thread.bodyMd.replace('{photo}', photo?.id ?? '00000000-0000-7000-8000-000000000000'),
+      isPinned: thread.isPinned ?? false,
+      isLocked: thread.isLocked ?? false,
+      commentCount: thread.comments.length,
+      createdAt,
+      updatedAt: createdAt,
+      lastActivityAt: times.at(-1) ?? createdAt,
+    });
+    for (const [at, comment] of thread.comments.entries()) {
+      commentRows.push({
+        id: uuidv7(),
+        postId: id,
+        authorId: idByEmail.get(comment.author)!,
+        bodyMd: comment.bodyMd,
+        createdAt: times[at]!,
+        updatedAt: times[at]!,
+      });
+    }
+  }
+  // Under D1's 100 bound variables a statement: 4 posts x 11 and 6 comments x 6 columns.
+  await database.batch([
+    database.db.insert(posts).values(postRows),
+    database.db.insert(comments).values(commentRows),
+  ]);
+  return postRows.length;
 }
 
 async function seedPhotos(

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
-import { localeCookie, parseLocaleCookie, t } from '../../src/lib/i18n';
+import { localeCookie, parseLocaleCookie, pluralKey, t } from '../../src/lib/i18n';
 import { vi } from '../../src/lib/i18n/vi';
 
 describe('AC-UI-06 message dictionaries', () => {
@@ -23,6 +23,16 @@ describe('AC-UI-06 message dictionaries', () => {
       '03.2006 · 14 photos',
     );
     expect(t('vi', 'home.membersJoined', { joined: 32, total: 41 })).not.toContain('{');
+  });
+
+  it('R-UI-10 picks the singular or plural count string by the locale plural rules', () => {
+    const replies = (locale: 'vi' | 'en', count: number) =>
+      t(locale, pluralKey(locale, 'brd.replies', count), { count });
+    expect(replies('en', 1)).toBe('1 reply');
+    expect(replies('en', 0)).toBe('0 replies');
+    expect(replies('en', 2)).toBe('2 replies');
+    expect(replies('vi', 1)).toBe('1 trả lời');
+    expect(replies('vi', 2)).toBe('2 trả lời');
   });
 });
 

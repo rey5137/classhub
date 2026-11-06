@@ -14,9 +14,9 @@
   out of the gallery), theme preset, display mode (light, dark, system), accent colour, card density (comfortable,
   compact), default language, and feature toggles for memories, discussions and chat.
 - **R-UI-02** **Level B, project configuration (`site.config.ts`, one validated object):** navigation order,
-  default locale, visible profile fields, app name, upload limits, quota thresholds, default theme, chat retention,
-  messaging-host allow-list. Every service reads it through `src/lib/config/` only; no default is duplicated
-  elsewhere.
+  default locale, default time zone, visible profile fields, app name, upload limits, quota thresholds, default
+  theme, chat retention, messaging-host allow-list. Every service reads it through `src/lib/config/` only; no default
+  is duplicated elsewhere.
 - **R-UI-03** **Level C, developer themes:** a new `src/lib/themes/<id>.css` that sets only contract tokens (§10.2)
   under `[data-theme='<id>']`, registered in `src/lib/themes/registry.ts`. Pages are never forked for styling.
 - **R-UI-04** Settings are validated with a strict Zod schema: theme ids from the registry, colours as `#rrggbb`
@@ -73,7 +73,11 @@ export const siteDefaults = {
   `Path=/; Max-Age=31536000; SameSite=Lax`, with `Secure` on HTTPS). The server render reads the cookie and validates
   it against the known locales; an unknown value uses the site default. The initial dictionary and `<html lang>`
   use this locale so the chosen language renders before JavaScript runs, without a language flash or hydration mismatch.
-- **R-UI-11** Dates and numbers use `Intl` with the active locale; times show in the viewer's time zone.
+- **R-UI-11** Dates and numbers use `Intl` with the active locale; times show in the viewer's time zone. The root
+  layout mirrors the browser's IANA zone in the first-party `tz` cookie (`Path=/; Max-Age=31536000; SameSite=Lax`,
+  with `Secure` on HTTPS) whenever it differs from the zone the page was rendered in, then reloads its data once. The
+  server render validates the cookie with `Intl.DateTimeFormat`; absent or unknown, it uses the Level B `timeZone`
+  (`Asia/Ho_Chi_Minh` in the shipped defaults). "Today" in a list is that zone's day.
 
 ## 10.5 Accessibility
 

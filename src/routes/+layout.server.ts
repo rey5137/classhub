@@ -19,6 +19,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
     },
     features: settings.features,
     locale: locals.locale,
+    timeZone: locals.timeZone,
     theme: locals.theme,
     mode: locals.mode,
     nav,

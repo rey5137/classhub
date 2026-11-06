@@ -11,16 +11,31 @@
     grow?: boolean;
     onclick?: () => void;
     tone?: number;
+    /** A thumbnail URL; the tile's text names it, so the picture itself is decorative. */
+    image?: string;
   }
 
-  let { title, meta, href, isNew = false, grow = false, onclick, tone = 0 }: Props = $props();
+  let {
+    title,
+    meta,
+    href,
+    isNew = false,
+    grow = false,
+    onclick,
+    tone = 0,
+    image,
+  }: Props = $props();
 
   const i18n = useI18n();
 </script>
 
 {#snippet inner()}
-  <span class="ph" style:background={`var(--placeholder-${(tone % 10) + 1})`} aria-hidden="true"
-  ></span>
+  {#if image}
+    <img class="ph" src={image} alt="" loading="lazy" decoding="async" />
+  {:else}
+    <span class="ph" style:background={`var(--placeholder-${(tone % 10) + 1})`} aria-hidden="true"
+    ></span>
+  {/if}
   {#if isNew}<span class="new">{i18n.t('common.new')}</span>{/if}
   <span class="cap">
     <b>{title}</b>
@@ -71,6 +86,13 @@
   .ph {
     position: absolute;
     inset: 0;
+  }
+
+  img.ph {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: var(--color-surface-2);
   }
 
   .cap {

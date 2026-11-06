@@ -8,6 +8,7 @@
   import FormField from '$lib/components/FormField.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import { useI18n } from '$lib/i18n/context';
+  import { mediumDate } from '$lib/shared/time';
   import type { PageProps } from './$types';
 
   let { data, form }: PageProps = $props();
@@ -17,9 +18,8 @@
   const byline = $derived(i18n.t('mem.photoBy', { name: photo.uploader.displayName }));
   const failure = $derived(form && 'message' in form ? form.message : null);
   const saved = $derived(form && 'done' in form && form.done === 'saved');
-  const dateFormat = $derived(
-    new Intl.DateTimeFormat(i18n.locale === 'vi' ? 'vi-VN' : 'en-GB', { dateStyle: 'medium' }),
-  );
+  // R-UI-11: in the viewer's time zone, the same as every other date on the page.
+  const formatDate = (at: number | Date) => mediumDate(at, i18n.locale, data.timeZone);
 </script>
 
 <PageHeader title={photo.caption ?? byline} />
@@ -72,7 +72,7 @@
       </div>
       <div>
         <dt>{i18n.t('photo.added')}</dt>
-        <dd class="tnum">{dateFormat.format(photo.createdAt)}</dd>
+        <dd class="tnum">{formatDate(photo.createdAt)}</dd>
       </div>
     </dl>
   </Card>

@@ -85,22 +85,9 @@ test('R-UI-06 minimal headings use the neutral theme text colour', async ({ page
   expect(colours.heading).toBe(colours.body);
 });
 
-test('AC-NAV-01 mobile row metadata starts below its title', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  // The prototype rows left /memories with the real gallery; Row.svelte still renders on the home page.
-  await page.goto('/');
-  const heading = page.locator('.rowhead h2:has(small)').first();
-  const title = await heading.boundingBox();
-  const meta = await heading.locator('small').boundingBox();
-  expect(title).not.toBeNull();
-  expect(meta).not.toBeNull();
-  expect(Math.abs(meta!.x - title!.x)).toBeLessThanOrEqual(1);
-  expect(meta!.y).toBeGreaterThan(title!.y + 20);
-});
-
-test('R-UI-05 prototype tints vary across tiles and people without clipped RSVP initials', async ({
-  page,
-}) => {
+// Home's prototype rails (placeholder tiles, RSVP faces, the classmates rail) gave way to
+// the real Home in 3b; the classmates' tints live on /members.
+test('R-UI-05 avatar tints vary across classmates in every theme', async ({ page }) => {
   for (const [theme, mode] of [
     ['yearbook', 'light'],
     ['yearbook', 'dark'],
@@ -108,28 +95,15 @@ test('R-UI-05 prototype tints vary across tiles and people without clipped RSVP 
     ['minimal', 'dark'],
     ['night', 'dark'],
   ]) {
-    await page.goto(`/?theme=${theme}&mode=${mode}`);
-    await expect(page.locator('.who .avatar')).toHaveCount(4);
-    expect(await page.locator('.who .avatar').allTextContents()).toEqual(['', '', '', '']);
-    for (const selector of [
-      '.wall > section:first-child .ph',
-      '.wall > section:last-child .ph',
-      '.person .avatar',
-    ]) {
-      const colours = await page
-        .locator(selector)
-        .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).background));
-      expect(colours.length).toBeGreaterThanOrEqual(4);
-      expect(new Set(colours).size).toBe(colours.length);
-    }
     await page.goto(`/members?theme=${theme}&mode=${mode}`);
     const avatars = await page
       .locator('.person .avatar')
       .evaluateAll((elements) =>
         elements.map((element) => getComputedStyle(element).backgroundColor),
       );
+    expect(avatars.length).toBeGreaterThanOrEqual(10);
     // The palette has ten tones: the first ten classmates each get their own.
-    expect(new Set(avatars.slice(0, 10)).size).toBe(Math.min(avatars.length, 10));
+    expect(new Set(avatars.slice(0, 10)).size).toBe(10);
   }
 });
 

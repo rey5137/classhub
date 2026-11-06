@@ -9,6 +9,7 @@ const ROOT = process.cwd();
 const BASE = 'http://127.0.0.1:5173';
 const OUT = path.join(ROOT, '.screenshots');
 const WATCHDOG_MS = 5 * 60 * 1000;
+const DEMO_THREAD_TITLE = 'Ai còn giữ ảnh chuyến dã ngoại Ba Vì?';
 
 const routes = [
   '/',
@@ -147,6 +148,16 @@ async function demoPhotoPath() {
   return `/memories/${photo.id}`;
 }
 
+/** And for the demo thread with comments and a photo reference (seed-demo.ts). */
+async function demoThreadPath() {
+  const response = await fetch(`${BASE}/api/v1/posts`, { signal: AbortSignal.timeout(10_000) });
+  /** @type {{ items: { id: string; title: string }[] }} */
+  const body = await response.json();
+  const thread = body.items.find((item) => item.title === DEMO_THREAD_TITLE);
+  if (!thread) throw new Error('screenshots: the demo seed has no demo thread');
+  return `/discussions/${thread.id}`;
+}
+
 async function run() {
   if (!(await isUp())) {
     server = spawn('npm', ['run', 'dev:offline'], {
@@ -171,7 +182,9 @@ async function run() {
         ? await demoMemberPath()
         : route === '/memories/photo-demo'
           ? await demoPhotoPath()
-          : route;
+          : route === '/discussions/thread-demo'
+            ? await demoThreadPath()
+            : route;
     for (const { theme, mode } of combos) {
       for (const { width, height } of sizes) {
         await page.setViewportSize({ width, height });

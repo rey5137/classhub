@@ -6,11 +6,13 @@
   import '@fontsource/be-vietnam-pro/700.css';
   import '@fontsource/patrick-hand/400.css';
   import { onMount } from 'svelte';
+  import { invalidateAll } from '$app/navigation';
   import { resolve } from '$app/paths';
   import AppShell from '$lib/components/AppShell.svelte';
   import Banner from '$lib/components/Banner.svelte';
   import { provideI18n } from '$lib/i18n/context';
   import { storeLocale, t as translate, type Locale, type MessageKey } from '$lib/i18n';
+  import { isTimeZone, timeZoneCookie } from '$lib/shared/time';
   import type { LayoutProps } from './$types';
 
   let { data, children }: LayoutProps = $props();
@@ -40,6 +42,18 @@
 
   onMount(() => {
     document.documentElement.dataset.locale = locale;
+    // R-UI-11: the server renders times in the zone it was told; tell it this browser's when
+    // they differ (first visit, a trip, a changed clock) and re-render with it once.
+    // Compared as this browser names them, so an alias (Asia/Saigon) is no change.
+    const named = (timeZone: string) =>
+      isTimeZone(timeZone)
+        ? Intl.DateTimeFormat(undefined, { timeZone }).resolvedOptions().timeZone
+        : null;
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (isTimeZone(zone) && zone !== named(data.timeZone)) {
+      document.cookie = timeZoneCookie(zone, location.protocol === 'https:');
+      void invalidateAll();
+    }
   });
 </script>
 

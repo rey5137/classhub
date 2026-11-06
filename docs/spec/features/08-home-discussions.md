@@ -11,7 +11,8 @@
 
 - **R-BRD-01** Home shows, in order: the welcome block (site name, class years, welcome message and banner photo from
   settings, §10.1); pinned info pages and pinned threads; reunion details (an info page with slug `reunion`, shown as a
-  card with date, place and a map link when filled); the 12 newest photos; the 5 most recently active threads.
+  card with date, place and a map link when filled); the 12 newest photos; the 5 most recently active
+  unpinned threads (pinned ones are already listed above).
 - **R-BRD-02** Admins create, edit, pin, order and delete info pages (`slug` 1–40 of `[a-z0-9-]`, title ≤ 160, body
   Markdown ≤ 20,000). Each is reachable at `/info/[slug]`.
 

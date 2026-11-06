@@ -210,12 +210,16 @@ export async function listBoardPosts(
   return { rows: rows.slice(0, options.limit).map(toPostRow), more: rows.length > options.limit };
 }
 
-/** R-BRD-01, R-DB-06, R-DB-07: activity-ordered query walking `posts_activity_idx` (without pinned sort). */
+/**
+ * R-BRD-01, R-DB-06, R-DB-07: activity-ordered query (without pinned sort). `unpinnedOnly` is
+ * Home's active list, where the pinned threads are already shown above it.
+ */
 export function buildRecentPostsQuery(
   database: Database,
-  options: { after: ActivityCursor | null; limit: number },
+  options: { after: ActivityCursor | null; limit: number; unpinnedOnly?: boolean },
 ) {
   const conditions: (SQL | undefined)[] = [isNull(posts.deletedAt)];
+  if (options.unpinnedOnly) conditions.push(eq(posts.isPinned, false));
   if (options.after) {
     conditions.push(
       sql`(${posts.lastActivityAt}, ${posts.id}) < (${options.after.lastActivityAt}, ${options.after.id})`,
@@ -229,7 +233,7 @@ export function buildRecentPostsQuery(
 
 export async function listRecentPosts(
   database: Database,
-  options: { after: ActivityCursor | null; limit: number },
+  options: { after: ActivityCursor | null; limit: number; unpinnedOnly?: boolean },
 ): Promise<{ rows: PostRow[]; more: boolean }> {
   const rows = await buildRecentPostsQuery(database, options);
   return { rows: rows.slice(0, options.limit).map(toPostRow), more: rows.length > options.limit };
@@ -406,6 +410,27 @@ export function buildCommentsQuery(
     .where(and(...conditions))
     .orderBy(asc(comments.createdAt), asc(comments.id))
     .limit(options.limit + 1);
+}
+
+/**
+ * R-BRD-07: the keys of up to `limit` comments before `before`, newest first. A live
+ * comment follows each of them, so every one is on the visible list.
+ */
+export async function listCommentKeysBefore(
+  database: Database,
+  options: { postId: string; before: CommentCursor; limit: number },
+): Promise<CommentCursor[]> {
+  return database.db
+    .select({ createdAt: comments.createdAt, id: comments.id })
+    .from(comments)
+    .where(
+      and(
+        eq(comments.postId, options.postId),
+        sql`(${comments.createdAt}, ${comments.id}) < (${options.before.createdAt}, ${options.before.id})`,
+      ),
+    )
+    .orderBy(desc(comments.createdAt), desc(comments.id))
+    .limit(options.limit);
 }
 
 export async function listPostComments(

@@ -2,9 +2,14 @@ import { z } from 'zod';
 
 // R-BRD-05, R-API-03, R-API-04: request and response DTOs for discussions.
 
-export const postTitleSchema = z.string().trim().min(1).max(160);
-export const postBodySchema = z.string().trim().min(1).max(10_000);
-export const commentBodySchema = z.string().trim().min(1).max(2_000);
+// R-BRD-05: shared with the forms' `maxlength`, so the two never drift apart.
+export const POST_TITLE_MAX = 160;
+export const POST_BODY_MAX = 10_000;
+export const COMMENT_MAX = 2_000;
+
+export const postTitleSchema = z.string().trim().min(1).max(POST_TITLE_MAX);
+export const postBodySchema = z.string().trim().min(1).max(POST_BODY_MAX);
+export const commentBodySchema = z.string().trim().min(1).max(COMMENT_MAX);
 
 export const postIdSchema = z.object({ id: z.uuid() });
 export const commentIdSchema = z.object({ id: z.uuid() });

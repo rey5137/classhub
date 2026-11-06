@@ -11,6 +11,8 @@ declare global {
       theme: ThemeId;
       mode: RenderedMode;
       locale: Locale;
+      /** R-UI-11: the viewer's `tz` cookie when valid, else the Level B `timeZone`. */
+      timeZone: string;
       /** R-UI-01: the effective site settings, read once per request (Level B until the read). */
       settings: SiteSettings;
       /** R-AUTH-12: from the same read; false until it happens. */

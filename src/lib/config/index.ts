@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { siteDefaults } from '../../../site.config';
+import { isTimeZone } from '../shared/time';
 import { contrastRatio, formatRatio, parseHexColor } from '../themes/contrast';
 import { themeIds, themes } from '../themes/registry';
 import { themeTokens, type ThemeId, type ThemeMode } from '../themes/theme-tokens';
@@ -76,6 +77,7 @@ const siteConfigSchema = z
     name: safeText(80),
     years: safeText(40),
     locale: localeSchema,
+    timeZone: z.string().refine(isTimeZone, 'Expected an IANA time zone'),
     theme: themeIdSchema,
     mode: modeSchema,
     accent: accentSchema,

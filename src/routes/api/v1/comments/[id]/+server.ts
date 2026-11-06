@@ -1,5 +1,5 @@
 import type { RequestHandler } from './$types';
-import { guarded, readJson, toResponse } from '$lib/server/http';
+import { bodyView, guarded, readJson, toResponse } from '$lib/server/http';
 import { deleteComment, editComment } from '$lib/server/services/discussions';
 
 // §11.2 / R-BRD-08: edit or soft-delete a comment (owner or admin).
@@ -8,7 +8,7 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
   const { member, context } = guarded(locals);
   return toResponse(
     locals,
-    await editComment(context, member, params, await readJson(request), locals.locale),
+    await editComment(context, member, params, await readJson(request), bodyView(locals)),
   );
 };
 

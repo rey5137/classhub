@@ -45,6 +45,7 @@ import { projectProfile } from './projection';
 // `/api/v1/albums`, `/api/v1/media` and the `/memories` form actions.
 
 export const GALLERY_PAGE = 30;
+export const HOME_PHOTOS = 12;
 const YEAR_CHIPS = 50;
 // One answer for an unknown, deleted or someone else's photo or album, so a refusal
 // never says whether the id exists.
@@ -101,6 +102,17 @@ export async function listPhotos(
       nextCursor: more && last ? encodeCursor([last.createdAt, last.id]) : null,
     }),
   };
+}
+
+/** R-BRD-01: Home's newest photos, the wall's first page cut short. */
+export async function newestPhotos(
+  context: AppContext,
+  viewer: Member,
+  limit = HOME_PHOTOS,
+): Promise<GalleryItem[]> {
+  if (!can(viewer, 'content.read')) return [];
+  const { rows } = await listGallery(context.database, { after: null, limit });
+  return rows.map((row) => toItem(viewer, row));
 }
 
 /** `/memories/[id]`: a live photo, or `undefined` for anything else. */
