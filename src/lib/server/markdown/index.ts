@@ -55,7 +55,8 @@ export interface ReferencedPhoto {
 
 export interface RenderMarkdownOptions {
   locale?: Locale;
-  photos?: ReadonlyMap<string, ReferencedPhoto>;
+  /** Live photos by id. `null`: the gallery is off (R-NAV-02), so every reference is a "not shown" note. */
+  photos?: ReadonlyMap<string, ReferencedPhoto> | null;
 }
 
 export function escapeHtml(value: string): string {
@@ -269,6 +270,11 @@ function extractHrefAttr(attrs: string): string | null {
   return foundHref;
 }
 
+/** An href for an attribute value; the private-use marker characters never pass through. */
+function escapeHref(href: string): string {
+  return escapeHtml(href).replaceAll('\ue000', '&#xe000;').replaceAll('\ue001', '&#xe001;');
+}
+
 function escapeTextNode(text: string): string {
   return escapeHtml(decodeEntitiesOnce(text));
 }
@@ -355,10 +361,7 @@ export function sanitizeHtml(input: string): string {
       const rawHref = extractHrefAttr(parsed.attrs);
       const safeHref = rawHref !== null ? sanitizeHref(rawHref) : null;
       if (safeHref && !isInside('a')) {
-        const escapedHref = escapeHtml(safeHref)
-          .replaceAll('\ue000', '&#xe000;')
-          .replaceAll('\ue001', '&#xe001;');
-        out += `<a href="${escapedHref}" rel="noopener noreferrer nofollow">`;
+        out += `<a href="${escapeHref(safeHref)}" rel="noopener noreferrer nofollow">`;
         openStack.push({ name: 'a', emitted: true });
       } else {
         openStack.push({ name: 'a', emitted: false });
@@ -549,10 +552,7 @@ function renderInlineSegment(segment: string, photoState: PhotoParseState): stri
         // Link labels never expand [[photo:...]] tokens.
         const inner = renderFormatting(escapeHtml(label));
         if (safeHref) {
-          const escapedHref = escapeHtml(safeHref)
-            .replaceAll('\ue000', '&#xe000;')
-            .replaceAll('\ue001', '&#xe001;');
-          out += `<a href="${escapedHref}" rel="noopener noreferrer nofollow">${inner}</a>`;
+          out += `<a href="${escapeHref(safeHref)}" rel="noopener noreferrer nofollow">${inner}</a>`;
         } else {
           out += inner;
         }
@@ -574,6 +574,9 @@ function renderInlineSegment(segment: string, photoState: PhotoParseState): stri
           ) {
             photoState.seenIds.add(normalizedId);
             markerId = normalizedId;
+          } else {
+            // Over the cap: the photo exists, it is just not expanded.
+            markerId = '__hidden__';
           }
         }
         out += `\ue000PHOTO:${photoState.nonce}:${markerId}\ue001`;
@@ -709,13 +712,15 @@ function replacePhotoMarkers(
   sanitizedHtml: string,
   nonce: string,
   locale: Locale,
-  photos?: ReadonlyMap<string, ReferencedPhoto>,
+  photos?: ReadonlyMap<string, ReferencedPhoto> | null,
 ): string {
   const removedText = escapeHtml(t(locale, 'brd.photoRemoved'));
+  const hiddenText = escapeHtml(t(locale, 'brd.photoHidden'));
   const fallbackAlt = t(locale, 'brd.photoAlt');
   const markerRe = new RegExp(`\\ue000PHOTO:${nonce}:([a-z0-9_-]+)\\ue001`, 'g');
 
   return sanitizedHtml.replace(markerRe, (_, id: string) => {
+    if (photos === null || id === '__hidden__') return `<em>${hiddenText}</em>`;
     const photo = photos?.get(id.toLowerCase());
     if (!photo) return `<em>${removedText}</em>`;
     const alt = escapeHtml(photo.caption?.trim() || fallbackAlt);

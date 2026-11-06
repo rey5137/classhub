@@ -15,13 +15,21 @@ import {
   siteSettings,
 } from '../../src/lib/server/db/schema';
 import type { Database } from '../../src/lib/server/ports/database';
-import { defaultSettings, effectiveSettings } from '../../src/lib/server/services/settings';
+import {
+  defaultSettings,
+  effectiveSettings,
+  updateSettings,
+} from '../../src/lib/server/services/settings';
 import { readSettingRows, writeSettings } from '../../src/lib/server/repositories/settings';
 import { load as layoutLoad } from '../../src/routes/+layout.server';
 import { actions as adminActions } from '../../src/routes/admin/+page.server';
 import { load as chatLayout } from '../../src/routes/chat/+layout.server';
 import { load as discussionsLayout } from '../../src/routes/discussions/+layout.server';
 import { load as memoriesLayout } from '../../src/routes/memories/+layout.server';
+import { load as boardLoad } from '../../src/routes/discussions/+page.server';
+import { load as threadLoad } from '../../src/routes/discussions/[id]/+page.server';
+import { load as galleryLoad } from '../../src/routes/memories/+page.server';
+import { load as photoLoad } from '../../src/routes/memories/[id]/+page.server';
 import * as invitesRoute from '../../src/routes/api/v1/admin/invites/+server';
 import * as settingsRoute from '../../src/routes/api/v1/admin/settings/+server';
 import * as postsRoute from '../../src/routes/api/v1/posts/+server';
@@ -125,6 +133,12 @@ async function featurePage(
 }
 
 const asMember = { id: PEOPLE.active.id, role: 'member', displayName: 'Active Member' } as Member;
+const asAdmin = { id: PEOPLE.admin.id, role: 'admin', displayName: 'Admin' } as Member;
+const ctx = {
+  get database() {
+    return database;
+  },
+} as unknown as AppContext;
 const stored = async () => effectiveSettings(await readSettingRows(database.db));
 
 beforeAll(async () => {
@@ -294,6 +308,48 @@ describe('site settings API (R-UI-01, R-UI-04)', () => {
       }),
     ).toBe(true);
     expect((await stored()).logoMediaId).toBe(live.id);
+  });
+
+  it('R-UI-01 a picture another setting took since the read stays live when the write retires it', async () => {
+    const x = await seedDeletedMedia(database, { mediaType: 'site', deletedAt: null });
+    const y = await seedDeletedMedia(database, { mediaType: 'site', deletedAt: null });
+    expect((await patch({ bannerMediaId: x.id })).status).toBe(200);
+    // Admin A read banner = X, then B sets the logo to X before A's write lands.
+    const snapshot = await stored();
+    expect((await patch({ logoMediaId: x.id })).status).toBe(200);
+    const result = await updateSettings(ctx, asAdmin, snapshot, { bannerMediaId: y.id });
+    expect(result.ok).toBe(true);
+    const [row] = await database.db.select().from(media).where(eq(media.id, x.id));
+    expect(row?.deletedAt).toBeNull();
+    expect(await stored()).toMatchObject({ bannerMediaId: y.id, logoMediaId: x.id });
+  });
+
+  it('R-UI-01 two interleaved feature toggles both stick, including the first write on an empty table, and the reply shows what is stored', async () => {
+    const snapshot = await stored();
+    const a = await updateSettings(ctx, asAdmin, snapshot, { features: { memories: false } });
+    const b = await updateSettings(ctx, asAdmin, snapshot, { features: { chat: false } });
+    expect(a.ok && b.ok).toBe(true);
+    expect(b.ok && b.body.features).toMatchObject({ memories: false, chat: false });
+    expect((await stored()).features).toMatchObject({
+      memories: false,
+      chat: false,
+      discussions: true,
+    });
+    // Turning one back on over a stale snapshot leaves the other off.
+    const c = await updateSettings(ctx, asAdmin, snapshot, { features: { memories: true } });
+    expect(c.ok && c.body.features).toMatchObject({ memories: true, chat: false });
+    expect((await stored()).features).toMatchObject({ memories: true, chat: false });
+  });
+
+  it('R-UI-01 a feature patch of false values merges over a stored row', async () => {
+    expect((await patch({ features: { discussions: false } })).status).toBe(200);
+    const response = await patch({ features: { memories: false, chat: false } });
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { features: object }).features).toEqual({
+      discussions: false,
+      memories: false,
+      chat: false,
+    });
   });
 
   it('R-UI-01 DELETE /api/v1/media/:id refuses a site picture a setting names and removes an unused one', async () => {
@@ -474,6 +530,38 @@ describe('feature toggles (R-NAV-02)', () => {
     expect(await (await list()).json()).toEqual(before);
   });
 
+  it('AC-NAV-04 each discussions and memories page load is a 404 with its flag off', async () => {
+    const created = await send('/api/v1/posts', 'POST', memberHeaders, {
+      title: 'Họp lớp',
+      body: 'Ai đi không?',
+    });
+    const { id: threadId } = (await created.json()) as { id: string };
+    const photo = await seedDeletedMedia(database, { ownerId: PEOPLE.active.id, deletedAt: null });
+    const loads = [
+      [boardLoad, {}],
+      [threadLoad, { id: threadId }],
+      [galleryLoad, {}],
+      [photoLoad, { id: photo.id }],
+    ] as const;
+    const run = async (settings: SiteSettings) => {
+      for (const [load, params] of loads) {
+        const event = { locals: locals(asMember, settings), params, url: new URL(ORIGIN) };
+        await (load as (e: unknown) => unknown)(event);
+      }
+    };
+    // With the flags on, the same loads succeed, so a 404 below comes from the flag.
+    await patch({ features: { discussions: true, memories: true } });
+    await expect(run(await stored())).resolves.toBeUndefined();
+    await patch({ features: { discussions: false, memories: false } });
+    const off = await stored();
+    for (const [load, params] of loads) {
+      const event = { locals: locals(asMember, off), params, url: new URL(ORIGIN) };
+      await expect((load as (e: unknown) => unknown)(event)).rejects.toMatchObject({
+        status: 404,
+      });
+    }
+  });
+
   it('memories off refuses the gallery and its photos but not site pictures', async () => {
     const photo = await seedDeletedMedia(database, { ownerId: PEOPLE.active.id, deletedAt: null });
     const site = await seedDeletedMedia(database, { mediaType: 'site', deletedAt: null });
@@ -575,6 +663,36 @@ describe('the /admin settings form (R-UI-01, R-AUTH-17)', () => {
       mode: 'dark',
       locale: 'en',
     });
+  });
+
+  it("R-UI-01 a save from a stale page does not revert another admin's feature toggle", async () => {
+    await patch({ features: { memories: true, discussions: true, chat: true } });
+    // Admin A loaded the page with every feature on; B then turns memories off.
+    const loaded = { 'was-memories': 'on', 'was-discussions': 'on', 'was-chat': 'on' };
+    await patch({ features: { memories: false } });
+    // A unticks chat (memories and discussions stay ticked, as loaded).
+    const stale = { ...full, ...loaded, memories: 'on', discussions: 'on' };
+    delete (stale as Record<string, string>).chat;
+    expect((await submit('settings', stale)).result).toEqual({
+      action: 'settings',
+      done: 'settingsSaved',
+    });
+    expect((await stored()).features).toEqual({ memories: false, discussions: true, chat: false });
+  });
+
+  it("R-UI-01 a save with no flag changed leaves every flag; a changed flag applies; a forged was- is only A's own change", async () => {
+    await patch({ features: { memories: true, discussions: false, chat: true } });
+    const same = { ...full, 'was-memories': 'on', 'was-discussions': '', 'was-chat': 'on' };
+    await submit('settings', { ...same, name: 'Tên mới' });
+    expect(await stored()).toMatchObject({
+      name: 'Tên mới',
+      features: { memories: true, discussions: false, chat: true },
+    });
+    await submit('settings', { ...same, discussions: 'on' });
+    expect((await stored()).features).toEqual({ memories: true, discussions: true, chat: true });
+    // Forging was-chat as already off while the box is ticked changes nothing.
+    await submit('settings', { ...same, discussions: 'on', 'was-chat': '' });
+    expect((await stored()).features.chat).toBe(true);
   });
 
   it('sends only the accent boxes the chosen theme ships, and names the contrast ratio', async () => {

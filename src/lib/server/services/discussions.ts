@@ -71,19 +71,29 @@ export interface BodyView {
 
 /**
  * R-BRD-04 photo references for a set of bodies. R-NAV-02: with memories off nothing is
- * looked up, so every reference renders as the placeholder (no caption, no link).
+ * looked up (`null`), so every reference renders as the "not shown" note (no caption, no link).
  */
 function lookupPhotos(
   context: AppContext,
   view: BodyView,
   ids: string[],
-): Promise<ReadonlyMap<string, ReferencedPhoto>> {
-  if (!view.memories || ids.length === 0) return Promise.resolve(new Map());
+): Promise<ReadonlyMap<string, ReferencedPhoto> | null> {
+  if (!view.memories) return Promise.resolve(null);
+  if (ids.length === 0) return Promise.resolve(new Map());
   return findReferencedPhotos(context.database, ids);
 }
 
-function toPostSummary(viewer: Member, row: PostRow): PostSummary {
+/** The projected author and the viewer's edit and delete rights over a post or comment row. */
+function authorAndRights(viewer: Member, row: PostRow | CommentRow) {
   const { id, displayName, avatarMediaId } = projectProfile(viewer, row.author);
+  return {
+    author: { id, displayName, ...(avatarMediaId ? { avatarMediaId } : {}) },
+    canEdit: can(viewer, 'content.edit', { ownerId: row.authorId }),
+    canDelete: can(viewer, 'content.delete', { ownerId: row.authorId }),
+  };
+}
+
+function toPostSummary(viewer: Member, row: PostRow): PostSummary {
   return postSummarySchema.parse({
     id: row.id,
     title: row.title,
@@ -95,9 +105,7 @@ function toPostSummary(viewer: Member, row: PostRow): PostSummary {
     updatedAt: row.updatedAt,
     lastActivityAt: row.lastActivityAt,
     edited: row.updatedAt > row.createdAt,
-    author: { id, displayName, ...(avatarMediaId ? { avatarMediaId } : {}) },
-    canEdit: can(viewer, 'content.edit', { ownerId: row.authorId }),
-    canDelete: can(viewer, 'content.delete', { ownerId: row.authorId }),
+    ...authorAndRights(viewer, row),
     canModerate: can(viewer, 'thread.moderate'),
   });
 }
@@ -106,9 +114,8 @@ function toPostItem(
   viewer: Member,
   row: PostRow,
   locale: Locale,
-  photos: ReadonlyMap<string, ReferencedPhoto>,
+  photos: ReadonlyMap<string, ReferencedPhoto> | null,
 ): PostItem {
-  const { id, displayName, avatarMediaId } = projectProfile(viewer, row.author);
   return postItemSchema.parse({
     id: row.id,
     title: row.title,
@@ -121,9 +128,7 @@ function toPostItem(
     updatedAt: row.updatedAt,
     lastActivityAt: row.lastActivityAt,
     edited: row.updatedAt > row.createdAt,
-    author: { id, displayName, ...(avatarMediaId ? { avatarMediaId } : {}) },
-    canEdit: can(viewer, 'content.edit', { ownerId: row.authorId }),
-    canDelete: can(viewer, 'content.delete', { ownerId: row.authorId }),
+    ...authorAndRights(viewer, row),
     canModerate: can(viewer, 'thread.moderate'),
   });
 }
@@ -132,7 +137,7 @@ function toCommentItem(
   viewer: Member,
   row: CommentRow,
   locale: Locale,
-  photos: ReadonlyMap<string, ReferencedPhoto>,
+  photos: ReadonlyMap<string, ReferencedPhoto> | null,
 ): CommentItem {
   if (row.deletedAt !== null) {
     return commentItemSchema.parse({
@@ -142,7 +147,6 @@ function toCommentItem(
       createdAt: row.createdAt,
     });
   }
-  const { id, displayName, avatarMediaId } = projectProfile(viewer, row.author);
   return liveCommentSchema.parse({
     id: row.id,
     postId: row.postId,
@@ -152,9 +156,7 @@ function toCommentItem(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     edited: row.updatedAt > row.createdAt,
-    author: { id, displayName, ...(avatarMediaId ? { avatarMediaId } : {}) },
-    canEdit: can(viewer, 'content.edit', { ownerId: row.authorId }),
-    canDelete: can(viewer, 'content.delete', { ownerId: row.authorId }),
+    ...authorAndRights(viewer, row),
   });
 }
 

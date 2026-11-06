@@ -557,7 +557,9 @@ describe('posts and comments CRUD, lock, moderation, audit and privacy (R-BRD-03
       expect(asMember.body.post.bodyHtml).toContain(
         `<a href="/memories/${livePhoto.id}" rel="noopener noreferrer nofollow"><img src="/api/v1/media/${livePhoto.id}/thumb" alt="Lửa trại Đà Lạt"></a>`,
       );
-      expect(asMember.body.post.bodyHtml.match(/<em>Ảnh đã gỡ<\/em>/g)).toHaveLength(13);
+      // Refs 1-10 are expanded (live photo; deleted, avatar, unknown and six absent ids stay "removed"); the last four are over the cap.
+      expect(asMember.body.post.bodyHtml.match(/<em>Ảnh đã gỡ<\/em>/g)).toHaveLength(9);
+      expect(asMember.body.post.bodyHtml.match(/<em>Ảnh không hiển thị<\/em>/g)).toHaveLength(4);
       const firstComment = asMember.body.comments.items[0]!;
       expect(firstComment.deleted).toBe(false);
       if (!firstComment.deleted) {

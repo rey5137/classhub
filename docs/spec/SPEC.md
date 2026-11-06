@@ -124,7 +124,8 @@ A custom domain, if used, shares the one Access application and AUD (R-OPS-16).
 ### 1.2 Invariants
 
 - **INV-1 Fail closed on identity.** No private data, page data or media leaves the server without a verified Access
-  JWT (signature, issuer, audience, expiry) **and** an `active` membership row. A missing, forged or unverifiable
+  JWT (signature, issuer, audience, expiry) **and** an `active` membership row, except `/health` and, while the `join` setting is on, the `/join` form
+  (R-AUTH-27), which carry no member data, media or counts. A missing, forged or unverifiable
   assertion gets the uniform denial (R-AUTH-03, R-AUTH-11). No debug identity header or query exists in a production
   build (R-AUTH-13).
 - **INV-2 D1 is the only authoritative store.** The Durable Object keeps connections and ephemeral presence only; no

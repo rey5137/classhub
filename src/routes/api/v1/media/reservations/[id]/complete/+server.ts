@@ -6,6 +6,12 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
   const { member, context } = guarded(locals);
   return toResponse(
     locals,
-    await finishReservation(context, member, params, await readJson(request)),
+    await finishReservation(
+      context,
+      member,
+      params,
+      await readJson(request),
+      locals.settings.features,
+    ),
   );
 };

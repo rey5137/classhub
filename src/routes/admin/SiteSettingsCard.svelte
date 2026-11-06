@@ -245,6 +245,11 @@
         {#each ['memories', 'discussions', 'chat'] as const as feature (feature)}
           <label class="choice">
             <input type="checkbox" name={feature} checked={settings.features[feature]} />
+            <input
+              type="hidden"
+              name="was-{feature}"
+              value={settings.features[feature] ? 'on' : ''}
+            />
             {i18n.t(`nav.${feature}`)}
           </label>
         {/each}

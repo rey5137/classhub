@@ -283,8 +283,8 @@ async function guard(
     );
   } else await touch;
 
-  // R-NAV-02: after membership, admins included. A page GET renders its 404 in the
-  // feature's own layout (`requireFeature`); an API or a form post is refused here.
+  // R-NAV-02: after membership, admins included. A page GET renders its 404 from
+  // each page load (`requireFeature`; a layout load can be skipped); an API or a form post is refused here.
   const route = routeKey(event.route.id, path);
   const api = route.startsWith('/api/');
   if (

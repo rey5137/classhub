@@ -117,6 +117,7 @@ export const en: Record<keyof typeof vi, string> = {
   'brd.replies.other': '{count} replies',
   'brd.photoAlt': 'Class photo',
   'brd.photoRemoved': 'Photo removed',
+  'brd.photoHidden': 'Photo not shown',
   'brd.threadLocked': 'This discussion is locked and accepts no new replies.',
   'brd.commentDeleted': 'Comment deleted',
   'home.greeting': 'Hi {name}, here is our class.',

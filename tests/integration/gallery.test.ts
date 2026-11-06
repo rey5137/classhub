@@ -323,7 +323,12 @@ describe('photo edit and delete (R-MEM-14, R-MEM-20, §3.3)', () => {
 describe('uploader projection (R-PROF-02, INV-5)', () => {
   const photoPage = (person: Member, id: string) =>
     photoLoad({
-      locals: { member: person, context: { database } as unknown as AppContext, locale: 'vi' },
+      locals: {
+        member: person,
+        context: { database } as unknown as AppContext,
+        locale: 'vi',
+        settings: defaultSettings,
+      },
       params: { id },
     } as unknown as Parameters<typeof photoLoad>[0]) as Promise<{
       photo: { uploader: { avatarMediaId?: string } };

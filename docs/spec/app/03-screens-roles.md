@@ -28,7 +28,8 @@
   shell is mobile-first: a bottom tab bar under 768 px (Home, Memories, Discussions, Chat, Members), a top bar with the
   rest above it; the profile and admin entries sit in the member menu.
 - **R-NAV-02** A route of a disabled feature returns 404 for pages and `feature_disabled` for its API; its data stays
-  untouched and comes back when the feature is re-enabled (R-UI-04).
+  untouched and comes back when the feature is re-enabled (R-UI-04). Every page load of the feature checks the flag itself, so
+  a client navigation (`__data.json`, where SvelteKit skips the layout's load) is refused too; its API and form posts are refused in the pipeline.
 - **R-NAV-03** Every private page loads its data in `+page.server.ts` after the membership check; client-side
   navigation never fetches a private API without the same check (R-PLAT-01).
 

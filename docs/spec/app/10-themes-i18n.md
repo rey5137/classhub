@@ -13,7 +13,8 @@
   description, welcome message, banner photo, logo and favicon (uploaded through §7 as `media_type = "site"`, kept
   out of the gallery), theme preset, display mode (light, dark, system), accent colour, card density (comfortable,
   compact), default language, feature toggles for memories, discussions and chat, and join requests on or off (`join`,
-  default off, R-AUTH-27).
+  default off, R-AUTH-27). A save merges feature toggles into the stored row key by key, so two admins toggling at
+  once both stick, and the reply shows the stored settings.
 - **R-UI-02** **Level B, project configuration (`site.config.ts`, one validated object):** navigation order,
   default locale, default time zone, visible profile fields, app name, upload limits, quota thresholds, default
   theme, chat retention, messaging-host allow-list. Every service reads it through `src/lib/config/` only; no default

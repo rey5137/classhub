@@ -15,8 +15,10 @@ import { usageSummary } from '$lib/server/services/gallery';
 import { adminInfoPages, createInfo, editInfo, removeInfo } from '$lib/server/services/info';
 import { applyAppearance } from '$lib/server/appearance';
 import { updateSettings } from '$lib/server/services/settings';
-import { siteMediaKeys } from '$lib/contracts/settings';
+import { siteMediaKeys, type Feature, type Features } from '$lib/contracts/settings';
 import { themes } from '$lib/themes/registry';
+
+const featureKeys: Feature[] = ['memories', 'discussions', 'chat'];
 
 // R-NAV-03: the invite screen loads here, after the membership check; R-NAV-05 refuses
 // everyone but admins before any row is read.
@@ -40,16 +42,25 @@ export const load: PageServerLoad = async ({ locals }) => {
 };
 
 /**
- * R-UI-01: the settings form as a PATCH body. Every field is sent, so an empty accent
- * box clears that mode's accent and an unticked feature is off.
+ * R-UI-01: the settings form as a PATCH body. Every scalar field is sent, so an empty
+ * accent box clears that mode's accent. A feature is sent only when its box differs from
+ * the hidden `was-<feature>` value the page was loaded with, so a save from a stale page
+ * never reverts another admin's toggle. A form without the hidden value is compared with
+ * the stored flag.
  */
-function settingsInput(form: FormData) {
+function settingsInput(form: FormData, current: Features) {
   const theme = formText(form, 'theme');
   const modes = theme && theme in themes ? themes[theme as keyof typeof themes].modes : [];
   const accent: Record<string, string> = {};
   for (const mode of modes) {
     const colour = formText(form, `accent-${mode}`)?.trim().toLowerCase();
     if (colour) accent[mode] = colour;
+  }
+  const features: Partial<Features> = {};
+  for (const feature of featureKeys) {
+    const submitted = form.get(feature) === 'on';
+    const was = form.has(`was-${feature}`) ? form.get(`was-${feature}`) === 'on' : current[feature];
+    if (submitted !== was) features[feature] = submitted;
   }
   return {
     name: formText(form, 'name')?.trim(),
@@ -61,11 +72,7 @@ function settingsInput(form: FormData) {
     accent: Object.keys(accent).length > 0 ? accent : null,
     density: formText(form, 'density'),
     locale: formText(form, 'locale'),
-    features: {
-      memories: form.get('memories') === 'on',
-      discussions: form.get('discussions') === 'on',
-      chat: form.get('chat') === 'on',
-    },
+    ...(Object.keys(features).length > 0 ? { features } : {}),
   };
 }
 
@@ -127,7 +134,12 @@ export const actions: Actions = {
     const { locals, request } = event;
     const { member, context } = guarded(locals);
     const form = await request.formData();
-    const result = await updateSettings(context, member, locals.settings, settingsInput(form));
+    const result = await updateSettings(
+      context,
+      member,
+      locals.settings,
+      settingsInput(form, locals.settings.features),
+    );
     if (!result.ok) return formFailure('settings', locals, result);
     // The pipeline read the settings before this write; this response shows the new ones.
     locals.settings = result.body;

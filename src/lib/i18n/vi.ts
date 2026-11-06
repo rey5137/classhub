@@ -116,6 +116,7 @@ export const vi = {
   'brd.replies.other': '{count} trả lời',
   'brd.photoAlt': 'Ảnh của lớp',
   'brd.photoRemoved': 'Ảnh đã gỡ',
+  'brd.photoHidden': 'Ảnh không hiển thị',
   'brd.threadLocked': 'Cuộc thảo luận này đã khoá, không nhận thêm trả lời mới.',
   'brd.commentDeleted': 'Bình luận đã xoá',
   'home.greeting': 'Chào {name}, lớp mình đây.',

@@ -757,6 +757,44 @@ describe('R-NAV-02 memories turned off', () => {
       .where(eq(users.id, PEOPLE.active.id));
   });
 
+  it('AC-NAV-04 a photo reserved before memories went off can neither upload nor complete; avatars still can', async () => {
+    const photo = await reserve();
+    const avatar = await uploaded({
+      purpose: 'avatar',
+      width: 512,
+      height: 512,
+      thumbBytes: 0,
+      thumbSha256: digest(new Uint8Array()),
+    });
+    const admin = await harness.as(PEOPLE.admin.email);
+    const siteReservation = await harness.send(root, {
+      method: 'POST',
+      headers: { ...admin, origin: ORIGIN, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...input(), purpose: 'site' }),
+    });
+    const site = (await siteReservation.json()) as { id: string };
+    for (const variant of ['image', 'thumb'])
+      expect((await put(site.id, variant, webp, admin)).status).toBe(200);
+    await memoriesOff();
+
+    const refusedPut = await put(photo.id);
+    expect(refusedPut.status).toBe(404);
+    expect(errorBodySchema.parse(await refusedPut.json()).error.code).toBe('feature_disabled');
+    const done = await finish(photo.id);
+    expect(done.status).toBe(404);
+    expect(errorBodySchema.parse(await done.json()).error.code).toBe('feature_disabled');
+    // The same status createReservation answers with.
+    const created = await harness.send(root, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify(input()),
+    });
+    expect(created.status).toBe(done.status);
+
+    expect((await finish(avatar.id)).status).toBe(201);
+    expect((await finish(site.id, {}, admin)).status).toBe(201);
+  });
+
   it('AC-NAV-04 refuses a photo upload, hides photo bytes like an unknown id; avatars and site media stay served', async () => {
     const photo = await uploaded();
     expect((await finish(photo.id)).status).toBe(201);

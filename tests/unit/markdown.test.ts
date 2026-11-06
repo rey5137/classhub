@@ -217,7 +217,17 @@ describe('Markdown renderer and allow-list sanitizer (R-BRD-03, R-BRD-04)', () =
     expect(extractPhotoIds([twelveMd])).toEqual(twelveIds.slice(0, 10));
     const twelveHtml = renderMarkdown(twelveMd, { locale: 'vi', photos: twelveMap });
     expect(twelveHtml.match(/<img /g)).toHaveLength(10);
-    expect(twelveHtml.match(/<em>Ảnh đã gỡ<\/em>/g)).toHaveLength(2);
+    expect(twelveHtml.match(/<em>Ảnh không hiển thị<\/em>/g)).toHaveLength(2);
+    expect(twelveHtml).not.toContain('Ảnh đã gỡ');
+
+    // R-NAV-02: memories off (`photos: null`) hides every reference, live or not, with the neutral note.
+    const offHtml = renderMarkdown(`[[photo:${liveId}]] [[photo:${deletedId}]]`, {
+      locale: 'en',
+      photos: null,
+    });
+    expect(offHtml).not.toContain('<img');
+    expect(offHtml.match(/<em>Photo not shown<\/em>/g)).toHaveLength(2);
+    expect(offHtml).not.toContain('Photo removed');
 
     const enHtml = renderMarkdown(`[[photo:${noCaptionId}]] [[photo:${deletedId}]]`, {
       locale: 'en',

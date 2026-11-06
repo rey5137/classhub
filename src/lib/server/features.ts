@@ -45,8 +45,9 @@ export function disabledFeature(path: string, features: Features): Feature | nul
 
 /**
  * R-NAV-02: a disabled feature's page is a 404. Each feature's own route folder calls
- * this from its `+layout.server.ts`; it reads only `locals`, so it never reruns the
- * root layout. Its API and form posts are refused earlier, in the pipeline.
+ * this from every page load itself, since SvelteKit can skip a layout load on a
+ * `__data.json` navigation; it reads only `locals`. API and form posts are refused
+ * earlier, in the pipeline.
  */
 export function requireFeature(locals: App.Locals, feature: Feature): void {
   if (!locals.settings.features[feature]) error(404, t(locals.locale, 'error.not_found'));

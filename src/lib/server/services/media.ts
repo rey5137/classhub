@@ -158,6 +158,7 @@ export async function uploadVariant(
   member: Member,
   params: unknown,
   request: Request,
+  features: Features,
   now = Date.now(),
 ): Promise<AdminResult<unknown>> {
   const parsed = parse(mediaPathSchema, params);
@@ -165,6 +166,8 @@ export async function uploadVariant(
   const row = await findReservation(context.database, parsed.data.id);
   const refusal = reservationAccess(row, member, now);
   if (refusal || !row) return refusal ?? forbidden;
+  // R-NAV-02: a photo reserved before memories was turned off can't finish.
+  if (row.purpose === 'photo' && !features.memories) return memoriesDisabled;
   const { key, expected, hash } = reservedVariant(row, parsed.data.variant);
   if (!key) return notFound;
   const mime = request.headers.get('content-type');
@@ -190,6 +193,7 @@ export async function finishReservation(
   member: Member,
   params: unknown,
   input: unknown,
+  features: Features,
   now = Date.now(),
 ): Promise<AdminResult<unknown>> {
   const path = parse(reservationPathSchema, params);
@@ -199,6 +203,8 @@ export async function finishReservation(
   const row = await findReservation(context.database, path.data.id);
   const refusal = reservationAccess(row, member, now);
   if (refusal || !row) return refusal ?? forbidden;
+  // R-NAV-02: a photo reserved before memories was turned off can't finish.
+  if (row.purpose === 'photo' && !features.memories) return memoriesDisabled;
   if (!row.mediaId) return conflict;
   if (parsed.data.albumId && !(await findAlbum(context.database, parsed.data.albumId)))
     return invalid;

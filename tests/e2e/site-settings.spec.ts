@@ -110,12 +110,30 @@ test('AC-NAV-04 turning discussions off hides them and turning them on shows the
     const off = await threads();
     expect(off.status).toBe(404);
     expect(off.body.error.code).toBe('feature_disabled');
+    // A crafted data request gets the load's own 404 node error and no thread data.
+    const seeded = before.body.items[0] as { id: string; title: string };
+    for (const path of ['/discussions', `/discussions/${seeded.id}`]) {
+      const data = await page.request.get(`${path}/__data.json?x-sveltekit-invalidated=01`);
+      const text = await data.text();
+      expect(text, path).not.toContain(seeded.title);
+      expect(text, path).toContain('"status":404');
+    }
 
     await saveFromAdmin(page, (admin) => admin.locator('input[name="discussions"]').check());
     await page.goto('/');
     await expect(nav(page)).toHaveCount(1);
     expect((await page.goto('/discussions'))?.status()).toBe(200);
     expect(await threads()).toEqual(before);
+
+    // R-NAV-02: a board already open when discussions go off. The click is a client
+    // navigation, which asks for `__data.json` and must get the 404 page, not the thread.
+    await page.goto('/discussions');
+    await expect(page.locator('html')).toHaveAttribute('data-locale', 'vi');
+    const thread = page.locator('main a[href^="/discussions/"]:not([href*="?"])').first();
+    await expect(thread).toBeVisible();
+    await restore(page.request, { features: { discussions: false } });
+    await thread.click();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('404');
   } finally {
     await restore(page.request, original);
   }

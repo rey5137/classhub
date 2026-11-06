@@ -1,6 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { t } from '$lib/i18n';
+import { requireFeature } from '$lib/server/features';
 import { can } from '$lib/server/auth/permissions';
 import { bodyView, formFailure, formText, guarded } from '$lib/server/http';
 import {
@@ -16,6 +17,7 @@ import {
 // §7.2 /discussions/[id]: an unknown, deleted or malformed id is one "not found", so the
 // page never says which. Comments page forward with a keyset cursor (R-BRD-07).
 export const load: PageServerLoad = async ({ locals, params, url }) => {
+  requireFeature(locals, 'discussions');
   const { member, context } = guarded(locals);
   const cursor = url.searchParams.get('cursor');
   const thread = await getThreadWithComments(

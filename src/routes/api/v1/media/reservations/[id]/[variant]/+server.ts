@@ -12,5 +12,8 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
       locale: locals.locale,
       status: 415,
     });
-  return toResponse(locals, await uploadVariant(context, member, params, request));
+  return toResponse(
+    locals,
+    await uploadVariant(context, member, params, request, locals.settings.features),
+  );
 };

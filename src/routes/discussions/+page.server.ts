@@ -1,6 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { t } from '$lib/i18n';
+import { requireFeature } from '$lib/server/features';
 import { can } from '$lib/server/auth/permissions';
 import { bodyView, formFailure, formText, guarded } from '$lib/server/http';
 import { createPost, listPosts } from '$lib/server/services/discussions';
@@ -8,6 +9,7 @@ import { createPost, listPosts } from '$lib/server/services/discussions';
 // R-BRD-06: the board reads its cursor from the query string, so "older threads" is a
 // plain link that works without JS; there is no offset paging.
 export const load: PageServerLoad = async ({ locals, url }) => {
+  requireFeature(locals, 'discussions');
   const { member, context } = guarded(locals);
   const cursor = url.searchParams.get('cursor');
   const page = await listPosts(context, member, cursor ? { cursor } : {});

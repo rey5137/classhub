@@ -60,7 +60,7 @@ successful independent restore. Deploying is not enough.
 
 ## 2. Gaps the spec leaves silent, filled with defaults
 
-* **Markdown stack:** `marked` with a custom renderer limited to the R-BRD-03 subset, then a string allow-list
+* **Markdown stack:** a hand-written parser limited to the R-BRD-03 subset (no `marked`), then a string allow-list
   sanitizer that runs without a DOM (`sanitize-html` is too heavy for the Worker; pick in 3a, measured against the
   10 ms CPU budget on a 10,000-character post).
 * **JWT library:** `jose` (Workers-compatible, no Node built-ins).

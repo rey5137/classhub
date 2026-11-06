@@ -10,8 +10,8 @@
 ## 8.1 Home and info pages
 
 - **R-BRD-01** Home shows, in order: the welcome block (site name, class years, welcome message and banner photo from
-  settings, §10.1); pinned info pages and pinned threads; reunion details (an info page with slug `reunion`, shown as a
-  card with date, place and a map link when filled); the 12 newest photos; the 5 most recently active
+  settings, §10.1); pinned info pages and pinned threads; reunion details (the info page with slug `reunion`, shown as a
+  card with its title and rendered body; it is not listed again among the pinned info pages); the 12 newest photos; the 5 most recently active
   unpinned threads (pinned ones are already listed above).
 - **R-BRD-02** Admins create, edit, pin, order and delete info pages (`slug` 1–40 of `[a-z0-9-]`, title ≤ 160, body
   Markdown ≤ 20,000). Each is reachable at `/info/[slug]`.
@@ -24,13 +24,16 @@
   `href` only) cleans; links get `rel="noopener noreferrer nofollow"`, and only `https:`, `mailto:` and same-origin
   relative URLs survive. Both must run without a DOM in the Worker.
 - **R-BRD-04** An internal photo reference `[[photo:<media-id>]]` renders as the photo's thumbnail linking to
-  `/memories/<id>`, after a visibility check; a deleted or unknown id renders the placeholder (R-MEM-20).
+  `/memories/<id>`, after a visibility check. At most 10 distinct references per body are expanded; further ones, and every
+  reference while memories is off (R-NAV-02), render a neutral *photo not shown* note (`brd.photoHidden`). A deleted or
+  unknown id renders the *removed* placeholder (`brd.photoRemoved`, R-MEM-20).
 
 ## 8.3 Threads and comments
 
 - **R-BRD-05** Limits: title 1–160, post body 1–10,000, comment 1–2,000 characters (after trimming).
 - **R-BRD-06** The board lists pinned threads first, then by `last_activity_at` descending, 20 per page, keyset
-  paged. A new comment updates the thread's `last_activity_at` and `comment_count` in the same batch (R-DB-08).
+  paged; the list carries a plain-text excerpt (≤ 200 characters, photo references removed) and the full HTML comes
+  only with the thread. A new comment updates the thread's `last_activity_at` and `comment_count` in the same batch (R-DB-08).
 - **R-BRD-07** Comments are one level, oldest first, 20 per page. A locked thread accepts no new comments (admins
   included, until unlocked) and says so.
 - **R-BRD-08** Authors edit and delete their own posts and comments; an edit shows *edited*; a delete is soft and

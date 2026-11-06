@@ -14,7 +14,7 @@ import type { Locale } from '../../i18n';
 import type { Member } from '../auth/membership';
 import { can } from '../auth/permissions';
 import type { AppContext } from '../context';
-import { extractPhotoIds, renderMarkdown, type ReferencedPhoto } from '../markdown';
+import { extractPhotoIds, renderMarkdown } from '../markdown';
 import { findReferencedPhotos } from '../repositories/discussions';
 import {
   deleteInfoPage,
@@ -45,10 +45,11 @@ export async function renderSiteMarkdown(
   features: Features,
   locale: Locale,
 ): Promise<string> {
-  // R-NAV-02: with memories off a photo reference names no gallery photo (no caption, no link).
+  // R-NAV-02: with memories off a photo reference names no gallery photo (no caption, no link),
+  // and renders as the "not shown" note.
   const photos = features.memories
     ? await findReferencedPhotos(context.database, extractPhotoIds([markdown]))
-    : new Map<string, ReferencedPhoto>();
+    : null;
   return renderMarkdown(markdown, { locale, photos });
 }
 

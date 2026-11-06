@@ -1,6 +1,7 @@
 import { error, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { t } from '$lib/i18n';
+import { requireFeature } from '$lib/server/features';
 import { guarded, formFailure, formText } from '$lib/server/http';
 import { can } from '$lib/server/auth/permissions';
 import {
@@ -14,6 +15,7 @@ import {
 // R-MEM-14: the wall reads its filters and cursor from the query string, so every
 // filter and the next page are plain links that work without JS.
 export const load: PageServerLoad = async ({ locals, url }) => {
+  requireFeature(locals, 'memories');
   const { member, context } = guarded(locals);
   const query: Record<string, string> = {};
   for (const name of ['album', 'year', 'cursor']) {

@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, inArray, isNull, lte, notExists, or, sql } from 'drizzle-orm';
-import { siteMediaKeys } from '../../contracts/settings';
-import { media, siteSettings, storageUsage, uploadReservations, users } from '../db/schema';
+import { media, storageUsage, uploadReservations, users } from '../db/schema';
 import { finalKeys } from './media';
+import { notNamedBySiteSetting } from './settings';
 import { uuidv7 } from '../ids';
 import type { Database } from '../ports/database';
 
@@ -96,20 +96,7 @@ export async function retireOrphanAvatars(database: Database, now: number) {
  * One statement, so a settings write that lands meanwhile keeps its row.
  */
 export async function retireOrphanSiteMedia(database: Database, now: number) {
-  const orphan = and(
-    isNull(media.deletedAt),
-    notExists(
-      database.db
-        .select({ one: sql`1` })
-        .from(siteSettings)
-        .where(
-          and(
-            inArray(siteSettings.key, [...siteMediaKeys]),
-            sql`${siteSettings.valueJson} = json_quote(${media.id})`,
-          ),
-        ),
-    ),
-  );
+  const orphan = and(isNull(media.deletedAt), notNamedBySiteSetting(database));
   await database.db
     .update(media)
     .set({ deletedAt: now })

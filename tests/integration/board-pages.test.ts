@@ -464,7 +464,7 @@ describe('a thread (R-BRD-07, R-BRD-08)', () => {
     expect((await thread(member, post.id)).post.bodyHtml).toContain(`href="/memories/${photo.id}"`);
     const off = { ...defaultSettings, features: { ...defaultSettings.features, memories: false } };
     const data = await thread(member, post.id, '', off, recording);
-    expect(data.post.bodyHtml).toBe('<p><em>Photo removed</em></p>');
+    expect(data.post.bodyHtml).toBe('<p><em>Photo not shown</em></p>');
     expect(prepared.filter((query) => /"media"/.test(query))).toEqual([]);
   });
 

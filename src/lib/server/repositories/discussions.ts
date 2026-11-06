@@ -54,26 +54,36 @@ export interface CommentCursor {
   id: string;
 }
 
-function toAuthor(
-  authorId: string,
-  row: {
-    displayName: string;
-    status: ProfileOwner['status'];
-    preferredName: string | null;
-    avatarMediaId: string | null;
-    deletionRequestedAt: number | null;
-    visibilityJson: string | null;
-  },
-): ProfileOwner {
-  return {
-    id: authorId,
-    displayName: row.displayName,
-    status: row.status,
-    preferredName: row.preferredName,
-    avatarMediaId: row.avatarMediaId,
-    deletionRequestedAt: row.deletionRequestedAt,
+interface AuthorColumns {
+  authorId: string;
+  displayName: string;
+  status: ProfileOwner['status'];
+  preferredName: string | null;
+  avatarMediaId: string | null;
+  deletionRequestedAt: number | null;
+  visibilityJson: string | null;
+}
+
+/** Folds the joined author columns of a selected row into its `author` owner. */
+function withAuthor<T extends AuthorColumns>(row: T) {
+  const {
+    displayName,
+    status,
+    preferredName,
+    avatarMediaId,
+    deletionRequestedAt,
+    visibilityJson,
+    ...rest
+  } = row;
+  const author: ProfileOwner = {
+    id: row.authorId,
+    displayName,
+    status,
+    preferredName,
+    avatarMediaId,
+    deletionRequestedAt,
     contacts:
-      row.visibilityJson === null
+      visibilityJson === null
         ? null
         : {
             contactEmail: null,
@@ -81,9 +91,10 @@ function toAuthor(
             messagingUrl: null,
             city: null,
             bio: null,
-            visibilityJson: row.visibilityJson,
+            visibilityJson,
           },
   };
+  return { ...rest, author };
 }
 
 function selectPosts(database: Database) {
@@ -115,26 +126,7 @@ function selectPosts(database: Database) {
 type SelectedPost = Awaited<ReturnType<ReturnType<typeof selectPosts>['limit']>>[number];
 
 function toPostRow(row: SelectedPost): PostRow {
-  const {
-    displayName,
-    status,
-    preferredName,
-    avatarMediaId,
-    deletionRequestedAt,
-    visibilityJson,
-    ...rest
-  } = row;
-  return {
-    ...rest,
-    author: toAuthor(row.authorId, {
-      displayName,
-      status,
-      preferredName,
-      avatarMediaId,
-      deletionRequestedAt,
-      visibilityJson,
-    }),
-  };
+  return withAuthor(row);
 }
 
 function selectComments(database: Database) {
@@ -162,26 +154,7 @@ function selectComments(database: Database) {
 type SelectedComment = Awaited<ReturnType<ReturnType<typeof selectComments>['limit']>>[number];
 
 function toCommentRow(row: SelectedComment): CommentRow {
-  const {
-    displayName,
-    status,
-    preferredName,
-    avatarMediaId,
-    deletionRequestedAt,
-    visibilityJson,
-    ...rest
-  } = row;
-  return {
-    ...rest,
-    author: toAuthor(row.authorId, {
-      displayName,
-      status,
-      preferredName,
-      avatarMediaId,
-      deletionRequestedAt,
-      visibilityJson,
-    }),
-  };
+  return withAuthor(row);
 }
 
 /** R-BRD-06, R-DB-06, R-DB-07: board query walking `posts_pinned_activity_idx`. */

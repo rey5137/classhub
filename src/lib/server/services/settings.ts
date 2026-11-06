@@ -133,7 +133,8 @@ export async function updateSettings(
   const dead = await deadMedia();
   if (dead) return { ok: false, code: 'validation', fields: dead };
 
-  // A replaced or removed picture goes, unless another setting still shows it.
+  // A replaced or removed picture goes, unless a setting still shows it: this request's
+  // own (`kept`) or one written since the snapshot (re-checked in the write's batch).
   const kept = new Set(siteMediaKeys.map((key) => merged.data[key]));
   const retire = siteMediaKeys.flatMap((key) => {
     const previous = current[key];
@@ -144,11 +145,17 @@ export async function updateSettings(
     const written = await writeSettings(context.database, entries, member.id, now, {
       retire: [...new Set(retire)],
       requireLive: mediaIds,
+      mergePatch: features ? { features } : {},
     });
     // A picture deleted between the check above and the write: nothing was written.
     if (!written) {
       return { ok: false, code: 'validation', fields: (await deadMedia()) ?? { _: 'conflict' } };
     }
   }
-  return { ok: true, status: 200, body: merged.data };
+  // The reply shows what is stored, so a concurrent toggle never reads back stale.
+  const stored =
+    entries.length > 0
+      ? effectiveSettings(await readSettingRows(context.database.db))
+      : merged.data;
+  return { ok: true, status: 200, body: stored };
 }

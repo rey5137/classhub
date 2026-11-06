@@ -42,21 +42,43 @@ export function setupUnlockedIn(rows: SettingRows): boolean {
   }
 }
 
+/** True for a `media` row that no banner, logo or favicon setting names. */
+export function notNamedBySiteSetting(database: Database) {
+  return notExists(
+    database.db
+      .select({ one: sql`1` })
+      .from(siteSettings)
+      .where(
+        and(
+          inArray(siteSettings.key, [...siteMediaKeys]),
+          sql`${siteSettings.valueJson} = json_quote(${media.id})`,
+        ),
+      ),
+  );
+}
+
 /**
  * R-UI-01: one upsert per changed key and one `settings.update` audit row (no values),
  * atomically, with the banner, logo or favicon pictures the change leaves unused
  * soft-deleted in the same batch (R-MEM-20 purges the objects). Every statement holds
  * only while each picture in `requireLive` is still a live `site` row, so a picture
  * deleted since the caller checked is never named; false when nothing was written.
+ * A key in `mergePatch` is an object setting changed key by key: a row already stored is
+ * merged with that partial value in SQL (so two admins toggling different features both
+ * stick), and `entries` supplies the full value for the first write only.
  */
 export async function writeSettings(
   database: Database,
   entries: [key: string, value: unknown][],
   actorId: string,
   now: number,
-  options: { retire?: string[]; requireLive?: string[] } = {},
+  options: {
+    retire?: string[];
+    requireLive?: string[];
+    mergePatch?: Record<string, unknown>;
+  } = {},
 ): Promise<boolean> {
-  const { retire = [], requireLive = [] } = options;
+  const { retire = [], requireLive = [], mergePatch = {} } = options;
   const live = and(
     sql`1 = 1`,
     ...requireLive.map(
@@ -66,12 +88,16 @@ export async function writeSettings(
   )!;
   const upserts = entries.map(([key, value]) => {
     const valueJson = JSON.stringify(value);
+    const patchJson = key in mergePatch ? JSON.stringify(mergePatch[key]) : null;
+    const stored = patchJson
+      ? sql`case when json_valid(${siteSettings.valueJson}) and json_type(${siteSettings.valueJson}) = 'object' then json_patch(${siteSettings.valueJson}, ${patchJson}) else ${valueJson} end`
+      : valueJson;
     return database.db
       .insert(siteSettings)
       .select(sql`select ${key}, ${valueJson}, ${actorId}, ${now} where ${live}`)
       .onConflictDoUpdate({
         target: siteSettings.key,
-        set: { valueJson, updatedBy: actorId, updatedAt: now },
+        set: { valueJson: stored, updatedBy: actorId, updatedAt: now },
       });
   });
   const [audit] = await database.batch([
@@ -98,6 +124,9 @@ export async function writeSettings(
                 eq(media.mediaType, 'site'),
                 isNull(media.deletedAt),
                 live,
+                // Runs after the upserts: a picture another setting took since the
+                // caller's read stays live.
+                notNamedBySiteSetting(database),
               ),
             ),
         ]
