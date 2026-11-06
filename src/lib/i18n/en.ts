@@ -346,9 +346,10 @@ export const en: Record<keyof typeof vi, string> = {
   'setup.unlocked': 'Open: classmates on the list can sign in.',
   'setup.done': 'Done',
   'setup.todo': 'To do',
+  'setup.optional': 'Recommended',
   'setup.step.access': 'Cloudflare Access protects the site',
   'setup.step.signin': 'You signed in as the first admin',
-  'setup.step.secondAdmin': 'Choose a second admin (recommended)',
+  'setup.step.secondAdmin': 'Choose a second admin',
   'setup.step.secondAdminBody':
     'Add them on the admin page once the site is open, so the class is never locked out.',
   'setup.step.preflight': 'Run the checks on your computer',

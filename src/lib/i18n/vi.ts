@@ -350,9 +350,10 @@ export const vi = {
   'setup.unlocked': 'Đã mở: các bạn trong danh sách có thể đăng nhập.',
   'setup.done': 'Xong',
   'setup.todo': 'Cần làm',
+  'setup.optional': 'Nên làm',
   'setup.step.access': 'Cloudflare Access bảo vệ trang',
   'setup.step.signin': 'Bạn đã đăng nhập với tư cách quản trị viên đầu tiên',
-  'setup.step.secondAdmin': 'Chọn quản trị viên thứ hai (nên làm)',
+  'setup.step.secondAdmin': 'Chọn quản trị viên thứ hai',
   'setup.step.secondAdminBody':
     'Thêm người đó ở trang quản trị khi trang đã mở, để lớp không bao giờ bị khóa ngoài.',
   'setup.step.preflight': 'Chạy bước kiểm tra trên máy của bạn',

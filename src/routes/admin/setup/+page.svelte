@@ -10,15 +10,20 @@
 
   // R-AUTH-12 / R-OPS-11: what the bootstrap admin does before `npm run unlock`. The
   // page shows only the lock state; preflight on the admin's machine checks the rest.
-  const steps = $derived<{ key: MessageKey; done: boolean; body?: MessageKey; command?: string }[]>(
-    [
-      { key: 'setup.step.access', done: true },
-      { key: 'setup.step.signin', done: true },
-      { key: 'setup.step.secondAdmin', done: false, body: 'setup.step.secondAdminBody' },
-      { key: 'setup.step.preflight', done: data.unlocked, command: 'npm run preflight' },
-      { key: 'setup.step.unlock', done: data.unlocked, command: 'npm run unlock' },
-    ],
-  );
+  const steps = $derived<
+    { key: MessageKey; done: boolean; optional?: true; body?: MessageKey; command?: string }[]
+  >([
+    { key: 'setup.step.access', done: true },
+    { key: 'setup.step.signin', done: true },
+    {
+      key: 'setup.step.secondAdmin',
+      done: data.secondAdmin,
+      optional: true,
+      body: 'setup.step.secondAdminBody',
+    },
+    { key: 'setup.step.preflight', done: data.unlocked, command: 'npm run preflight' },
+    { key: 'setup.step.unlock', done: data.unlocked, command: 'npm run unlock' },
+  ]);
 </script>
 
 <PageHeader
@@ -34,7 +39,11 @@
     <ol class="steps">
       {#each steps as step (step.key)}
         <li class:done={step.done}>
-          <span class="mark">{step.done ? i18n.t('setup.done') : i18n.t('setup.todo')}</span>
+          <span class="mark"
+            >{i18n.t(
+              step.done ? 'setup.done' : step.optional ? 'setup.optional' : 'setup.todo',
+            )}</span
+          >
           <div class="text">
             <p class="title">{i18n.t(step.key)}</p>
             {#if step.body}<p class="body">{i18n.t(step.body)}</p>{/if}
