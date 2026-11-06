@@ -147,6 +147,14 @@ test('R-UI-08 the account menu closes on Esc, navigation, language switch and ou
   await expect(menu).toHaveJSProperty('open', false);
 });
 
+test('R-AUTH-16 the account menu signs out through Access', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('details.account summary').click();
+  const signOut = page.getByRole('link', { name: 'Đăng xuất' });
+  await expect(signOut).toHaveAttribute('href', '/cdn-cgi/access/logout');
+  await expect(signOut).toHaveAttribute('data-sveltekit-reload', '');
+});
+
 test('R-UI-08 the bottom space is reserved once and the tab bar fits four items', async ({
   page,
 }) => {

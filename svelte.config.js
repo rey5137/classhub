@@ -5,7 +5,14 @@ import { cspDirectives } from './src/lib/server/headers.ts';
 // The adapter writes SvelteKit's worker to the configured `main`, so builds use
 // a Worker-mode template whose main is the adapter output. The deploy config
 // (`wrangler.jsonc`) instead points at src/worker.ts, which re-exports ChatRoom.
-const cloudflareAdapter = adapterCloudflare({ config: 'wrangler.build.jsonc' });
+// dev:offline reads no binding (context.ts), so its dev proxy loads the build template too: the
+// deploy config's PUSH self-binding (entrypoint PushDelivery) stops the local runtime from starting.
+const cloudflareAdapter = adapterCloudflare({
+  config: 'wrangler.build.jsonc',
+  ...(process.env.CLASSHUB_OFFLINE === '1' && {
+    platformProxy: { configPath: 'wrangler.build.jsonc' },
+  }),
+});
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {

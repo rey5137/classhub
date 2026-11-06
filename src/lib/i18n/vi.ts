@@ -15,6 +15,7 @@ export const vi = {
   'shell.admin': 'Quản trị',
   'shell.language': 'Tiếng Việt',
   'shell.switchLanguage': 'Chuyển sang English',
+  'shell.signOut': 'Đăng xuất',
   'shell.className': '{name} · {years}',
   'home.newPhotos': 'Ảnh mới',
   'home.discussing': 'Đang bàn',

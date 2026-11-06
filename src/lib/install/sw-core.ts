@@ -19,6 +19,8 @@ export function isHandled(request: Request, origin: string): boolean {
   const url = new URL(request.url);
   if (url.origin !== origin) return false;
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return false;
+  // Cloudflare's own paths (Access logout, certs) never go through the app or its cache.
+  if (url.pathname.startsWith('/cdn-cgi/')) return false;
   return request.headers.get('upgrade')?.toLowerCase() !== 'websocket';
 }
 

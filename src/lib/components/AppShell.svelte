@@ -125,6 +125,10 @@
         {/if}
         <a href={resolve('/admin')}>{i18n.t('shell.admin')}</a>
         <button type="button" onclick={switchLanguage}>{i18n.t('shell.switchLanguage')}</button>
+        <!-- R-AUTH-16: the Access cookie is the session; Access's own endpoint clears it. -->
+        <a class="sign-out" href="/cdn-cgi/access/logout" rel="external" data-sveltekit-reload
+          >{i18n.t('shell.signOut')}</a
+        >
       </div>
     </details>
   {/if}
@@ -303,6 +307,12 @@
     text-align: left;
     font-size: 0.9375rem;
     font-weight: 500;
+  }
+
+  .menu .sign-out {
+    margin-top: calc(var(--space-unit) * 1.5);
+    border-top: 1px solid var(--color-divider);
+    border-radius: 0 0 var(--radius-control) var(--radius-control);
   }
 
   .menu a:hover,

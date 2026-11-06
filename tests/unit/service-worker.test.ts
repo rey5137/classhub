@@ -65,13 +65,14 @@ describe('service worker fetch handler', () => {
     }
   });
 
-  it('AC-NAV-07 non-GET, /api/, cross-origin and socket requests are left to the browser', async () => {
+  it('AC-NAV-07 non-GET, /api/, /cdn-cgi/, cross-origin and socket requests are left to the browser', async () => {
     const fetchImpl = vi.fn(async () => new Response('x'));
     const requests = [
       new Request(`${ORIGIN}/api/v1/me`, { method: 'POST', body: '{}' }),
       new Request(`${ORIGIN}/profile`, { method: 'POST', body: '' }),
       new Request(`${ORIGIN}/api/v1/me`),
       new Request(`${ORIGIN}/api`),
+      new Request(`${ORIGIN}/cdn-cgi/access/logout`),
       new Request('https://other.example.test/'),
       new Request(`${ORIGIN}/api/v1/chat/ws`, { headers: { upgrade: 'websocket' } }),
     ];
