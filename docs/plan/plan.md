@@ -274,7 +274,7 @@ successful independent restore. Deploying is not enough.
   var left in `wrangler.jsonc`; the 1d result stays recorded in `docs/DEPLOY_CLOUDFLARE.md`.
 
 #### Slice 4b — chat UI and the production WebSocket
-- **Covers:** AC-CHAT-01, 07, 08, AC-BUD-03.
+- **Covers:** AC-CHAT-01, 07, 08, 15, AC-BUD-03.
 - `/chat` with history paging, unread marker, reconnect, not-sent retry, online count, deletion; deploy (owner
   confirms) and test through Access on desktop and iOS Safari.
 

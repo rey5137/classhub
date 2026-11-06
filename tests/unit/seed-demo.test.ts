@@ -7,6 +7,7 @@ import { createLocalDatabase } from '../../src/lib/server/adapters/local/sqlite-
 import { seedDemo } from '../../src/lib/server/db/seed-demo';
 import {
   albums,
+  chatMessages,
   comments,
   infoPages,
   invites,
@@ -33,8 +34,8 @@ describe('seedDemo', () => {
     try {
       const first = await seedDemo(database, storage);
       const second = await seedDemo(database, storage);
-      expect(first).toEqual({ members: 12, invites: 12, photos: 10, threads: 4 });
-      expect(second).toEqual({ members: 0, invites: 0, photos: 0, threads: 0 });
+      expect(first).toEqual({ members: 12, invites: 12, photos: 10, threads: 4, chat: 8 });
+      expect(second).toEqual({ members: 0, invites: 0, photos: 0, threads: 0, chat: 0 });
 
       const members = await database.db.select().from(users);
       const rows = await database.db.select().from(invites);
@@ -80,6 +81,15 @@ describe('seedDemo', () => {
       }
       const referenced = threads.find((row) => row.bodyMd.includes('[[photo:'))!.bodyMd;
       expect(photos.some((photo) => referenced.includes(`[[photo:${photo.id}]]`))).toBe(true);
+
+      // §9.1: the demo room, in id order as in time order, with one tombstone (R-CHAT-03).
+      const chat = await database.db.select().from(chatMessages).orderBy(chatMessages.id);
+      expect(chat.map((row) => row.createdAt)).toEqual(
+        [...chat.map((row) => row.createdAt)].sort((a, b) => a - b),
+      );
+      const tombstones = chat.filter((row) => row.deletedAt !== null);
+      expect(tombstones).toHaveLength(1);
+      expect(tombstones[0]!.body).toBe('');
     } finally {
       database.close();
     }

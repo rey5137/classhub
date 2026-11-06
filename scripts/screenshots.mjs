@@ -158,6 +158,22 @@ async function demoThreadPath() {
   return `/discussions/${thread.id}`;
 }
 
+/**
+ * R-CHAT-12: /chat shows its unread marker when this browser has read part of the room,
+ * so the shot stores a last-read id three messages from the end.
+ * @param {import('@playwright/test').Page} page
+ */
+async function markChatPartlyRead(page) {
+  const response = await fetch(`${BASE}/api/v1/chat/messages`, {
+    signal: AbortSignal.timeout(10_000),
+  });
+  /** @type {{ items: { id: string }[] }} */
+  const body = await response.json();
+  const lastRead = body.items.at(-4)?.id;
+  if (!lastRead) return;
+  await page.addInitScript((id) => localStorage.setItem('classhub.chat.lastRead', id), lastRead);
+}
+
 async function run() {
   if (!(await isUp())) {
     server = spawn('npm', ['run', 'dev:offline'], {
@@ -185,6 +201,7 @@ async function run() {
           : route === '/discussions/thread-demo'
             ? await demoThreadPath()
             : route;
+    if (route === '/chat') await markChatPartlyRead(page);
     for (const { theme, mode } of combos) {
       for (const { width, height } of sizes) {
         await page.setViewportSize({ width, height });
@@ -212,7 +229,9 @@ async function run() {
         const folder = path.join(OUT, `${theme}-${mode}`, `${width}`);
         await mkdir(folder, { recursive: true });
         const file = path.join(folder, `${slug(route)}.png`);
-        await page.screenshot({ path: file, fullPage: true });
+        // /chat scrolls to its newest message under a pinned composer: a full-page shot
+        // would draw the sticky bars mid-page, so it shows the viewport as a member sees it.
+        await page.screenshot({ path: file, fullPage: route !== '/chat' });
 
         if (slice) {
           await mkdir(COPY_DIR, { recursive: true });

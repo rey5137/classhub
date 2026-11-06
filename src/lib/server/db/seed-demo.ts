@@ -1,3 +1,4 @@
+import { CHAT_ROOM_ID } from '../../contracts/chat';
 import { DEFAULT_VISIBILITY } from '../../contracts/profile';
 import { normalizeName } from '../../shared/normalize';
 import { uuidv7 } from '../ids';
@@ -6,6 +7,7 @@ import type { ObjectStorage } from '../ports/object-storage';
 import { eq, sql } from 'drizzle-orm';
 import {
   albums,
+  chatMessages,
   comments,
   infoPages,
   invites,
@@ -258,6 +260,27 @@ const DEMO_THREADS: {
   },
 ];
 
+/** §9.1: a short room history, oldest first; `deleted` is a tombstone (R-CHAT-03). */
+const DEMO_CHAT: { author: string; body: string; deleted?: boolean }[] = [
+  {
+    author: 'mai.nguyen@example.com',
+    body: 'Mọi người chốt giúp mình số người đi họp lớp trước 30/6 nhé.',
+  },
+  { author: 'linh.tran@example.com', body: 'Mình bay về từ Melbourne, chắc chắn có mặt!' },
+  {
+    author: 'bao.pham@example.com',
+    body: 'Lịch chi tiết ở đây: https://example.test/hop-lop-20-nam',
+  },
+  { author: ADMIN_EMAIL, body: 'Mình đã ghi tên Linh rồi nhé.' },
+  { author: 'mai.nguyen@example.com', body: 'Nhầm nhóm, xin lỗi cả lớp.', deleted: true },
+  { author: 'linh.tran@example.com', body: 'Có ai đi chung xe từ Hà Nội không? Mình còn 2 chỗ.' },
+  { author: 'bao.pham@example.com', body: 'Cho mình một chỗ với nhé 🚗' },
+  {
+    author: ADMIN_EMAIL,
+    body: 'Chiều nay mình gửi danh sách cuối cùng.\nAi đổi ý thì nhắn trước 17:00.',
+  },
+];
+
 // D1 caps a statement at 100 bound variables (7 user rows x 13 columns = 91).
 const INSERT_CHUNK = 7;
 
@@ -284,7 +307,7 @@ async function insertChunked<T>(
 export async function seedDemo(
   database: Database,
   storage: ObjectStorage,
-): Promise<{ members: number; invites: number; photos: number; threads: number }> {
+): Promise<{ members: number; invites: number; photos: number; threads: number; chat: number }> {
   const now = Date.now();
   const memberRows = DEMO_MEMBERS.map((member) => ({
     id: uuidv7(),
@@ -361,7 +384,8 @@ export async function seedDemo(
 
   const photos = await seedPhotos(database, storage, idByEmail, now);
   const threads = await seedThreads(database, idByEmail, now);
-  return { members: insertedMembers, invites: insertedInvites, photos, threads };
+  const chat = await seedChat(database, idByEmail, now);
+  return { members: insertedMembers, invites: insertedInvites, photos, threads, chat };
 }
 
 /** Seeded once, while the first demo thread is missing; posts and comments in one batch. */
@@ -493,4 +517,34 @@ async function seedPhotos(
     throw error;
   }
   return rows.length;
+}
+
+/** The demo room's history, seeded once while the room is empty; ten minutes apart, ending an hour ago. */
+async function seedChat(
+  database: Database,
+  idByEmail: Map<string, string>,
+  now: number,
+): Promise<number> {
+  const [any] = await database.db.select({ id: chatMessages.id }).from(chatMessages).limit(1);
+  if (any) return 0;
+  const start = now - 3_600_000 - DEMO_CHAT.length * 600_000;
+  const rows = DEMO_CHAT.flatMap((message, index) => {
+    const senderId = idByEmail.get(message.author);
+    if (!senderId) return [];
+    const createdAt = start + index * 600_000;
+    return [
+      {
+        id: uuidv7(createdAt),
+        roomId: CHAT_ROOM_ID,
+        senderId,
+        clientNonce: uuidv7(createdAt),
+        body: message.deleted ? '' : message.body,
+        createdAt,
+        deletedAt: message.deleted ? createdAt + 60_000 : null,
+      },
+    ];
+  });
+  return insertChunked(rows, (chunk) =>
+    database.db.insert(chatMessages).values(chunk).returning({ id: chatMessages.id }),
+  );
 }

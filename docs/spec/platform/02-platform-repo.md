@@ -104,8 +104,9 @@ classhub/
 
 ## 2.5 Local development and CI
 
-- **R-PLAT-10** `npm run dev` runs Vite with Cloudflare dev bindings (`getPlatformProxy`: local D1, R2 and the Durable
-  Object). `npm run dev:offline` (`CLASSHUB_OFFLINE=1`) runs on the local adapters: SQLite in `data/dev.sqlite`, media
+- **R-PLAT-10** `npm run dev` runs Vite with Cloudflare dev bindings (`getPlatformProxy`: local D1 and R2). It has no
+  chat: `getPlatformProxy` cannot run a Durable Object class from the app's own worker, and Vite gives that server no
+  upgrade path, so chat is exercised under `npm run dev:offline` (and e2e) or on the deployed site. `npm run dev:offline` (`CLASSHUB_OFFLINE=1`) runs on the local adapters: SQLite in `data/dev.sqlite`, media
   in `data/objects/`, the in-process WebSocket hub and the dev identity. Vite hands upgrades only to its `upgrade`
   listeners, so under `dev:offline` one of them runs the chat upgrade through the dev server's own middleware (the whole
   pipeline, then the route) and completes the socket on the local hub only when the route accepted it. In a dev build `CLASSHUB_OFFLINE=1` selects
@@ -113,7 +114,7 @@ classhub/
   dev identity accepts a chosen fixture member only when the peer address (from `event.getClientAddress()`, not a
   header) is loopback, the request host is `localhost`/`127.0.0.1` and the build is a dev build; production builds do
   not contain it (R-AUTH-13). The Cloudflare context's identity provider refuses every call until the Access verifier
-  lands. `npm run db:seed:demo` creates synthetic classmates, posts, albums and generated placeholder images.
+  lands. `npm run db:seed:demo` creates synthetic classmates, posts, albums, generated placeholder images and a short chat history.
 - **R-PLAT-11** **`npm run verify`** runs, in order: `lint` (ESLint + Prettier check), `check` (`svelte-check` +
   `tsc`), `test` (Vitest: unit, contract on local adapters, integration on the Workers pool), `test:migrations`
   (migrations apply from empty; the older-schema case waits for R-DB-12, which is deferred, §5.5), `test:security` (§6.7), `build` (Cloudflare

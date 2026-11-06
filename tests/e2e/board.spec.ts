@@ -1,10 +1,11 @@
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
 import { COMMENT_MAX } from '../../src/lib/contracts/discussions';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { DEV_SERVER_START_MS, startDevServer, stopDevServers } from './dev-server';
 
 // The board and thread flows that write (plan §3b checklist 1-3, AC-BRD-02 over 5,000
 // threads). They run in the `chromium-board` project against two dev servers of their own,
@@ -14,11 +15,9 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 const ADMIN_URL = 'http://127.0.0.1:5174';
 const MEMBER_URL = 'http://127.0.0.1:5175';
 const SEEDED = 5000;
-const START_DEADLINE_MS = 90_000;
 
 let scratch: string;
 let dbFile: string;
-const servers: ChildProcess[] = [];
 
 test.describe.configure({ mode: 'serial' });
 
@@ -31,54 +30,6 @@ function env(member: string) {
     CLASSHUB_DEV_MEMBER: member,
   };
 }
-
-/** Starts one dev server and waits for /health; a server that exits or stalls fails the run. */
-async function startServer(port: number, member: string): Promise<void> {
-  // A server already on the port (a stale run, or `npm run dev`) would answer /health for us.
-  const busy = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) })
-    .then(() => true)
-    .catch(() => false);
-  if (busy) throw new Error(`port ${port} busy: stop whatever answers /health there first`);
-  const server = spawn(
-    'node_modules/.bin/vite',
-    ['dev', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
-    { env: env(member), detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
-  );
-  servers.push(server);
-  let output = '';
-  server.stdout?.on('data', (chunk: Buffer) => (output = (output + chunk.toString()).slice(-4000)));
-  server.stderr?.on('data', (chunk: Buffer) => (output = (output + chunk.toString()).slice(-4000)));
-  let exited: number | null = null;
-  server.once('exit', (code) => (exited = code ?? -1));
-  const deadline = Date.now() + START_DEADLINE_MS;
-  while (Date.now() < deadline) {
-    if (exited !== null) throw new Error(`dev server on ${port} exited (${exited}):\n${output}`);
-    const up = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) })
-      .then((response) => response.ok)
-      .catch(() => false);
-    if (up) return;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`dev server on ${port} did not answer /health in time:\n${output}`);
-}
-
-function stopServers() {
-  for (const server of servers.splice(0)) {
-    try {
-      if (server.pid) process.kill(-server.pid, 'SIGTERM');
-    } catch {
-      server.kill('SIGTERM');
-    }
-  }
-}
-
-// The servers are detached (their own process group): a worker that dies or is interrupted
-// before afterAll must not leave them running on 5174/5175.
-process.once('exit', stopServers);
-process.once('SIGINT', () => {
-  stopServers();
-  process.exit(130);
-});
 
 /**
  * 5,000 threads in one recursive CTE (no bound parameters, R-DB D1 limit), their last
@@ -155,7 +106,7 @@ function boardOrder(): string[] {
 }
 
 test.beforeAll(async () => {
-  test.setTimeout(4 * START_DEADLINE_MS);
+  test.setTimeout(4 * DEV_SERVER_START_MS);
   scratch = mkdtempSync(join(tmpdir(), 'classhub-board-'));
   dbFile = join(scratch, 'board.sqlite');
   execFileSync('node_modules/.bin/tsx', ['scripts/seed-demo.ts'], {
@@ -166,12 +117,12 @@ test.beforeAll(async () => {
   seedThreads();
   seedPagedThread();
   // One at a time, so the two servers don't race each other's first dependency scan.
-  await startServer(5174, 'admin@example.com');
-  await startServer(5175, 'mai.nguyen@example.com');
+  await startDevServer(5174, env('admin@example.com'));
+  await startDevServer(5175, env('mai.nguyen@example.com'));
 });
 
 test.afterAll(() => {
-  stopServers();
+  stopDevServers();
   if (scratch) rmSync(scratch, { recursive: true, force: true });
 });
 

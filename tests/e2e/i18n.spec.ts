@@ -78,16 +78,17 @@ test('AC-UI-06 placeholder content follows the selected locale on navigation', a
   await expect(page.locator('html')).toHaveAttribute('data-locale', 'vi');
   await page.locator('summary').click();
   await page.getByRole('button', { name: 'Chuyển sang English' }).click();
-  await expect(page.getByText('Morning in the schoolyard', { exact: true })).toBeAttached();
+  // Home's own heading (the 3b Home dropped the prototype photo captions).
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('here is our class');
   await page.goto('/memories');
   await expect(page.getByRole('heading', { level: 1, name: 'Memories' })).toBeVisible();
   await expect(
     page.getByText('Photos from the class, newest first.', { exact: true }),
   ).toBeVisible();
+  // Chat messages are members' own words, never translated; the screen around them is.
   await page.goto('/chat');
-  await expect(
-    page.getByText('Please confirm how many are coming before June 30.', { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Chat' })).toBeVisible();
+  await expect(page.getByPlaceholder('Write a message…')).toBeVisible();
 });
 
 test('R-UI-10 the chat lede shows the configured retention days', async ({ page }) => {

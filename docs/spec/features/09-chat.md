@@ -129,7 +129,7 @@ sequenceDiagram
 
 | ID | Criterion | Rules | Proved by |
 |---|---|---|---|
-| AC-CHAT-01 | Two browsers chat live, see each other's messages in order with the online count | R-CHAT-05, 07 | e2e (dev bindings) + manual 4b in production |
+| AC-CHAT-01 | Two browsers chat live, see each other's messages in order with the online count | R-CHAT-05, 07 | e2e (`dev:offline`, local hub) + manual 4b in production |
 | AC-CHAT-02 | A resent `clientNonce` yields one row and the original id | R-CHAT-02 | integration (DO pool) |
 | AC-CHAT-03 | With D1 failing, the sender gets `not_saved` and nobody receives a broadcast | R-CHAT-06 | integration with failing adapter |
 | AC-CHAT-04 | A direct request to the DO without a valid signed context, or with an expired one, is refused | R-CHAT-04 | `test:security` |
