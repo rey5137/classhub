@@ -29,7 +29,7 @@ export function acquireBackupLock(command, path = BACKUP_LOCK_PATH) {
       // Released between the create and the read; still refuse rather than retry.
     }
     throw new LockHeldError(
-      `another backup, export-chat or prune-chat holds ${path} (${holder}). If no such run is going, remove that file and try again.`,
+      `another backup, export-chat, prune-chat or restore --chat holds ${path} (${holder}). If no such run is going, remove that file and try again.`,
     );
   }
   try {

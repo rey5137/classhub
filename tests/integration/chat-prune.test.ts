@@ -32,10 +32,13 @@ beforeEach(async () => {
   await database.db.delete(chatMessages);
 });
 
-/** `count` hourly messages on one day, ids `m00…` in time order; `deleted` are tombstones. */
-async function seed(count: number, deleted: number[] = []) {
+/**
+ * `count` hourly messages on one day, ids `m00…` in time order from `first`; `deleted` are
+ * tombstones.
+ */
+async function seed(count: number, deleted: number[] = [], first = 0) {
   const start = NOW - 3 * 24 * HOUR;
-  for (let index = 0; index < count; index += 1) {
+  for (let index = first; index < first + count; index += 1) {
     const createdAt = start + index * HOUR;
     await database.db.insert(chatMessages).values({
       id: `m${String(index).padStart(2, '0')}`,
@@ -213,6 +216,44 @@ describe('prune-chat', () => {
     expect(await run()).toMatchObject({ status: 'grown', fileName: range.fileName, deleted: 0 });
     expect(await ids()).toHaveLength(11);
     expect(await purgedAt()).toEqual([null]);
+  });
+
+  it('R-CHAT-14, INV-7 keeps a message deleted after the export as its tombstone and clears the rest', async () => {
+    await seed(10);
+    const first = await archive();
+    expect(first).toMatchObject({ from: { id: 'm00' }, to: { id: 'm04' } });
+    // m02 was in the file; its author deleted it after the export.
+    await database.db
+      .update(chatMessages)
+      .set({ body: '', deletedAt: NOW + 5 })
+      .where(eq(chatMessages.id, 'm02'));
+
+    expect(await run()).toEqual({
+      status: 'pruned',
+      deleted: 4,
+      purged: [first.fileName],
+      remaining: false,
+    });
+    // The tombstone stays, so restore --chat finds its id and cannot bring the text back.
+    expect(await ids()).toEqual(['m02', 'm05', 'm06', 'm07', 'm08', 'm09']);
+    const [kept] = await database.db
+      .select({ body: chatMessages.body, deletedAt: chatMessages.deletedAt })
+      .from(chatMessages)
+      .where(eq(chatMessages.id, 'm02'));
+    expect(kept).toEqual({ body: '', deletedAt: NOW + 5 });
+    expect(await purgedAt()).toEqual([NOW + 1]);
+
+    // Not stuck: the next candidates archive and prune past the kept tombstone.
+    await seed(5, [], 10);
+    const second = await archive();
+    expect(second).toMatchObject({ from: { id: 'm05' }, to: { id: 'm09' } });
+    expect(await run()).toEqual({
+      status: 'pruned',
+      deleted: 5,
+      purged: [second.fileName],
+      remaining: false,
+    });
+    expect(await ids()).toEqual(['m02', 'm10', 'm11', 'm12', 'm13', 'm14']);
   });
 
   it('R-CHAT-14 the /admin banner shows while candidates have no verified archive', async () => {

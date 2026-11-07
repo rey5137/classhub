@@ -113,7 +113,9 @@ sequenceDiagram
   (`chat/<fromId>_<toId>.ndjson.age`), never overwritten (a name collision aborts); later candidates from an
   already partly pruned month go in a new file. Each file has a SHA-256, then the export re-reads the written files, checks
   record counts and hashes against D1, and only then records a `chat_archives` row with `verified_at`.
-  `npm run prune-chat` deletes only rows inside a range with a verified, un-purged archive and sets `purged_at`. With no
+  `npm run prune-chat` deletes only rows inside a range with a verified, un-purged archive and sets `purged_at`, except
+  a message deleted after that archive's export: it stays as its empty tombstone, so `restore --chat` finds its id and
+  never brings the archived text back (R-CHAT-15). With no
   verified archive, nothing is deleted and `/admin` shows *chat over retention: run export-chat*. An R2 copy never
   counts as the independent archive. `export-chat` and `prune-chat` take the same **backup lock** as `backup` (R-BAK-03), so
   they never run concurrently with it or with each other. **Archives are encrypted with `age`, like backups (R-BAK-05), and encryption is
@@ -121,10 +123,12 @@ sequenceDiagram
   record counts are checked on the decrypted content.
 - **R-CHAT-18** **Prune in chunks.** `prune-chat` deletes verified ranges in chunks (for example 1,000 rows per
   statement batch, paced) so one run stays within the D1 daily write allowance once index writes count (§14); an
-  interrupted run resumes from the remaining rows and `purged_at` is set only when the range is empty. It holds the backup lock of R-BAK-03 for the whole run.
+  interrupted run resumes from the remaining rows and `purged_at` is set only when the range holds nothing but those
+  tombstones (R-CHAT-14). It holds the backup lock of R-BAK-03 for the whole run.
 - **R-CHAT-15** Archives are not shown in the UI; an admin restores one with `npm run restore -- --chat <file>`. **`restore --chat` is insert-only**
   (`INSERT … ON CONFLICT DO NOTHING`, never update or delete, so it cannot contradict R-BAK-08), skips messages of
-  completed deletion requests (R-PROF-11), and refuses to run unless a verified backup of the current database
+  completed deletion requests (R-PROF-11) and messages deleted after the export (their tombstone's id is still there,
+  R-CHAT-14), and refuses to run unless a verified backup of the current database
   exists first (R-BAK-03).
   Members can't bulk-export the chat; admins export it through the CLI only. Pruning and archives honour completed
   deletion requests (R-PROF-11): a member's deleted messages are omitted from later archives.

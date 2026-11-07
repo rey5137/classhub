@@ -166,7 +166,9 @@ describe('prune-chat CLI', () => {
       } finally {
         release();
       }
-      expect(lines.join('\n')).toMatch(/backup: another backup, export-chat or prune-chat holds/);
+      expect(lines.join('\n')).toMatch(
+        /backup: another backup, export-chat, prune-chat or restore --chat holds/,
+      );
       expect(run).not.toHaveBeenCalled();
       expect(storage.list).not.toHaveBeenCalled();
       expect(existsSync(join(dir, 'out'))).toBe(false);

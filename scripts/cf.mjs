@@ -4,7 +4,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pendingDestructiveGate } from './lib/backup-gate.mjs';
-import { BACKUP_RUNS_INSERT } from './lib/backup-sql.mjs';
+import {
+  BACKUP_RUNS_INSERT,
+  isRestoreTargetRead,
+  RESTORE_CHAT_INSERT,
+  RESTORE_TARGET_TABLES,
+} from './lib/backup-sql.mjs';
 import { runCf } from './lib/cf-child.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -146,15 +151,61 @@ if (
   if (!gate.ok) fail(`d1 migrations apply refused: ${gate.detail} ${gate.fix}`);
 }
 
+// R-BAK-06: a database wrangler.jsonc does not bind (a `restore --target new` target) takes
+// one `--file` import while it holds no table, and after that only the pinned read-only checks.
+if (args[0] === 'd1' && args[1] === 'execute' && args.includes('--remote') && args[2] !== 'DB') {
+  const target = args[2] ?? '';
+  const refusal =
+    'd1 execute --remote may only run as: d1 execute DB --remote --json --command <SQL>; on a restore database wrangler.jsonc does not bind, one --file import while it is empty, then the pinned read-only restore checks only (R-BAK-06).';
+  const config = readWranglerConfig(configPath);
+  if (!config) fail(`wrangler.jsonc is missing at ${configPath}. Run the setup step first.`);
+  const bound = (config.d1_databases ?? [])
+    .flatMap((/** @type {Record<string, unknown>} */ entry) => [
+      entry.binding,
+      entry.database_name,
+      entry.database_id,
+    ])
+    .filter((value) => typeof value === 'string')
+    .map((value) => value.toLowerCase());
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(target) || bound.includes(target.toLowerCase()))
+    fail(refusal);
+  if (args.length === 7 && args.slice(3, 6).join(' ') === '--remote --json --command') {
+    if (!isRestoreTargetRead(args[6] ?? '')) fail(refusal);
+  } else if (
+    args.length === 6 &&
+    args.slice(3, 5).join(' ') === '--remote --file' &&
+    !args[5]?.startsWith('-')
+  ) {
+    // The import: only into a database with no table yet, so it never lands on a site's data.
+    const check = spawnSync(
+      wranglerBin,
+      ['d1', 'execute', target, '--remote', '--json', '--command', RESTORE_TARGET_TABLES],
+      { cwd: root, env: childEnv, encoding: 'utf8', timeout: 2 * 60 * 1000 },
+    );
+    let tables = null;
+    try {
+      const parsed = JSON.parse(check.stdout ?? '');
+      tables = (Array.isArray(parsed) ? parsed : [parsed])[0]?.results;
+    } catch {
+      // Unreadable stays null and refuses below.
+    }
+    if (check.status !== 0 || !Array.isArray(tables))
+      fail(`cannot read the tables of ${target}; nothing imported.`);
+    if (tables.length > 0)
+      fail(`${target} already holds tables; restore imports into a new, empty database only.`);
+  } else {
+    fail(refusal);
+  }
+}
+
 // INV-7: remote SQL goes only as the one-command shape the scripts use, never DDL, PRAGMA or a
 // comment, and never a write to backup_runs (only d1-query's pinned INSERT) or d1_migrations
 // (only wrangler), so a destructive change cannot skip the migration gate through `d1 execute`.
-if (args[0] === 'd1' && args[1] === 'execute' && args.includes('--remote')) {
+if (args[0] === 'd1' && args[1] === 'execute' && args.includes('--remote') && args[2] === 'DB') {
   const sql = args[6] ?? '';
   const scan = scanSql(sql);
   if (
     args.length !== 7 ||
-    args[2] !== 'DB' ||
     args[3] !== '--remote' ||
     args[4] !== '--json' ||
     args[5] !== '--command' ||
@@ -597,16 +648,18 @@ async function d1Query(argv, account, apiToken) {
         .split(/\b(?:where|order|limit|join|group|having|union|returning|set|on)\b|\)/i)[0]
         .includes(','),
   );
+  // R-CHAT-15: restore --chat's insert-only statement, verbatim, is the one that reads `users`.
   if (
-    !/^(?:select|update|delete|insert)\b/i.test(sql) ||
-    scan.unsafe ||
-    /[;`[\]]/.test(sql) ||
-    /\b(?:replace|with|load_extension)\b/i.test(sql) ||
-    commaJoin ||
-    !tables.length ||
-    tables.some((table) => !allowedTables.includes(table)) ||
-    // R-BAK-09: backup_runs takes the one INSERT backup sends, verbatim, nothing else.
-    (tables.includes('backup_runs') && body.sql !== BACKUP_RUNS_INSERT)
+    body.sql !== RESTORE_CHAT_INSERT &&
+    (!/^(?:select|update|delete|insert)\b/i.test(sql) ||
+      scan.unsafe ||
+      /[;`[\]]/.test(sql) ||
+      /\b(?:replace|with|load_extension)\b/i.test(sql) ||
+      commaJoin ||
+      !tables.length ||
+      tables.some((table) => !allowedTables.includes(table)) ||
+      // R-BAK-09: backup_runs takes the one INSERT backup sends, verbatim, nothing else.
+      (tables.includes('backup_runs') && body.sql !== BACKUP_RUNS_INSERT))
   )
     fail(
       'd1-query permits SELECT/UPDATE/DELETE/INSERT on housekeeping and chat archive tables only.',

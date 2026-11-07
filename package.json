@@ -35,6 +35,7 @@
     "housekeeping": "node --import tsx scripts/housekeeping.mjs",
     "backup": "node scripts/backup.mjs",
     "verify-backup": "node scripts/verify-backup.mjs",
+    "restore": "node --import tsx scripts/restore.mjs",
     "export-chat": "node --import tsx scripts/export-chat.mjs",
     "prune-chat": "node --import tsx scripts/prune-chat.mjs",
     "db:migrate:remote": "node scripts/db-migrate-remote.mjs",

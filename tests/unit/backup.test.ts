@@ -611,6 +611,37 @@ describe('S3 object GET', () => {
     expect(fetcher.mock.calls[0]![1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it('R-BAK-06 PUTs an object with its payload hash signed, a bounded signal, and refuses bad keys', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(null));
+    const now = () => new Date(Date.UTC(2026, 10, 7));
+    const client = createS3Client(credentials, { fetch: fetcher, now });
+    const body = Buffer.from('restored bytes');
+    await client.put('media/v1/m1/image.webp', body, 'image/webp');
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe(
+      `https://${account}.r2.cloudflarestorage.com/${bucket}/media/v1/m1/image.webp`,
+    );
+    expect(init?.method).toBe('PUT');
+    expect(Buffer.from(init!.body as Uint8Array)).toEqual(body);
+    const headers = init!.headers as Record<string, string>;
+    expect(headers['x-amz-content-sha256']).toBe(sha(body));
+    expect(headers['content-type']).toBe('image/webp');
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    // The signature covers the payload: other bytes under the same key and clock sign differently.
+    await client.put('media/v1/m1/image.webp', Buffer.from('other bytes'), 'image/webp');
+    const other = fetcher.mock.calls[1]![1]!.headers as Record<string, string>;
+    expect(other['x-amz-content-sha256']).toBe(sha('other bytes'));
+    expect(other.authorization).not.toBe(headers.authorization);
+    await expect(client.put('../escape', body, 'image/webp')).rejects.toThrow(
+      'Invalid media object key',
+    );
+    fetcher.mockResolvedValueOnce(new Response(null, { status: 403 }));
+    await expect(client.put('media/v1/m1/image.webp', body, 'image/webp')).rejects.toThrow(
+      'HTTP 403',
+    );
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
   it('R-BAK-16 reports a gone object as null and refuses a size other than listed', async () => {
     const fetcher = vi
       .fn<typeof fetch>()

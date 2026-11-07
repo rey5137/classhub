@@ -310,9 +310,11 @@ export type PruneResult =
 
 /**
  * R-CHAT-14, 18 (INV-7): deletes only rows inside a verified, un-purged archive range, in
- * chunks, and sets `purged_at` once the range is empty. Every step is idempotent, so a run
- * that stops anywhere resumes from the rows still there. Stops before deleting from a range
- * whose rows could not all be in its file.
+ * chunks, and sets `purged_at` once nothing deletable is left. A message deleted after the
+ * export stays as its empty tombstone, so `restore --chat` finds its id and never brings the
+ * archived text back (R-CHAT-15). Every step is idempotent, so a run that stops anywhere
+ * resumes from the rows still there. Stops before deleting from a range whose rows could not
+ * all be in its file.
  */
 export async function pruneArchived(
   database: Database,
@@ -363,24 +365,30 @@ export async function pruneArchived(
       );
     if ((archived?.rows ?? 0) > archive.recordCount)
       return { status: 'grown', fileName: archive.fileName, deleted, purged };
+    // A tombstone at or after the export time is kept: an extra one is harmless. Only a
+    // deletion within the skew between the Worker's and D1's clock could still be pruned.
+    const deletable = and(
+      range,
+      or(isNull(chatMessages.deletedAt), lt(chatMessages.deletedAt, archive.exportedAt)),
+    );
     for (;;) {
       const budget = Math.min(chunk, maxRows - deleted);
       if (budget <= 0) return { status: 'pruned', deleted, purged, remaining: true };
       const oldest = database.db
         .select({ id: chatMessages.id })
         .from(chatMessages)
-        .where(range)
+        .where(deletable)
         .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id))
         .limit(budget);
       const gone = await database.db
         .delete(chatMessages)
-        .where(and(range, inArray(chatMessages.id, oldest)))
+        .where(and(deletable, inArray(chatMessages.id, oldest)))
         .returning({ id: chatMessages.id });
       deleted += gone.length;
       if (gone.length === 0) break;
       await options.pause();
     }
-    // R-CHAT-18: the range is empty, so it is purged; a retry finds nothing left to flip.
+    // R-CHAT-18: only late tombstones are left, so it is purged; a retry finds nothing to flip.
     await database.db
       .update(chatArchives)
       .set({ purgedAt: options.now() })

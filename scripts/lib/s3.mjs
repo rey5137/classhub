@@ -45,7 +45,10 @@ export function validObjectKey(key) {
   );
 }
 
-/** Minimal R-BAK-17 shared S3 client: housekeeping lists and deletes, backup lists and GETs. */
+/**
+ * Minimal R-BAK-17 shared S3 client: housekeeping lists and deletes, backup lists and GETs,
+ * `restore --target new` PUTs into the new bucket only (R-BAK-06, R-BAK-10).
+ */
 export function createS3Client(
   /** @type {z.input<typeof credentialsSchema>} */ credentials,
   /** @type {{ fetch?: typeof fetch; now?: () => Date }} */ options = {},
@@ -55,9 +58,14 @@ export function createS3Client(
   const fetcher = options.fetch ?? fetch;
   /**
    * @param {string} method @param {string} key @param {Record<string, string>} query
-   * @param {{ allowNotFound?: boolean; timeoutMs?: number }} [options]
+   * @param {{ allowNotFound?: boolean; timeoutMs?: number; body?: Buffer; contentType?: string }} [options]
    */
-  async function request(method, key, query, { allowNotFound = false, timeoutMs = 30_000 } = {}) {
+  async function request(
+    method,
+    key,
+    query,
+    { allowNotFound = false, timeoutMs = 30_000, body, contentType } = {},
+  ) {
     const date = (options.now?.() ?? new Date()).toISOString().replace(/[:-]|\.\d{3}/g, '');
     const day = date.slice(0, 8);
     const path = `/${bucket}${key ? `/${key.split('/').map(encode).join('/')}` : ''}`;
@@ -66,12 +74,16 @@ export function createS3Client(
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([key, value]) => `${key}=${value}`)
       .join('&');
-    const headers = { host, 'x-amz-content-sha256': hash(''), 'x-amz-date': date };
+    // A PUT signs its payload's hash, so R2 refuses bytes altered on the way (R-BAK-06).
+    const payloadHash = body ? createHash('sha256').update(body).digest('hex') : hash('');
+    const headers = { host, 'x-amz-content-sha256': payloadHash, 'x-amz-date': date };
     const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
     const canonicalHeaders = Object.entries(headers)
       .map(([key, value]) => `${key}:${value}\n`)
       .join('');
-    const canonical = [method, path, search, canonicalHeaders, signedHeaders, hash('')].join('\n');
+    const canonical = [method, path, search, canonicalHeaders, signedHeaders, payloadHash].join(
+      '\n',
+    );
     const scope = `${day}/auto/s3/aws4_request`;
     const signingKey = hmac(
       hmac(hmac(hmac(`AWS4${secretKey}`, day), 'auto'), 's3'),
@@ -85,7 +97,9 @@ export function createS3Client(
       headers: {
         ...headers,
         authorization: `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+        ...(contentType ? { 'content-type': contentType } : {}),
       },
+      ...(body ? { body: new Uint8Array(body) } : {}),
       signal: AbortSignal.timeout(timeoutMs),
       redirect: 'error',
     });
@@ -165,6 +179,16 @@ export function createS3Client(
         const response = await request('DELETE', key, {});
         await response?.body?.cancel();
       }
+    },
+    /**
+     * R-BAK-06: writes one final object's bytes. Only `restore` calls it, with the restore pair
+     * scoped to the new bucket; it refuses the live one before this client is made.
+     * @param {string} key @param {Buffer} body @param {string} contentType
+     */
+    async put(key, body, contentType) {
+      if (!validObjectKey(key)) throw new Error('Invalid media object key');
+      const response = await request('PUT', key, {}, { body, contentType, timeoutMs: 300_000 });
+      await response?.body?.cancel();
     },
     /**
      * R-BAK-03: streams one final object (never `staging/`) to a new file, byte for byte.

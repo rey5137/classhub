@@ -24,6 +24,19 @@ import {
   recordVerifiedArchive,
 } from '../../src/lib/server/repositories/chat-archive';
 import { retainedObjectKeys } from '../../src/lib/server/repositories/housekeeping';
+import {
+  RESTORE_ACCESS_SUB_LEFT,
+  RESTORE_CHAT_INSERT,
+  RESTORE_CLEAR_ACCESS_SUB,
+  RESTORE_CLEAR_PUSH_SUBSCRIPTIONS,
+  RESTORE_FOREIGN_KEY_CHECK,
+  RESTORE_LOCK_SETUP,
+  RESTORE_MEDIA_SELECT,
+  RESTORE_SETUP_STATE_SELECT,
+  RESTORE_TARGET_TABLES,
+  restoreCountSelect,
+} from '../../scripts/lib/backup-sql.mjs';
+import { chatInsert } from '../../scripts/lib/restore-chat.mjs';
 import { createHousekeepingWrites } from '../../scripts/lib/housekeeping-writes.mjs';
 import { startFakeApi, type FakeApi } from '../fixtures/fake-cloudflare-api';
 
@@ -815,6 +828,46 @@ describe('scripts/cf.mjs api (read-only Cloudflare API GET)', () => {
     expect(api.requests).toEqual([]);
   });
 
+  it("R-CHAT-15 passes restore --chat's pinned insert as rendered, and no variant of it", async () => {
+    writeValidEnv();
+    const sent: { sql: string; params: unknown[] }[] = [];
+    const remote = createRemoteDatabase(async (statement) => {
+      sent.push(statement);
+      return [{ success: true, results: { columns: [], rows: [] }, meta: { changes: 0 } }];
+    });
+    await remote.db.all(
+      chatInsert({
+        id: 'm1',
+        roomId: 'main',
+        senderId: 'u1',
+        clientNonce: 'n1',
+        body: 'hello',
+        createdAt: 1,
+        editedAt: null,
+      } as Parameters<typeof chatInsert>[0]),
+    );
+    expect(sent.map((statement) => statement.sql)).toEqual([RESTORE_CHAT_INSERT]);
+    const ok = await runApi(['d1-query', databaseId], {
+      config: d1Config(),
+      input: JSON.stringify(sent[0]),
+    });
+    expect(ok.status).toBe(0);
+    for (const sql of [
+      RESTORE_CHAT_INSERT.replace(
+        'ON CONFLICT DO NOTHING',
+        'ON CONFLICT (id) DO UPDATE SET body = ?',
+      ),
+      `${RESTORE_CHAT_INSERT} `,
+      RESTORE_CHAT_INSERT.replace('FROM users', 'FROM users, profile_contacts'),
+    ]) {
+      const refused = await runApi(['d1-query', databaseId], {
+        config: d1Config(),
+        input: JSON.stringify({ sql, params: [] }),
+      });
+      expect(refused.status, sql).not.toBe(0);
+    }
+  });
+
   it.each([
     'DROP TABLE media',
     'ALTER TABLE media ADD value TEXT',
@@ -1039,6 +1092,7 @@ else if (args[0] === 'd1' && args[1] === 'execute') {
     process.exitCode = 1;
   } else if (sql.includes('d1_migrations')) rows(JSON.parse(process.env.FAKE_APPLIED ?? '[]').map((name) => ({ name })));
   else if (sql.includes('backup_runs')) rows([{ at: process.env.FAKE_BACKUP_AT ? Number(process.env.FAKE_BACKUP_AT) : null }]);
+  else if (sql.includes('sqlite_master')) rows(JSON.parse(process.env.FAKE_RESTORE_TABLES ?? '[]'));
 }
 `;
   const apply = ['d1', 'migrations', 'apply', 'DB', '--remote'];
@@ -1149,6 +1203,104 @@ else if (args[0] === 'd1' && args[1] === 'execute') {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('d1 execute --remote may only run as');
     expect(invocations.some((entry) => entry.args[1] === 'execute')).toBe(false);
+  });
+
+  describe('R-BAK-06 a restore database wrangler.jsonc does not bind', () => {
+    const restoreDb = (...rest: string[]) => ['d1', 'execute', 'restored', '--remote', ...rest];
+    const executed = (invocations: Invocation[], args: string[]) =>
+      invocations.some((entry) => entry.args.join(' ') === args.join(' '));
+
+    it.each([
+      RESTORE_TARGET_TABLES,
+      RESTORE_FOREIGN_KEY_CHECK,
+      RESTORE_MEDIA_SELECT,
+      RESTORE_ACCESS_SUB_LEFT,
+      RESTORE_SETUP_STATE_SELECT,
+      restoreCountSelect('push_subscriptions'),
+    ])('runs the pinned read-only check: %s', (sql) => {
+      const args = restoreDb('--json', '--command', sql);
+      const { result, invocations } = gated(args);
+      expect(result.status).toBe(0);
+      expect(executed(invocations, args)).toBe(true);
+    });
+
+    it.each([
+      ['a plain read that is not pinned', 'select * from users'],
+      [
+        'two pinned reads in one command',
+        `${RESTORE_ACCESS_SUB_LEFT};\n${RESTORE_SETUP_STATE_SELECT}`,
+      ],
+      ['a count with a write after it', 'SELECT count(*) AS n FROM users; DELETE FROM users'],
+      ['a pinned read with a trailing space', `${RESTORE_SETUP_STATE_SELECT} `],
+      ['the push clear', RESTORE_CLEAR_PUSH_SUBSCRIPTIONS],
+      ['the access_sub clear', RESTORE_CLEAR_ACCESS_SUB],
+      ['the lock', RESTORE_LOCK_SETUP],
+      ['the chat insert', RESTORE_CHAT_INSERT],
+      ['a delete', 'delete from users'],
+      ['a pragma', 'PRAGMA foreign_key_check'],
+    ])('refuses %s', (_name, sql) => {
+      const { result, invocations } = gated(restoreDb('--json', '--command', sql));
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('d1 execute --remote may only run as');
+      expect(invocations.some((entry) => entry.args[1] === 'execute')).toBe(false);
+    });
+
+    it('imports a --file into a database that holds no table, after checking that', () => {
+      const args = restoreDb('--file', 'database.sql');
+      const { result, invocations } = gated(args);
+      expect(result.status).toBe(0);
+      const check = restoreDb('--json', '--command', RESTORE_TARGET_TABLES).join(' ');
+      const order = invocations.map((entry) => entry.args.join(' '));
+      expect(order.indexOf(check)).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf(args.join(' '))).toBeGreaterThan(order.indexOf(check));
+    });
+
+    it('refuses a --file into a database that already holds tables', () => {
+      const args = restoreDb('--file', 'database.sql');
+      const { result, invocations } = gated(args, {
+        FAKE_RESTORE_TABLES: JSON.stringify([{ name: 'users' }]),
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('already holds tables');
+      expect(executed(invocations, args)).toBe(false);
+    });
+
+    it.each([
+      ['an extra flag', restoreDb('--file', 'database.sql', '--yes')],
+      ['a flag as the file', restoreDb('--file', '--yes')],
+      ['--command without --json', restoreDb('--command', RESTORE_ACCESS_SUB_LEFT)],
+    ])('refuses %s', (_name, args) => {
+      const { result, invocations } = gated(args);
+      expect(result.status).not.toBe(0);
+      expect(invocations.some((entry) => entry.args[1] === 'execute')).toBe(false);
+    });
+
+    it.each(['classhub', '33333333-3333-4333-8333-333333333333'])(
+      'refuses the bound database named as %s, even for a pinned read or an import',
+      (name) => {
+        writeWranglerConfigSource(
+          JSON.stringify({
+            name: 'classhub',
+            account_id: account,
+            d1_databases: [
+              {
+                binding: 'DB',
+                database_name: 'classhub',
+                database_id: '33333333-3333-4333-8333-333333333333',
+              },
+            ],
+          }),
+        );
+        for (const args of [
+          ['d1', 'execute', name, '--remote', '--json', '--command', RESTORE_ACCESS_SUB_LEFT],
+          ['d1', 'execute', name, '--remote', '--file', 'database.sql'],
+        ]) {
+          const { result, invocations } = gated(args);
+          expect(result.status).not.toBe(0);
+          expect(invocations.some((entry) => entry.args[1] === 'execute')).toBe(false);
+        }
+      },
+    );
   });
 
   it.each([

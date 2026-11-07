@@ -38,15 +38,16 @@ export function reason(/** @type {CfResult} */ result) {
 }
 
 /**
- * Runs the statements against the remote `DB` in order and returns each one's rows.
- * @param {CfRunner} run @param {string[]} statements
+ * Runs the statements against the remote `DB` in order and returns each one's rows; `database`
+ * names a restore target instead (R-BAK-06; cf.mjs takes only its pinned reads there).
+ * @param {CfRunner} run @param {string[]} statements @param {string} [database]
  * @returns {Promise<Record<string, unknown>[][]>}
  */
-export async function d1Remote(run, statements) {
+export async function d1Remote(run, statements, database = 'DB') {
   const result = run([
     'd1',
     'execute',
-    'DB',
+    database,
     '--remote',
     '--json',
     '--command',

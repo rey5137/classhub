@@ -65,15 +65,17 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
   is no `--no-encrypt`. `export-chat` archives are encrypted the same way (R-CHAT-14). The docs explain keeping the
   identity key apart from the archive and off the machine that holds the archive.
 - **R-BAK-06** **`npm run restore -- <archive> --target new`** restores into a **new, empty** D1 database and bucket
-  named by flags. It refuses a database with any table row, a **non-empty bucket**, and any database id or bucket name
-  equal to the live binding in `wrangler.jsonc`. Order: verify (R-BAK-04), import the SQL, copy the objects,
-  re-verify hashes and references, run integrity checks (every foreign key resolves; every media row has its objects),
-  empty `push_subscriptions` (they belong to the old site's VAPID key and devices; members turn push on again,
-  R-NTF-11), clear `users.access_sub` (the new Access application issues new subjects; accounts re-link by verified email on first login, R-AUTH-25, R-BAK-14), then set `setup_state='locked'` so `preflight` and `unlock` must run on the new instance before it serves anyone.
+  named by flags. It refuses a database holding any table (so any row), a **non-empty bucket**, and any database id or
+  bucket name equal to the live binding in `wrangler.jsonc`. Order: verify (R-BAK-04); import the SQL, which ends by
+  emptying `push_subscriptions` (they belong to the old site's VAPID key and devices; members turn push on again,
+  R-NTF-11), clearing `users.access_sub` (the new Access application issues new subjects; accounts re-link by verified email on first login, R-AUTH-25, R-BAK-14) and setting `setup_state='locked'` so `preflight` and `unlock` must run on the new instance before it serves anyone; copy the objects; then re-verify hashes and references and run the integrity checks (every foreign key resolves; every media row has its objects; the counts, the empty `push_subscriptions`, no `access_sub` and the lock) with read-only queries.
+  On a database `wrangler.jsonc` does not bind, `scripts/cf.mjs` allows only that one `--file` import while the
+  database holds no table, and then only the pinned read-only check statements of `scripts/lib/backup-sql.mjs`.
   The backup's `schemaVersion` must equal the restoring app's; `RESTORE.md` names the app version to check out. Older
   schemas are not migrated in v1.0 (§D); the same-version rule is the whole compatibility contract.
 - **R-BAK-07** `npm run restore -- <dir> --target local` restores into `data/` for the local adapters, so a backup can
-  be opened with `npm run dev:offline` without Cloudflare.
+  be opened with `npm run dev:offline` without Cloudflare. It empties `push_subscriptions` and clears `users.access_sub`
+  as R-BAK-06 does but keeps `setup_state` as backed up, so `dev:offline` opens the restored site.
 - **R-BAK-08** Restoring into a live site is not supported; disaster recovery always restores side by side (§13.4). The one exception is the insert-only `restore --chat` of R-CHAT-15, which cannot update or delete a row; `export-chat` and `prune-chat` (R-CHAT-14, 18) share the backup lock of R-BAK-03.
 - **R-BAK-09** After a verified backup, the CLI writes a `backup_runs` row (no content) so `/admin` can show the last
   verified backup's date and size, and preflight and `db:migrate:remote` can check it (R-OPS-12).
@@ -96,7 +98,7 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
 | Every 3 months | test restore to `--target local` | local |
 | Before chat pruning | verified chat NDJSON archive (R-CHAT-14) | off-provider location |
 
-- **R-BAK-10** The live R2 bucket is never the only backup destination; the S3 client only reads from the bucket and never deletes or syncs (R-BAK-17).
+- **R-BAK-10** The live R2 bucket is never the only backup destination; the S3 client only reads from the live bucket for a backup and never deletes or syncs (R-BAK-17); `restore --target new` writes only into the new, empty bucket, with its own `R2_RESTORE_*` pair (R-BAK-06).
 - **R-BAK-11** **Retention:** keep the last 12 weekly and 12 monthly snapshots (each a full, self-contained copy, so deleting a snapshot is the only way a deleted member's photos age out); `npm run backup -- --prune-old`
   deletes older local snapshots only after the newest one verified: a snapshot stays when it is the newest in one of
   the 12 most recent ISO weeks (UTC) holding a snapshot, or in one of the 12 most recent months that do, so a gap in
@@ -111,7 +113,7 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
 
 1. Provision a new D1 database and private bucket; leave the old environment untouched.
 2. `verify-backup` the archive.
-3. `restore --target new`, which imports, migrates, copies and re-verifies.
+3. `restore --target new`, which imports (same schema version only, no migration, R-BAK-06), copies and re-verifies.
 4. Run the smoke and permission tests against the restored instance.
 5. Run `preflight` and `unlock` on the restored instance (it restores locked, R-BAK-06); configure Access for the new hostname and confirm the admin.
 6. Cut over the domain only after the restore is tested; revoke old tokens.
@@ -134,7 +136,7 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
 | AC-BAK-02 | `verify-backup` fails on a missing image, a truncated SQL file and a mismatched checksum | R-BAK-04 | unit fixtures |
 | AC-BAK-03 | A directory without `completed: true` is rejected by restore | R-BAK-02 | unit |
 | AC-BAK-04 | `restore --target new` refuses a non-empty database, a non-empty bucket, and a database or bucket id equal to the live binding; a successful restore leaves `setup_state='locked'` | R-BAK-06 | integration |
-| AC-BAK-05 | A backup restored with `--target local` runs under `npm run dev:offline` with no Cloudflare credentials | R-BAK-07 | e2e |
+| AC-BAK-05 | A backup restored with `--target local` runs under `npm run dev:offline` with no Cloudflare credentials | R-BAK-07 | e2e, run by `npm run verify` in the unit project (`tests/unit/restore.test.ts` spawns `restore` and `dev:offline`) |
 | AC-BAK-06 | Two concurrent `backup` runs, or a `backup` and a `prune-chat`: the second exits without writing | R-BAK-03 | unit |
 | AC-BAK-07 | *Deferred (§D):* the Node build passing the contract tests; the local adapters pass them under AC-PLAT-03 | R-BAK-13 | n/a |
 | AC-BAK-08 | No archive file contains an account id or token, and no file the backup writes itself a provider URL or the team domain (in member content: a warning naming table and row) | R-BAK-01 | `verify-backup` scan |

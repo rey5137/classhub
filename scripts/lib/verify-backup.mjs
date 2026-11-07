@@ -589,12 +589,29 @@ export function pipeCommands(first, second, timeoutMs, extraEnv = {}) {
 }
 
 /**
+ * @typedef {{ tmpRoot?: string; secrets?: import('./backup-scan.mjs').Secret[]; decrypt?: (archive: string, identity: string, into: string) => Promise<void> }} ArchiveOptions
+ * @typedef {{ errors: string[]; warnings: string[]; manifest: Manifest | null }} Verification
+ */
+
+/**
  * Decrypts `archive` with the `age` identity into a private temporary directory, verifies
  * the one snapshot inside it, and removes the directory on every path.
- * @param {string} archive @param {string} identity
- * @param {{ tmpRoot?: string; secrets?: import('./backup-scan.mjs').Secret[]; decrypt?: (archive: string, identity: string, into: string) => Promise<void> }} [options]
+ * @param {string} archive @param {string} identity @param {ArchiveOptions} [options]
+ * @returns {Promise<Verification>}
  */
-export async function verifyArchive(archive, identity, options = {}) {
+export function verifyArchive(archive, identity, options = {}) {
+  return withVerifiedArchive(archive, identity, options, async (_dir, result) => result);
+}
+
+/**
+ * verifyArchive that hands the snapshot directory to `use` while it still exists (`dir` is
+ * null when the archive did not unpack); `restore` reads it there (R-BAK-06).
+ * @template T
+ * @param {string} archive @param {string} identity @param {ArchiveOptions} options
+ * @param {(dir: string | null, result: Verification) => Promise<T>} use
+ * @returns {Promise<T>}
+ */
+export async function withVerifiedArchive(archive, identity, options, use) {
   const decrypt =
     options.decrypt ??
     ((/** @type {string} */ file, /** @type {string} */ key, /** @type {string} */ into) =>
@@ -609,21 +626,22 @@ export async function verifyArchive(archive, identity, options = {}) {
     try {
       await decrypt(archive, identity, scratch);
     } catch (error) {
-      return {
+      return await use(null, {
         errors: [`cannot decrypt and unpack the archive: ${/** @type {Error} */ (error).message}`],
         warnings: [],
         manifest: null,
-      };
+      });
     }
     const entries = readdirSync(scratch, { withFileTypes: true });
     const top = entries[0];
     if (entries.length !== 1 || !top?.isDirectory() || !top.name.startsWith('classhub-backup-'))
-      return {
+      return await use(null, {
         errors: ['the archive does not hold one classhub-backup-* directory.'],
         warnings: [],
         manifest: null,
-      };
-    return await verifySnapshot(join(scratch, top.name), { secrets: options.secrets });
+      });
+    const dir = join(scratch, top.name);
+    return await use(dir, await verifySnapshot(dir, { secrets: options.secrets }));
   } finally {
     unregister();
     rmSync(scratch, { recursive: true, force: true });
