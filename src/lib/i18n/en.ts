@@ -319,6 +319,11 @@ export const en: Record<keyof typeof vi, string> = {
   'admin.access.step':
     'The Access policy changes from your computer, never from this page. After each change run:',
   'admin.actionFor': '{action}: {name}',
+  'admin.inviteEmail.sending': 'Sending…',
+  'admin.inviteEmail.resend': 'Resend email',
+  'admin.inviteEmail.sentAt': 'Email sent {date}',
+  'admin.access.evaluated':
+    'Access asks this site at each sign-in: inviting or approving someone lets them in. Suspending takes effect at their next sign-in.',
   'admin.inviteEmail.send': 'Send invite email',
   'admin.inviteEmail.unavailable': 'Email sending is not set up (GMAIL_USER, GMAIL_APP_PASSWORD).',
   'admin.inviteEmail.failed':

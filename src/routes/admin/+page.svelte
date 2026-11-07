@@ -39,13 +39,27 @@
   }
 
   const notice = $derived(
-    form && 'done' in form && form.done
+    form && 'done' in form && form.done && form.action !== 'inviteEmail'
       ? i18n.t(`admin.done.${form.done}` as MessageKey, {
           email: 'email' in form && typeof form.email === 'string' ? form.email : '',
         })
       : null,
   );
   const failure = $derived(form && 'message' in form ? form.message : null);
+  // R-AUTH-31: the invite whose email is on its way, so its button says so until the answer.
+  let sending = $state<string | null>(null);
+  const sendEmail = (id: string) => () => {
+    sending = id;
+    return async ({ update }: { update: () => Promise<void> }) => {
+      await update();
+      sending = null;
+    };
+  };
+  // The answer is shown on the row it came from: the banner sits far above a long list.
+  const rowResult = (id: string) =>
+    form && 'action' in form && form.action === 'inviteEmail' && 'id' in form && form.id === id
+      ? form
+      : null;
   // R-MEM-18: decimal units, the ones the 8 and 9 GB thresholds are written in; below
   // a gigabyte in megabytes, so a young class doesn't read "0 GB".
   const numberLocale = $derived(i18n.locale === 'vi' ? 'vi-VN' : 'en-GB');
@@ -162,22 +176,41 @@
                 {#if invite.deletionRequestedAt !== null && invite.status === 'accepted'}
                   <span class="status suspended">{i18n.t('admin.deletionRequested')}</span>
                 {/if}
-                <span class="access" class:synced={invite.accessSyncedAt !== null}>
-                  {invite.accessSyncedAt !== null
-                    ? i18n.t('admin.access.synced')
-                    : i18n.t('admin.access.manual')}
-                </span>
+                {#if !data.accessEvaluation}
+                  <span class="access" class:synced={invite.accessSyncedAt !== null}>
+                    {invite.accessSyncedAt !== null
+                      ? i18n.t('admin.access.synced')
+                      : i18n.t('admin.access.manual')}
+                  </span>
+                {/if}
+                {#if invite.status === 'pending' && data.emailedAt[invite.id]}
+                  <span class="access synced tnum"
+                    >{i18n.t('admin.inviteEmail.sentAt', {
+                      date: formatDate(data.emailedAt[invite.id]!),
+                    })}</span
+                  >
+                {/if}
               </p>
+              {#if rowResult(invite.id) && 'message' in rowResult(invite.id)!}
+                <p class="row-error" role="alert">{failure}</p>
+              {:else if rowResult(invite.id)}
+                <p class="row-done" role="status">{i18n.t('admin.done.inviteEmailed')}</p>
+              {/if}
             </div>
             <div class="actions">
               {#if invite.status === 'pending' && data.mailer}
-                <form method="POST" action="?/inviteEmail" use:enhance>
+                <form method="POST" action="?/inviteEmail" use:enhance={sendEmail(invite.id)}>
                   <input type="hidden" name="id" value={invite.id} />
                   <Button
                     type="submit"
                     variant="ghost"
+                    disabled={sending === invite.id}
                     aria-label={labelFor('admin.inviteEmail.send', invite)}
-                    >{i18n.t('admin.inviteEmail.send')}</Button
+                    >{sending === invite.id
+                      ? i18n.t('admin.inviteEmail.sending')
+                      : data.emailedAt[invite.id]
+                        ? i18n.t('admin.inviteEmail.resend')
+                        : i18n.t('admin.inviteEmail.send')}</Button
                   >
                 </form>
               {/if}
@@ -253,10 +286,14 @@
       </ul>
     {/if}
     <!-- R-AUTH-18: the Worker holds no Cloudflare token; the policy changes from the CLI. -->
-    <div class="step">
-      <p>{i18n.t('admin.access.step')}</p>
-      <code>npm run invite -- add|remove &lt;email&gt;</code>
-    </div>
+    {#if data.accessEvaluation}
+      <div class="step"><p>{i18n.t('admin.access.evaluated')}</p></div>
+    {:else}
+      <div class="step">
+        <p>{i18n.t('admin.access.step')}</p>
+        <code>npm run invite -- add|remove &lt;email&gt;</code>
+      </div>
+    {/if}
   </Card>
 
   {#if data.usage}
@@ -450,6 +487,18 @@
 
   .access.synced {
     color: var(--color-success);
+  }
+
+  .row-done,
+  .row-error {
+    margin: calc(var(--space-unit) * 1) 0 0;
+    font: var(--text-small);
+    font-weight: 600;
+    color: var(--color-success);
+  }
+
+  .row-error {
+    color: var(--color-danger);
   }
 
   .actions {

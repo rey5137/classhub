@@ -1,13 +1,14 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, max } from 'drizzle-orm';
 import { siteConfig } from '../../config';
 import { mediumDate } from '../../shared/time';
 import type { Member } from '../auth/membership';
 import { can } from '../auth/permissions';
-import { invites, users } from '../db/schema';
+import { auditEvents, invites, users } from '../db/schema';
 import { logLine } from '../log';
 import type { Mailer } from '../ports/mailer';
 import { auditInsert } from '../repositories/audit';
 import { forbidden, rateLimit, refused, type AdminResult } from './admin';
+import type { DatabaseHandle } from '../ports/database';
 import type { MemberServices } from './members';
 
 /**
@@ -90,4 +91,20 @@ export async function adminSendInviteEmail(
     createdAt: now,
   });
   return { ok: true, status: 200, body: { ok: true } };
+}
+
+/** R-AUTH-31: when each of these invites was last emailed, from the `invite.emailed` audit rows. */
+export async function lastInviteEmails(
+  db: DatabaseHandle,
+  inviteIds: string[],
+): Promise<Record<string, number>> {
+  if (inviteIds.length === 0) return {};
+  const rows = await db
+    .select({ id: auditEvents.entityId, at: max(auditEvents.createdAt) })
+    .from(auditEvents)
+    .where(and(eq(auditEvents.action, 'invite.emailed'), inArray(auditEvents.entityId, inviteIds)))
+    .groupBy(auditEvents.entityId);
+  const result: Record<string, number> = {};
+  for (const row of rows) if (row.id && row.at !== null) result[row.id] = row.at;
+  return result;
 }

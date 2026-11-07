@@ -7,6 +7,7 @@ import { createD1Database } from '../../src/lib/server/adapters/cloudflare/d1-da
 import { createRecordingMailer } from '../../src/lib/server/adapters/recording/mailer';
 import { auditEvents, invites } from '../../src/lib/server/db/schema';
 import type { Database } from '../../src/lib/server/ports/database';
+import { lastInviteEmails } from '../../src/lib/server/services/invite-email';
 import * as invitesApi from '../../src/routes/api/v1/admin/invites/+server';
 import * as emailApi from '../../src/routes/api/v1/admin/invites/[id]/email/+server';
 import { PEOPLE, seedMembership } from '../fixtures/membership';
@@ -95,6 +96,11 @@ describe('AC-AUTH-20 invite email', () => {
       .where(and(eq(auditEvents.action, 'invite.emailed'), eq(auditEvents.entityId, id)));
     expect(audits).toHaveLength(1);
     expect(JSON.stringify(audits)).not.toContain(INVITEE);
+    // The admin row reads it back as "Email sent <date>".
+    expect(await lastInviteEmails(database.db, [id, 'no-such-invite'])).toEqual({
+      [id]: audits[0]!.createdAt,
+    });
+    expect(await lastInviteEmails(database.db, [])).toEqual({});
   });
 
   it('sends nothing for a member, an accepted or revoked invite, or without a mailer', async () => {

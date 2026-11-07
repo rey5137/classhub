@@ -56,7 +56,8 @@
 - **R-AUTH-09** **Revoke and suspend:** the internal status changes first (immediate denial, R-NAV-04, R-CHAT-09),
   then the email is removed from the Access policy (R-AUTH-18). Reactivation reverses both (`invite add` on a suspended member with an accepted invite reactivates them, then syncs the policy). Revoking a pending invite follows R-AUTH-08.
 - **R-AUTH-10** The admin invite screen shows, per email, whether it is in the app list, in the Access policy, or both,
-  when the token can read the policy; otherwise it shows the manual step.
+  when the token can read the policy; otherwise it shows the manual step. With External Evaluation on (R-AUTH-33) it
+  shows neither: the screen says Access asks the site at each sign-in.
 - **R-AUTH-11** **Uniform denial.** A valid Google identity without an active membership, an invited-but-revoked
   email and a suspended user all get the same `/denied` page and the same `403 { error: { code: "forbidden" } }`, with
   no hint whether the email is known. Every cause takes the same path per request kind: a page navigation gets
@@ -157,7 +158,9 @@
   the sender name is the site name) with the site's address, the invitee's name, the inviter's name and the expiry
   date. Nothing is sent automatically on invite or approval. Without both secrets the button is hidden and the route
   answers `unavailable`. It takes the invite rate limit (R-AUTH-21) and writes an `invite.emailed` audit row with
-  ids only; a failed send logs no address.
+  ids only; a failed send logs no address. The button reads "Sending…" while the request runs, the answer (sent or
+  the failure) shows on that invite's row, and a pending invite shows "Email sent <date>" from its latest
+  `invite.emailed` row, its button then reading "Resend email".
 - **R-AUTH-32** **Privacy page.** `GET /privacy` sits outside Access (a path in the same Bypass application as
   `/join`) and answers everyone, before the membership check, with a static Vietnamese summary of `docs/PRIVACY.md`
   and no member data or site media. It is the privacy-policy link on the Google sign-in consent screen, which Google
