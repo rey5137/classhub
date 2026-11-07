@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   createReadStream,
+  existsSync,
   lstatSync,
   mkdtempSync,
   readFileSync,
@@ -16,6 +17,7 @@ import { constants, tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
+import { scanForSecrets } from './backup-scan.mjs';
 
 export const MANIFEST = 'manifest.json';
 export const CHECKSUMS = 'checksums.sha256';
@@ -25,7 +27,9 @@ export const OBJECTS = 'objects';
 
 const hex64 = z.string().regex(/^[0-9a-f]{64}$/);
 const count = z.number().int().nonnegative().safe();
-// R-BAK-02; `skipped` is R-BAK-16: objects of photos deleted between the export and the copy.
+// R-BAK-02; `liveCounts` are R-BAK-03's live COUNT(*) before the export, `portable` the
+// §13.1 interchange files with their row counts, `skipped` is R-BAK-16: objects of photos
+// deleted between the export and the copy.
 export const manifestSchema = z
   .object({
     format: z.literal('classhub-backup'),
@@ -35,6 +39,8 @@ export const manifestSchema = z
     exportedAt: z.string().datetime(),
     database: z.object({ path: z.literal(DATABASE), sha256: hex64, bytes: count }),
     tables: z.record(z.string(), count),
+    liveCounts: z.record(z.string(), count),
+    portable: z.record(z.string(), count),
     objects: z.object({ count, totalBytes: count }),
     skipped: z.array(
       z.object({
@@ -210,6 +216,90 @@ export function describeDump(db) {
   return { tables, schemaVersion: version === undefined ? null : String(version), media };
 }
 
+// R-DB-13: the tables never hard-deleted, so a row read live before the export must be in it.
+export const NEVER_HARD_DELETED = [
+  'media',
+  'invites',
+  'chat_archives',
+  'backup_runs',
+  'audit_events',
+];
+
+/**
+ * R-BAK-04 / AC-BAK-10: every never-hard-deleted table holds at least the rows read live before
+ * the export, so a dump cut at a statement boundary fails even though it parses.
+ * @param {Record<string, number>} live @param {Record<string, number>} dumped
+ * @returns {string[]}
+ */
+export function liveCountErrors(live, dumped) {
+  return NEVER_HARD_DELETED.flatMap((name) =>
+    (live[name] ?? 0) > (dumped[name] ?? 0)
+      ? [
+          `database.sql holds ${dumped[name] ?? 0} ${name} rows, fewer than the ${live[name]} read live before the export (truncated?).`,
+        ]
+      : [],
+  );
+}
+
+export const PORTABLE = 'portable';
+// §13.1: the cross-database interchange (R-BAK-01), one NDJSON file per table plus settings.
+const PORTABLE_TABLES = /** @type {const} */ ([
+  ['users', 'users.ndjson'],
+  ['profile_contacts', 'profile_contacts.ndjson'],
+  ['invites', 'invites.ndjson'],
+  ['info_pages', 'info_pages.ndjson'],
+  ['posts', 'posts.ndjson'],
+  ['comments', 'comments.ndjson'],
+  ['albums', 'albums.ndjson'],
+  ['media', 'media.ndjson'],
+  ['chat_messages', 'chat-messages.ndjson'],
+]);
+
+/**
+ * The `portable/` files written from the loaded dump, as path → text. Deterministic (rowid
+ * order, the dump's column order), so `verify-backup` rebuilds them from database.sql and
+ * compares byte for byte. A table the dump lacks has no file. Rows count per path.
+ * @param {import('better-sqlite3').Database} db @param {Record<string, number>} tables
+ * @returns {Map<string, { text: string; rows: number }>}
+ */
+export function portableFiles(db, tables) {
+  /** @type {Map<string, { text: string; rows: number }>} */
+  const files = new Map();
+  for (const [table, file] of PORTABLE_TABLES) {
+    if (!(table in tables)) continue;
+    const rows = db.prepare(`select * from "${table}" order by rowid`).all();
+    files.set(`${PORTABLE}/${file}`, {
+      text: rows.map((row) => `${JSON.stringify(row)}\n`).join(''),
+      rows: rows.length,
+    });
+  }
+  if ('site_settings' in tables) {
+    const rows =
+      /** @type {{ key: string; value_json: string; updated_by: string | null; updated_at: number }[]} */ (
+        db
+          .prepare('select key, value_json, updated_by, updated_at from site_settings order by key')
+          .all()
+      );
+    // The stored JSON as JSON. The app writes only validated JSON there, so a value that does not
+    // parse fails the export rather than leaving a lossy or ambiguous copy (key named, no value).
+    const settings = rows.map(({ key, value_json, updated_by, updated_at }) => {
+      /** @type {unknown} */
+      let value;
+      try {
+        value = JSON.parse(value_json);
+      } catch {
+        throw new Error(`site_settings ${key.slice(0, 40)} is not JSON`);
+      }
+      return { key, value, updated_by, updated_at };
+    });
+    files.set(`${PORTABLE}/settings.json`, {
+      text: `${JSON.stringify(settings, null, 2)}\n`,
+      rows: rows.length,
+    });
+  }
+  return files;
+}
+
 /**
  * @typedef {{
  *   id: string; object_key: string; thumb_key: string; size_bytes: number;
@@ -240,13 +330,16 @@ export function requiredObjects(rows) {
 
 /**
  * @param {string} dir a snapshot directory (manifest.json at its top)
- * @param {{ requireCompleted?: boolean }} [options] `backup` checks its own staging before
- *   it writes `completed: true`; everyone else requires it (AC-BAK-03).
- * @returns {Promise<{ errors: string[]; manifest: Manifest | null }>}
+ * @param {{ requireCompleted?: boolean; secrets?: import('./backup-scan.mjs').Secret[] }} [options]
+ *   `backup` checks its own staging before it writes `completed: true`; everyone else requires
+ *   it (AC-BAK-03). `secrets`: the account id and tokens no file may contain (AC-BAK-08).
+ * @returns {Promise<{ errors: string[]; warnings: string[]; manifest: Manifest | null }>}
  */
-export async function verifySnapshot(dir, { requireCompleted = true } = {}) {
+export async function verifySnapshot(dir, { requireCompleted = true, secrets = [] } = {}) {
   /** @type {string[]} */
   const errors = [];
+  /** @type {string[]} */
+  const warnings = [];
   /** @type {Manifest | null} */
   let manifest = null;
   try {
@@ -256,10 +349,11 @@ export async function verifySnapshot(dir, { requireCompleted = true } = {}) {
   } catch {
     errors.push('manifest.json is missing or not JSON.');
   }
-  if (!manifest) return { errors, manifest };
+  if (!manifest) return { errors, warnings, manifest };
   if (requireCompleted && manifest.completed !== true)
     return {
       errors: ['manifest.json lacks completed: true; this directory is not a backup.'],
+      warnings,
       manifest,
     };
 
@@ -310,6 +404,8 @@ export async function verifySnapshot(dir, { requireCompleted = true } = {}) {
   // 2. database.sql: the manifest's hash and size, parses fully, row counts agree.
   const sqlPath = join(dir, DATABASE);
   let dump = null;
+  /** @type {Map<string, { text: string; rows: number }> | null} */
+  let portable = null;
   try {
     const bytes = lstatSync(sqlPath).size;
     const sha = hashes.get(DATABASE) ?? (await sha256File(sqlPath));
@@ -318,16 +414,19 @@ export async function verifySnapshot(dir, { requireCompleted = true } = {}) {
     const db = loadDump(sqlPath);
     try {
       dump = describeDump(db);
+      portable = portableFiles(db, dump.tables);
     } finally {
       db.close();
     }
   } catch (error) {
     errors.push(
-      error instanceof DumpRefusedError
-        ? `database.sql holds a statement no D1 export contains (${error.message}); nothing in it was run.`
-        : /** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT'
-          ? 'database.sql is missing.'
-          : 'database.sql does not parse into SQLite (truncated or corrupt).',
+      dump
+        ? `portable/ cannot be rebuilt from database.sql (${/** @type {Error} */ (error).message}).`
+        : error instanceof DumpRefusedError
+          ? `database.sql holds a statement no D1 export contains (${error.message}); nothing in it was run.`
+          : /** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT'
+            ? 'database.sql is missing.'
+            : 'database.sql does not parse into SQLite (truncated or corrupt).',
     );
   }
   if (dump) {
@@ -339,7 +438,32 @@ export async function verifySnapshot(dir, { requireCompleted = true } = {}) {
         );
     if (dump.schemaVersion !== manifest.schemaVersion)
       errors.push('schema version differs between database.sql and the manifest.');
+    errors.push(...liveCountErrors(manifest.liveCounts, dump.tables));
   }
+
+  // portable/: exactly the files database.sql rebuilds, byte for byte, listed in the manifest.
+  if (portable) {
+    const onDisk = files.filter((file) => file.startsWith(`${PORTABLE}/`));
+    const paths = new Set([...portable.keys(), ...onDisk, ...Object.keys(manifest.portable)]);
+    for (const path of [...paths].sort()) {
+      const expected = portable.get(path);
+      if (!expected) errors.push(`${path} is not a portable export of database.sql.`);
+      else if (!present.has(path)) errors.push(`${path} is missing.`);
+      else if (readFileSync(join(dir, path), 'utf8') !== expected.text)
+        errors.push(`${path} differs from database.sql.`);
+      else if (manifest.portable[path] !== expected.rows)
+        errors.push(`${path}: the manifest's row count differs.`);
+    }
+  }
+
+  // AC-BAK-08: no account id or token anywhere; a provider URL only as a warning, in content.
+  const scanned = [MANIFEST, ...(existsSync(join(dir, CHECKSUMS)) ? [CHECKSUMS] : []), ...files];
+  /** @type {Map<string, string | null>} */
+  const content = new Map([[DATABASE, null]]);
+  for (const [table, file] of PORTABLE_TABLES) content.set(`${PORTABLE}/${file}`, table);
+  const scan = scanForSecrets(dir, scanned, secrets, content);
+  errors.push(...scan.errors);
+  warnings.push(...scan.warnings);
 
   // 3. Objects: every non-deleted media row's objects with their recorded size and hash;
   // count and bytes equal the manifest. Objects with no row are allowed (R-BAK-04).
@@ -366,7 +490,7 @@ export async function verifySnapshot(dir, { requireCompleted = true } = {}) {
     if (size !== object.size || sha !== object.sha256)
       errors.push(`object ${object.key} differs from its media row (size or hash).`);
   }
-  return { errors, manifest };
+  return { errors, warnings, manifest };
 }
 
 // Plaintext directories and running children a signal must not leave behind (R-BAK-05):
@@ -468,7 +592,7 @@ export function pipeCommands(first, second, timeoutMs, extraEnv = {}) {
  * Decrypts `archive` with the `age` identity into a private temporary directory, verifies
  * the one snapshot inside it, and removes the directory on every path.
  * @param {string} archive @param {string} identity
- * @param {{ tmpRoot?: string; decrypt?: (archive: string, identity: string, into: string) => Promise<void> }} [options]
+ * @param {{ tmpRoot?: string; secrets?: import('./backup-scan.mjs').Secret[]; decrypt?: (archive: string, identity: string, into: string) => Promise<void> }} [options]
  */
 export async function verifyArchive(archive, identity, options = {}) {
   const decrypt =
@@ -487,6 +611,7 @@ export async function verifyArchive(archive, identity, options = {}) {
     } catch (error) {
       return {
         errors: [`cannot decrypt and unpack the archive: ${/** @type {Error} */ (error).message}`],
+        warnings: [],
         manifest: null,
       };
     }
@@ -495,9 +620,10 @@ export async function verifyArchive(archive, identity, options = {}) {
     if (entries.length !== 1 || !top?.isDirectory() || !top.name.startsWith('classhub-backup-'))
       return {
         errors: ['the archive does not hold one classhub-backup-* directory.'],
+        warnings: [],
         manifest: null,
       };
-    return await verifySnapshot(join(scratch, top.name));
+    return await verifySnapshot(join(scratch, top.name), { secrets: options.secrets });
   } finally {
     unregister();
     rmSync(scratch, { recursive: true, force: true });

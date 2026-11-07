@@ -351,6 +351,34 @@
     </Card>
   {/if}
 
+  {#if data.backup}
+    {@const last = data.backup.last}
+    <Card class="sheet" aria-labelledby="backup-head">
+      <div class="head">
+        <h2 id="backup-head">{i18n.t('admin.backup')}</h2>
+      </div>
+      {#if last}
+        <dl class="usage">
+          <div>
+            <dt>{i18n.t('admin.backup.last')}</dt>
+            <dd class="tnum">{formatDate(last.verifiedAt)}</dd>
+          </div>
+          <div>
+            <dt>{i18n.t('admin.backup.size')}</dt>
+            <dd class="tnum">{gb(last.totalBytes)}</dd>
+          </div>
+          <div>
+            <dt>{i18n.t('admin.backup.objects')}</dt>
+            <dd class="tnum">{count.format(last.objectCount)}</dd>
+          </div>
+        </dl>
+      {:else}
+        <p>{i18n.t('admin.backup.none')}</p>
+      {/if}
+      <p class="hint">{i18n.t('admin.backup.hint')}</p>
+    </Card>
+  {/if}
+
   <SiteSettingsCard settings={data.settings} themes={data.themes} form={form ?? null} />
 
   <InfoPagesCard pages={data.infoPages} form={form ?? null} />

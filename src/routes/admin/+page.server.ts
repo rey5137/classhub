@@ -16,6 +16,7 @@ import {
 } from '$lib/server/services/join';
 import { adminSendInviteEmail, lastInviteEmails } from '$lib/server/services/invite-email';
 import { chatOverRetention } from '$lib/server/repositories/chat-archive';
+import { lastVerifiedBackup } from '$lib/server/repositories/backups';
 import { findAuthEmail } from '$lib/server/repositories/users';
 import { siteConfig } from '$lib/config';
 import { countActiveAdmins } from '$lib/server/services/members';
@@ -61,6 +62,8 @@ export const load: PageServerLoad = async ({ locals }) => {
     // R-AUTH-33: with External Evaluation Access asks the site, so the policy labels and the CLI step go.
     accessEvaluation: Boolean(context.accessEvaluator),
     usage: await usageSummary(context, member),
+    // R-BAK-09: the last verified backup's date and size; `usage.view` covers backup status.
+    backup: can(member, 'usage.view') ? { last: await lastVerifiedBackup(context.database) } : null,
     infoPages: (await adminInfoPages(context, member)) ?? [],
     // R-CHAT-14: messages over R-CHAT-13's limits with no verified archive yet.
     chatOverRetention: await chatOverRetention(context.database, siteConfig.chat, Date.now()),

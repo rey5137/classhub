@@ -5,14 +5,20 @@ import { appVersionOf, backupDependencies, runBackup } from './lib/backup.mjs';
 import { runCf } from './lib/cf-child.mjs';
 import { cleanUpOnSignals } from './lib/verify-backup.mjs';
 
-const usage = 'usage: npm run backup -- [--out <dir>] [--recipient age1…]';
+const usage = 'usage: npm run backup -- [--out <dir>] [--recipient age1…] [--prune-old]';
 
-/** @param {string[]} args @returns {{ out?: string; recipient?: string } | null} */
+/** @param {string[]} args @returns {{ out?: string; recipient?: string; pruneOld?: true } | null} */
 export function parseBackupArgs(args) {
-  /** @type {{ out?: string; recipient?: string }} */
+  /** @type {{ out?: string; recipient?: string; pruneOld?: true }} */
   const options = {};
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index];
+    // R-BAK-11: a bare flag, so it takes no value.
+    if (flag === '--prune-old' && options.pruneOld === undefined) {
+      options.pruneOld = true;
+      index -= 1;
+      continue;
+    }
     const value = args[index + 1];
     if (!value || value.startsWith('--')) return null;
     if (flag === '--out' && options.out === undefined) options.out = value;
@@ -47,6 +53,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         run: runCf,
         appVersion: appVersionOf(root),
         recipient: options.recipient ?? deps.recipient,
+        pruneOld: options.pruneOld,
         outDir: resolve(options.out ?? join(root, 'backups')),
       });
     }

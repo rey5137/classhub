@@ -26,11 +26,21 @@ The directory above is a staging layout in a private temporary directory; the on
 encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
 
 - **R-BAK-01** **SQL is the authoritative restore artifact; NDJSON/JSON is the cross-database interchange.** Both are
-  written; neither contains a provider URL, account id or token.
+  written; neither contains an account id or token, and no file the backup writes itself contains a provider URL. Each NDJSON line is one row (column names as keys,
+  rowid order); `settings.json` is the `site_settings` rows with `value_json` parsed into `value`. Both are written
+  from the dump, so `verify-backup` rebuilds them from `database.sql` and compares byte for byte. Every file but the
+  photo bytes is scanned for the R2 S3 host, `api.cloudflare.com`, and the account id, API token, R2 keys, Access
+  audience and team domain from `.env.cloudflare` (`backup` always has it; `verify-backup` uses it when the machine
+  has one and otherwise says the values were not checked). An account id, token, key or Access audience fails
+  anywhere. The provider hosts and the team domain fail in the files the backup writes itself (`manifest.json`,
+  `RESTORE.md`, `checksums.sha256`, `portable/settings.json`); in `database.sql` and the content NDJSON they are what a
+  member or admin wrote (a sign-out link, a how-to page), so there they are a printed warning. Every message names the
+  file, and for an NDJSON file the table and the row ids, never the value.
 - **R-BAK-02** `manifest.json`: `format: "classhub-backup"`, `formatVersion`, `appVersion`, `schemaVersion`,
   `exportedAt` (D1's clock, the same value as `backup_runs.verified_at`, R-BAK-09; `RESTORE.md` and the snapshot name
-  carry it too, never the admin machine's clock), `database { path, sha256, bytes }`, per-table row counts, `objects { count, totalBytes }`,
-  `completed`. `completed: true` is written last, only after every check of R-BAK-04 passed; a directory without it
+  carry it too, never the admin machine's clock), `database { path, sha256, bytes }`, per-table row counts (`tables`,
+  from the dump), `liveCounts` (R-BAK-03's live `COUNT(*)` per table), `portable` (each `portable/` path with its row
+  count), `objects { count, totalBytes }`, `skipped` (R-BAK-16), `completed`. `completed: true` is written last, only after every check of R-BAK-04 passed; a directory without it
   is not a backup.
 
 ## 13.2 CLI
@@ -88,7 +98,12 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
 
 - **R-BAK-10** The live R2 bucket is never the only backup destination; the S3 client only reads from the bucket and never deletes or syncs (R-BAK-17).
 - **R-BAK-11** **Retention:** keep the last 12 weekly and 12 monthly snapshots (each a full, self-contained copy, so deleting a snapshot is the only way a deleted member's photos age out); `npm run backup -- --prune-old`
-  deletes older local snapshots only after the newest one verified. Completed deletion requests age out of backups
+  deletes older local snapshots only after the newest one verified: a snapshot stays when it is the newest in one of
+  the 12 most recent ISO weeks (UTC) holding a snapshot, or in one of the 12 most recent months that do, so a gap in
+  backups never deletes the older ones that cover it; nothing but `classhub-backup-<ts>.tar.age` files in the output
+  directory is ever deleted, and never the archive this run wrote. The output directory holds one site's snapshots
+  (several sites need their own). A file that cannot be deleted is reported; the rest still go and the run still
+  succeeds. Completed deletion requests age out of backups
   with this schedule (R-PROF-12).
 - **R-BAK-12** D1 Time Travel (point-in-time recovery) is a convenience, not a backup.
 
@@ -122,7 +137,7 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
 | AC-BAK-05 | A backup restored with `--target local` runs under `npm run dev:offline` with no Cloudflare credentials | R-BAK-07 | e2e |
 | AC-BAK-06 | Two concurrent `backup` runs, or a `backup` and a `prune-chat`: the second exits without writing | R-BAK-03 | unit |
 | AC-BAK-07 | *Deferred (§D):* the Node build passing the contract tests; the local adapters pass them under AC-PLAT-03 | R-BAK-13 | n/a |
-| AC-BAK-08 | No archive file contains an account id, token or provider URL | R-BAK-01 | `verify-backup` scan |
+| AC-BAK-08 | No archive file contains an account id or token, and no file the backup writes itself a provider URL or the team domain (in member content: a warning naming table and row) | R-BAK-01 | `verify-backup` scan |
 | AC-BAK-09 | `backup` without `age` or a recipient refuses and writes nothing; every output is `.tar.age`; no plaintext staging remains after success or failure | R-BAK-05 | unit |
 | AC-BAK-10 | A dump truncated at a statement boundary fails `verify-backup` against the live counts; a photo deleted between export and copy still verifies | R-BAK-04, 16 | unit fixtures + integration |
 | AC-BAK-11 | The S3 client takes its endpoint from `CLOUDFLARE_ACCOUNT_ID` and refuses to run without the guard's environment | R-BAK-17 | unit |

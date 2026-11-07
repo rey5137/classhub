@@ -285,17 +285,30 @@ Run a backup at least weekly and before every update:
 ```bash
 npm run backup                      # → backups/classhub-backup-<time>.tar.age
 npm run backup -- --out /Volumes/x  # another folder; --recipient age1… overrides AGE_RECIPIENT
+npm run backup -- --prune-old       # then keep the newest per week (12 weeks) and per month (12 months)
 ```
 
 `backup` takes the backup lock (`.wrangler/backup.lock`; a second run, `export-chat` or `prune-chat` refuses while it
-is held), exports D1 through the account guard, copies every photo and avatar in full over the S3 API, writes
-`manifest.json`, `checksums.sha256` and `RESTORE.md`, verifies the snapshot, and only then encrypts it. The plaintext
+is held), reads every table's row count, exports D1 through the account guard, writes the `portable/` NDJSON copy
+from that export, copies every photo and avatar in full over the S3 API, writes `manifest.json`, `checksums.sha256`
+and `RESTORE.md`, verifies the snapshot (including that the export holds at least the rows counted before it in the
+tables that are never hard-deleted (R-DB-13), that no file holds your account id or a token, and that no file the
+backup writes itself names a Cloudflare endpoint or your Access team domain), and only then encrypts it. The plaintext
 staging folder is private to your user and removed whether the run succeeds or fails; the `.tar.age` is the only file
 left. A verified run is recorded in D1 (`backup_runs`: the time of the database export, object count and size, no
 content), which `preflight`,
 `db:migrate:remote` and `/admin` read. Without `age` or a recipient it refuses before reading anything.
 
-A photo deleted between the database export and the object copy is listed in the manifest as skipped; any other
+`--prune-old` deletes older `classhub-backup-*.tar.age` files in the output folder, only after the new one verified
+and was recorded, and never the one it just wrote; it never touches R2 or any other file, and a file it cannot delete
+is reported without failing the backup. The output folder holds one site's backups only: if you back up several
+sites, give each its own `--out` folder, or one site's backups count against another's weeks and months.
+`verify-backup` checks for the account id and tokens only on a machine with `.env.cloudflare`, and says so otherwise.
+A Cloudflare endpoint or your team domain in what members or admins wrote (a sign-out link in an info page, say) is
+theirs to keep: the backup still verifies and prints a warning naming the table and row.
+
+A photo deleted between the database export and the object copy is still copied, since deleted photos keep their
+files for `deletedMediaGraceDays`; if its files are already gone it is listed in the manifest as skipped; any other
 missing object fails the backup. If a run was killed and the lock remains, `backup` names the file: remove it once you
 are sure no backup is running.
 

@@ -11,3 +11,12 @@ test('the /admin row actions each have a distinct accessible name', async ({ pag
   expect(names.every((name) => name.includes(':'))).toBe(true);
   expect(new Set(names).size).toBe(names.length);
 });
+
+// R-BAK-09: the backup status card is on /admin; the dev seed records no backup, so it says so.
+test('R-BAK-09 /admin shows the backup status card', async ({ page }) => {
+  await page.goto('/admin');
+  const card = page.locator('[aria-labelledby="backup-head"]');
+  await expect(card.locator('#backup-head')).toBeVisible();
+  await expect(card.locator('dl')).toHaveCount(0);
+  await expect(card.locator('p').first()).not.toBeEmpty();
+});

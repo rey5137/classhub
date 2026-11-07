@@ -289,6 +289,13 @@ export const vi = {
   'admin.usage.notBilling':
     'Giới hạn dung lượng của ứng dụng không phải giới hạn thanh toán: Cloudflare tính phí theo mức tài khoản thực dùng.',
   'admin.usage.dashboard': 'Mở bảng điều khiển R2',
+  'admin.backup': 'Sao lưu',
+  'admin.backup.last': 'Bản sao lưu đã kiểm tra gần nhất',
+  'admin.backup.size': 'Dung lượng (ảnh và ảnh đại diện)',
+  'admin.backup.objects': 'Số tệp đã sao chép',
+  'admin.backup.none': 'Chưa có bản sao lưu nào được kiểm tra.',
+  'admin.backup.hint':
+    'Sao lưu chạy trên máy tính của bạn bằng npm run backup, ít nhất mỗi tuần. Đó là các tệp đã mã hóa, lưu ngoài Cloudflare.',
   'admin.usage.banner': 'Dung lượng ảnh sắp đầy.',
   'admin.usage.bannerLink': 'Xem dung lượng',
   'admin.seats': 'Đã dùng {used} / {limit} chỗ',

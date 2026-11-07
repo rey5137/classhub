@@ -288,6 +288,13 @@ export const en: Record<keyof typeof vi, string> = {
   'admin.usage.notBilling':
     "The app's storage limit is not a billing cap: Cloudflare bills whatever the account uses.",
   'admin.usage.dashboard': 'Open the R2 dashboard',
+  'admin.backup': 'Backups',
+  'admin.backup.last': 'Last verified backup',
+  'admin.backup.size': 'Size (photos and avatars)',
+  'admin.backup.objects': 'Files copied',
+  'admin.backup.none': 'No verified backup yet.',
+  'admin.backup.hint':
+    'Backups run on your computer with npm run backup, at least weekly. They are encrypted files kept off Cloudflare.',
   'admin.usage.banner': 'Photo storage is nearly full.',
   'admin.usage.bannerLink': 'See usage',
   'admin.seats': '{used} of {limit} seats used',

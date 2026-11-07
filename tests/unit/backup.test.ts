@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseBackupArgs } from '../../scripts/backup.mjs';
 import { BACKUP_RUNS_INSERT } from '../../scripts/lib/backup-sql.mjs';
 import { acquireBackupLock } from '../../scripts/lib/backup-lock.mjs';
+import { secretsFrom } from '../../scripts/lib/backup-scan.mjs';
 import { backupDependencies, encryptWithAge, runBackup } from '../../scripts/lib/backup.mjs';
 import type { CfResult } from '../../scripts/lib/cf-child.mjs';
 import { createS3Client } from '../../scripts/lib/s3.mjs';
@@ -27,6 +28,7 @@ import {
   describeDump,
   DumpRefusedError,
   loadDump,
+  portableFiles,
   runPendingCleanups,
   verifyArchive,
   verifySnapshot,
@@ -96,12 +98,30 @@ function fakeStorage(objects: Map<string, Buffer>) {
   };
 }
 
-function fakeRun(live: Record<string, number | null | undefined> = {}, sql = dumpSql) {
+// `liveSql` is what D1 holds when the live counts are read (R-BAK-03); the export writes `sql`.
+function fakeRun(
+  live: Record<string, number | null | undefined> = {},
+  sql = dumpSql,
+  liveSql = sql,
+) {
   const calls: { args: string[]; input?: string }[] = [];
   const run = vi.fn((args: string[], options: { input?: string } = {}): CfResult => {
     calls.push({ args, input: options.input });
     const ok = (stdout = '{}') => ({ status: 0, stdout, stderr: '' });
     if (args[0] === 'api') return ok();
+    if (args.slice(0, 6).join(' ') === 'd1 execute DB --remote --json --command') {
+      const db = new Database(':memory:');
+      try {
+        db.exec(liveSql);
+        const results = args[6]!.split(';\n').map((statement) => ({
+          results: db.prepare(statement).all(),
+          success: true,
+        }));
+        return ok(JSON.stringify(results));
+      } finally {
+        db.close();
+      }
+    }
     if (args[0] === 'd1' && args[1] === 'export') {
       writeFileSync(args[args.indexOf('--output') + 1]!, sql);
       return ok('');
@@ -221,8 +241,11 @@ describe('npm run backup', () => {
     expect(existsSync(d.lockPath)).toBe(false);
     // The guard runs first; no `staging/` prefix is ever listed (R-BAK-04).
     expect(calls[0]!.args).toEqual(['api', `/r2/buckets/${bucket}`]);
-    expect(calls[1]!.args[0]).toBe('d1-query'); // D1's clock, right before the export
-    expect(calls[2]!.args.slice(0, 4)).toEqual(['d1', 'export', 'DB', '--remote']);
+    // R-BAK-03: the live table list and counts, then D1's clock, right before the export.
+    expect(calls[1]!.args[6]).toMatch(/^select name from sqlite_master /);
+    expect(calls[2]!.args[6]).toMatch(/^select count\(\*\) as n from media;\n/);
+    expect(calls[3]!.args[0]).toBe('d1-query');
+    expect(calls[4]!.args.slice(0, 4)).toEqual(['d1', 'export', 'DB', '--remote']);
     expect(vi.mocked(d.storage.list).mock.calls.map(([prefix]) => prefix)).not.toContain(
       'staging/',
     );
@@ -235,6 +258,8 @@ describe('npm run backup', () => {
       schemaVersion: '1',
       exportedAt: '2026-11-05T00:00:00.000Z',
       tables: { media: 3, schema_meta: 1, users: 1 },
+      liveCounts: { media: 3, schema_meta: 1, users: 1 },
+      portable: { 'portable/media.ndjson': 3, 'portable/users.ndjson': 1 },
       objects: { count: 5 },
       skipped: [],
       completed: true,
@@ -249,6 +274,7 @@ describe('npm run backup', () => {
       'database.sql',
       'manifest.json',
       'objects',
+      'portable',
     ]);
     expect(readFileSync(join(snapshot, 'RESTORE.md'), 'utf8')).not.toMatch(
       /cloudflare|aaaaaaaa|token/i,
@@ -534,6 +560,12 @@ describe('backup S3 configuration', () => {
     const root = writeRoot(`CLOUDFLARE_ACCOUNT_ID=${account}\n${pair}AGE_RECIPIENT=${recipient}\n`);
     const built = backupDependencies(root, { fetch: fetcher });
     expect(built).toMatchObject({ databaseId, bucket, recipient });
+    // AC-BAK-08: the account id and the pair are what the staged snapshot is scanned for.
+    expect(built.secrets.map((secret) => secret.name)).toEqual([
+      'CLOUDFLARE_ACCOUNT_ID',
+      'R2_ACCESS_KEY_ID',
+      'R2_SECRET_ACCESS_KEY',
+    ]);
     await built.storage.list('media/');
     const [url, init] = fetcher.mock.calls[0]!;
     expect(new URL(String(url)).host).toBe(`${account}.r2.cloudflarestorage.com`);
@@ -884,5 +916,458 @@ describe('verify-backup database.sql allowlist', () => {
     expect(loaded.prepare('select count(*) from t').pluck().get()).toBe(1);
     loaded.close();
     expect(existsSync(target())).toBe(false);
+  });
+});
+
+describe('backup completion (5a)', () => {
+  const avatarRow = `${row('a1', 'avatars/v1/u1/a1.webp', '')}\n`;
+  const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
+
+  it('AC-BAK-06 two concurrent backups: the second exits without a remote call or a file', async () => {
+    const storage = fakeStorage(new Map(Object.entries(bytes)));
+    let resume: () => void = () => {};
+    const list = storage.list.getMockImplementation()!;
+    storage.list.mockImplementationOnce(async (...args) => {
+      await new Promise<void>((resolve) => (resume = resolve));
+      return list(...args);
+    });
+    const first = deps({ storage });
+    const running = runBackup(first.deps);
+    await vi.waitFor(() => expect(storage.list).toHaveBeenCalled());
+    const second = deps();
+    expect(await runBackup(second.deps)).toBe(1);
+    expect(second.errors.join('\n')).toContain('backup');
+    expect(second.deps.run).not.toHaveBeenCalled();
+    expect(readdirSync(join(dir, 'out'))).toEqual([]);
+    expect(readdirSync(join(dir, 'tmp'))).toHaveLength(1); // the first run's staging only
+    resume();
+    expect(await running).toBe(0);
+    expect(readdirSync(join(dir, 'out'))).toHaveLength(1);
+  });
+
+  it('R-BAK-01 writes portable/ NDJSON from the dump, listed in the checksums and the manifest', async () => {
+    expect(await runBackup(deps().deps)).toBe(0);
+    const snapshot = snapshotDir();
+    expect(readdirSync(join(snapshot, 'portable')).sort()).toEqual([
+      'media.ndjson',
+      'users.ndjson',
+    ]);
+    expect(readFileSync(join(snapshot, 'portable/users.ndjson'), 'utf8')).toBe(
+      '{"id":"u1","display_name":"Synthetic Member"}\n',
+    );
+    const media = readFileSync(join(snapshot, 'portable/media.ndjson'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(media.map((entry) => entry.id)).toEqual(['m1', 'm2', 'a1']);
+    expect(media[0]).toMatchObject({ object_key: 'media/v1/m1/image.webp', deleted_at: null });
+    const checksums = readFileSync(join(snapshot, 'checksums.sha256'), 'utf8');
+    expect(checksums).toContain('  portable/users.ndjson\n');
+    expect(checksums).toContain('  portable/media.ndjson\n');
+    expect(readJson(join(snapshot, 'manifest.json')).portable).toEqual({
+      'portable/media.ndjson': 3,
+      'portable/users.ndjson': 1,
+    });
+  });
+
+  it.each([
+    [
+      'an edited file',
+      (snapshot: string) => writeFileSync(join(snapshot, 'portable/users.ndjson'), '{}\n'),
+      'portable/users.ndjson differs from database.sql.',
+    ],
+    [
+      'a missing file',
+      (snapshot: string) => rmSync(join(snapshot, 'portable/users.ndjson')),
+      'portable/users.ndjson is missing.',
+    ],
+    [
+      'a file no table exports',
+      (snapshot: string) => writeFileSync(join(snapshot, 'portable/extra.ndjson'), ''),
+      'portable/extra.ndjson is not a portable export of database.sql.',
+    ],
+    [
+      'a wrong manifest row count',
+      (snapshot: string) => {
+        const manifest = readJson(join(snapshot, 'manifest.json'));
+        manifest.portable['portable/users.ndjson'] = 2;
+        writeFileSync(join(snapshot, 'manifest.json'), JSON.stringify(manifest));
+      },
+      "portable/users.ndjson: the manifest's row count differs.",
+    ],
+  ])('R-BAK-04 verify-backup fails on %s under portable/', async (_case, mutate, message) => {
+    expect(await runBackup(deps().deps)).toBe(0);
+    const snapshot = snapshotDir();
+    mutate(snapshot);
+    reseal(snapshot);
+    expect((await verifySnapshot(snapshot)).errors).toEqual([message]);
+  });
+
+  it('AC-BAK-10 a dump truncated at a statement boundary fails the backup against the live counts', async () => {
+    const truncated = dumpSql.replace(avatarRow, '');
+    expect(truncated).not.toBe(dumpSql);
+    const { run, calls } = fakeRun({}, truncated, dumpSql);
+    const { deps: d, errors } = deps({ run });
+    expect(await runBackup(d)).toBe(1);
+    expect(errors.join('\n')).toContain(
+      'database.sql holds 2 media rows, fewer than the 3 read live before the export (truncated?).',
+    );
+    expect(readdirSync(join(dir, 'out'))).toEqual([]);
+    expect(readdirSync(join(dir, 'tmp'))).toEqual([]);
+    expect(calls.some((call) => call.input?.includes('INSERT INTO backup_runs'))).toBe(false);
+  });
+
+  it('R-DB-13 a table that can be hard-deleted may hold fewer rows than were read live', async () => {
+    const liveSql = `${dumpSql}INSERT INTO "users" VALUES('u2','Removed Before Export');\n`;
+    const { deps: d, errors } = deps({ run: fakeRun({}, dumpSql, liveSql).run });
+    expect(await runBackup(d)).toBe(0);
+    expect(errors).toEqual([]);
+    expect(readJson(join(snapshotDir(), 'manifest.json')).liveCounts.users).toBe(2);
+  });
+
+  it('AC-BAK-10 verify-backup fails a dump cut at a statement boundary even when the manifest matches it', async () => {
+    expect(await runBackup(deps().deps)).toBe(0);
+    const snapshot = snapshotDir();
+    const sqlPath = join(snapshot, 'database.sql');
+    writeFileSync(sqlPath, readFileSync(sqlPath, 'utf8').replace(avatarRow, ''));
+    const mediaPath = join(snapshot, 'portable/media.ndjson');
+    const lines = readFileSync(mediaPath, 'utf8').trim().split('\n');
+    writeFileSync(mediaPath, `${lines.slice(0, -1).join('\n')}\n`);
+    const manifest = readJson(join(snapshot, 'manifest.json'));
+    manifest.tables.media = 2;
+    manifest.portable['portable/media.ndjson'] = 2;
+    writeFileSync(join(snapshot, 'manifest.json'), JSON.stringify(manifest));
+    reseal(snapshot);
+    expect((await verifySnapshot(snapshot)).errors).toEqual([
+      'database.sql holds 2 media rows, fewer than the 3 read live before the export (truncated?).',
+    ]);
+  });
+
+  it('R-BAK-03 a failed live count read stops the run before the export', async () => {
+    const base = fakeRun();
+    const run = vi.fn((args: string[], options: { input?: string } = {}) =>
+      args[1] === 'execute'
+        ? { status: 1, stdout: '', stderr: 'cf.mjs: refused' }
+        : base.run(args, options),
+    );
+    const { deps: d, errors } = deps({ run });
+    expect(await runBackup(d)).toBe(1);
+    expect(errors.join('\n')).toContain('cannot read the live row counts');
+    expect(run.mock.calls.some(([args]) => args[1] === 'export')).toBe(false);
+  });
+
+  it('AC-BAK-08 verify-backup fails naming the file that holds a provider URL or the account id', async () => {
+    expect(await runBackup(deps().deps)).toBe(0);
+    const snapshot = snapshotDir();
+    writeFileSync(
+      join(snapshot, 'RESTORE.md'),
+      `${readFileSync(join(snapshot, 'RESTORE.md'), 'utf8')}\nhttps://${account}.r2.cloudflarestorage.com/${bucket}\n`,
+    );
+    reseal(snapshot);
+    expect((await verifySnapshot(snapshot)).errors).toEqual([
+      'RESTORE.md contains the R2 S3 endpoint.',
+    ]);
+    const secrets = [{ name: 'CLOUDFLARE_ACCOUNT_ID', value: account }];
+    expect((await verifySnapshot(snapshot, { secrets })).errors).toEqual([
+      'RESTORE.md contains the R2 S3 endpoint.',
+      'RESTORE.md contains the CLOUDFLARE_ACCOUNT_ID value.',
+    ]);
+    const manifest = readJson(join(snapshot, 'manifest.json'));
+    manifest.appVersion = 'see https://api.cloudflare.com/client/v4';
+    writeFileSync(join(snapshot, 'manifest.json'), JSON.stringify(manifest));
+    expect((await verifySnapshot(snapshot)).errors).toContain(
+      'manifest.json contains the Cloudflare API host.',
+    );
+  });
+
+  it('AC-BAK-08 a token in member data fails the backup, naming the SQL and NDJSON files, never the value', async () => {
+    const token = 'synthetic-api-token-0123456789';
+    const sql = dumpSql.replace('Synthetic Member', `Pasted ${token}`);
+    const { deps: d, errors } = deps({
+      run: fakeRun({}, sql).run,
+      secrets: [{ name: 'CLOUDFLARE_API_TOKEN', value: token }],
+    });
+    expect(await runBackup(d)).toBe(1);
+    const said = errors.join('\n');
+    expect(said).toContain('database.sql contains the CLOUDFLARE_API_TOKEN value.');
+    expect(said).toContain(
+      'portable/users.ndjson contains the CLOUDFLARE_API_TOKEN value in users row u1.',
+    );
+    expect(said).not.toContain(token);
+    expect(readdirSync(join(dir, 'out'))).toEqual([]);
+    expect(readdirSync(join(dir, 'tmp'))).toEqual([]);
+  });
+
+  it('AC-BAK-08 a team-domain link or provider host in member content warns, naming the table and row, and still verifies', async () => {
+    const team = 'synthetic-team.cloudflareaccess.com';
+    const sql = `${dumpSql}CREATE TABLE info_pages (id text primary key, body text not null);
+INSERT INTO "info_pages" VALUES('ip1','Sign out: https://${team}/cdn-cgi/access/logout');
+CREATE TABLE posts (id text primary key, body text not null);
+INSERT INTO "posts" VALUES('p1','Our host is ${['api', 'cloudflare', 'com'].join('.')}');
+`;
+    const secrets = [
+      { name: 'CLOUDFLARE_ACCOUNT_ID', value: account },
+      { name: 'ACCESS_TEAM_DOMAIN', value: team },
+    ];
+    const { deps: d, errors } = deps({ run: fakeRun({}, sql).run, secrets });
+    expect(await runBackup(d)).toBe(0);
+    expect(errors).toEqual([
+      'backup: warning: database.sql contains the Cloudflare API host.',
+      'backup: warning: database.sql contains the ACCESS_TEAM_DOMAIN host.',
+      'backup: warning: portable/info_pages.ndjson contains the ACCESS_TEAM_DOMAIN host in info_pages row ip1.',
+      'backup: warning: portable/posts.ndjson contains the Cloudflare API host in posts row p1.',
+    ]);
+    const lines: string[] = [];
+    const io = { out: () => {}, err: (line: string) => lines.push(line), secrets };
+    expect(await runVerifyBackup([snapshotDir()], {}, io)).toBe(0);
+    expect(lines).toContain(
+      'verify-backup: WARN portable/info_pages.ndjson contains the ACCESS_TEAM_DOMAIN host in info_pages row ip1.',
+    );
+  });
+
+  it('AC-BAK-08 an account id in a post fails the backup, naming the table and row', async () => {
+    const sql = `${dumpSql}CREATE TABLE posts (id text primary key, body text not null);
+INSERT INTO "posts" VALUES('p1','plain');
+INSERT INTO "posts" VALUES('p2','my account is ${account}');
+`;
+    const { deps: d, errors } = deps({
+      run: fakeRun({}, sql).run,
+      secrets: [{ name: 'CLOUDFLARE_ACCOUNT_ID', value: account }],
+    });
+    expect(await runBackup(d)).toBe(1);
+    const said = errors.join('\n');
+    expect(said).toContain('database.sql contains the CLOUDFLARE_ACCOUNT_ID value.');
+    expect(said).toContain(
+      'portable/posts.ndjson contains the CLOUDFLARE_ACCOUNT_ID value in posts row p2.',
+    );
+    expect(said).not.toContain(account);
+    expect(readdirSync(join(dir, 'out'))).toEqual([]);
+  });
+
+  it('AC-BAK-08 the team domain in a file the backup writes itself fails', async () => {
+    const team = 'synthetic-team.cloudflareaccess.com';
+    const secrets = [{ name: 'ACCESS_TEAM_DOMAIN', value: team }];
+    expect(await runBackup(deps({ secrets }).deps)).toBe(0);
+    const snapshot = snapshotDir();
+    writeFileSync(
+      join(snapshot, 'RESTORE.md'),
+      `${readFileSync(join(snapshot, 'RESTORE.md'), 'utf8')}\nhttps://${team}/\n`,
+    );
+    reseal(snapshot);
+    expect((await verifySnapshot(snapshot, { secrets })).errors).toEqual([
+      'RESTORE.md contains the ACCESS_TEAM_DOMAIN host.',
+    ]);
+    const manifest = readJson(join(snapshot, 'manifest.json'));
+    manifest.appVersion = `see ${team}`;
+    writeFileSync(join(snapshot, 'manifest.json'), JSON.stringify(manifest));
+    expect((await verifySnapshot(snapshot, { secrets })).errors).toContain(
+      'manifest.json contains the ACCESS_TEAM_DOMAIN host.',
+    );
+  });
+
+  it('AC-BAK-08 verify-backup scans a decrypted archive for the .env.cloudflare values', async () => {
+    expect(await runBackup(deps().deps)).toBe(0);
+    const snapshot = snapshotDir();
+    writeFileSync(
+      join(snapshot, 'RESTORE.md'),
+      `${readFileSync(join(snapshot, 'RESTORE.md'), 'utf8')}\naccount ${account}\n`,
+    );
+    reseal(snapshot);
+    const [archive] = readdirSync(join(dir, 'out'));
+    const identity = join(dir, 'key.txt');
+    writeFileSync(identity, 'AGE-SECRET-KEY-SYNTHETIC');
+    const lines: string[] = [];
+    const io = {
+      out: () => {},
+      err: (line: string) => lines.push(line),
+      secrets: [{ name: 'CLOUDFLARE_ACCOUNT_ID', value: account }],
+      // Stands in for age -d | tar -x: the staged copy fakeEncrypt kept.
+      decrypt: async (_archive: string, _identity: string, into: string) =>
+        cpSync(snapshot, join(into, snapshot.split(/[\\/]/).pop()!), { recursive: true }),
+    };
+    expect(
+      await runVerifyBackup([join(dir, 'out', archive!), '--identity', identity], {}, io),
+    ).toBe(1);
+    expect(lines).toEqual([
+      'verify-backup: FAIL RESTORE.md contains the CLOUDFLARE_ACCOUNT_ID value.',
+    ]);
+  });
+
+  it('AC-BAK-08 the verify-backup CLI says whether the .env.cloudflare values were checked', async () => {
+    expect(await runBackup(deps().deps)).toBe(0);
+    const snapshot = snapshotDir();
+    const lines: string[] = [];
+    const out = (line: string) => lines.push(line);
+    expect(await runVerifyBackup([snapshot], {}, { out })).toBe(0);
+    expect(lines[0]).toContain('the account id and tokens were not checked');
+    lines.length = 0;
+    const secrets = [{ name: 'CLOUDFLARE_ACCOUNT_ID', value: account }];
+    expect(await runVerifyBackup([snapshot], {}, { out, secrets })).toBe(0);
+    expect(lines[0]).toContain('any of 1 .env.cloudflare values');
+  });
+
+  it('AC-BAK-08 secretsFrom takes the account id, tokens and keys, never the age recipient or a short value', () => {
+    expect(
+      secretsFrom({
+        CLOUDFLARE_ACCOUNT_ID: account,
+        CLOUDFLARE_API_TOKEN: 'synthetic-token-value',
+        R2_HOUSEKEEPING_SECRET_ACCESS_KEY: 'short',
+        ACCESS_TEAM_DOMAIN: 'synthetic.example.test',
+        AGE_RECIPIENT: recipient,
+      }).map((secret) => secret.name),
+    ).toEqual(['CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'ACCESS_TEAM_DOMAIN']);
+    expect(secretsFrom(null)).toEqual([]);
+  });
+
+  it('R-BAK-01 the portable export of the real schema has every §13.1 file, row for row', () => {
+    const migrationsDir = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    const source = new Database(':memory:');
+    for (const file of readdirSync(migrationsDir)
+      .filter((name) => name.endsWith('.sql'))
+      .sort())
+      source.exec(readFileSync(join(migrationsDir, file), 'utf8'));
+    source
+      .prepare('insert into site_settings (key, value_json, updated_at) values (?, ?, ?)')
+      .run('site', '{"name":"Synthetic Class","features":{"chat":true}}', 1);
+    const path = join(dir, 'database.sql');
+    writeFileSync(path, dumpLikeD1(source));
+    const loaded = loadDump(path);
+    const files = portableFiles(loaded, describeDump(loaded).tables);
+    expect([...files.keys()].sort()).toEqual(
+      [
+        'albums.ndjson',
+        'chat-messages.ndjson',
+        'comments.ndjson',
+        'info_pages.ndjson',
+        'invites.ndjson',
+        'media.ndjson',
+        'posts.ndjson',
+        'profile_contacts.ndjson',
+        'settings.json',
+        'users.ndjson',
+      ].map((file) => `portable/${file}`),
+    );
+    const settings = JSON.parse(files.get('portable/settings.json')!.text);
+    expect(settings).toContainEqual({
+      key: 'site',
+      value: { name: 'Synthetic Class', features: { chat: true } },
+      updated_by: null,
+      updated_at: 1,
+    });
+    expect(files.get('portable/settings.json')!.rows).toBe(
+      source.prepare('select count(*) from site_settings').pluck().get(),
+    );
+    // A stored value that is not JSON fails the export instead of a lossy copy.
+    loaded.prepare("update site_settings set value_json = '{' where key = 'site'").run();
+    expect(() => portableFiles(loaded, describeDump(loaded).tables)).toThrow(
+      'site_settings site is not JSON',
+    );
+    loaded.close();
+    source.close();
+  });
+
+  it('R-BAK-11 --prune-old deletes old snapshots only after the new one verified', async () => {
+    const out = join(dir, 'out');
+    // Weekly since January 2025: 96 weeks, far more than 12 weekly and 12 monthly.
+    const names: string[] = [];
+    for (
+      let time = Date.parse('2025-01-01T00:00:00Z');
+      time < Date.parse('2026-11-01T00:00:00Z');
+      time += 7 * 86_400_000
+    )
+      names.push(
+        `classhub-backup-${new Date(time).toISOString().replace(/:|\.\d{3}/g, '')}.tar.age`,
+      );
+    for (const name of names) writeFileSync(join(out, name), 'old');
+    writeFileSync(join(out, 'notes.txt'), 'mine');
+
+    const failing = fakeStorage(new Map(Object.entries(bytes)));
+    failing.get.mockRejectedValueOnce(new Error('S3 GET failed: HTTP 500'));
+    expect(await runBackup(deps({ storage: failing, pruneOld: true }).deps)).toBe(1);
+    expect(readdirSync(out)).toHaveLength(names.length + 1);
+
+    // Written but not recorded in backup_runs: not verified as far as INV-7 knows, so no prune.
+    const base = fakeRun();
+    const unrecorded = vi.fn((args: string[], options: { input?: string } = {}) =>
+      options.input?.includes('INSERT INTO backup_runs')
+        ? { status: 1, stdout: '', stderr: 'D1 refused' }
+        : base.run(args, options),
+    );
+    expect(await runBackup(deps({ run: unrecorded, pruneOld: true }).deps)).toBe(1);
+    expect(readdirSync(out).sort()).toEqual(
+      [...names, 'notes.txt', 'classhub-backup-2026-11-05T000000Z.tar.age'].sort(),
+    );
+    rmSync(join(out, 'classhub-backup-2026-11-05T000000Z.tar.age'));
+
+    const lines: string[] = [];
+    const { deps: d } = deps({ pruneOld: true, out: (line: string) => lines.push(line) });
+    expect(await runBackup(d)).toBe(0);
+    const left = readdirSync(out);
+    expect(left).toContain('classhub-backup-2026-11-05T000000Z.tar.age');
+    expect(left).toContain('notes.txt');
+    expect(left.length).toBeLessThan(names.length);
+    expect(lines.filter((line) => line.startsWith('backup: deleted old '))).toHaveLength(
+      names.length + 2 - left.length,
+    );
+  });
+
+  it('R-BAK-11 a file --prune-old cannot delete is reported; the rest go and the backup still succeeds', async () => {
+    const out = join(dir, 'out');
+    const names = ['2024-01-03', '2024-02-07', '2024-03-06'].map(
+      (day) => `classhub-backup-${day}T000000Z.tar.age`,
+    );
+    for (const name of names) writeFileSync(join(out, name), 'old');
+    // Thirteen newer monthly snapshots push the three above out of both windows.
+    for (let month = 0; month < 13; month += 1) {
+      const day = new Date(Date.UTC(2025, month, 1)).toISOString().slice(0, 10);
+      writeFileSync(join(out, `classhub-backup-${day}T000000Z.tar.age`), 'kept');
+    }
+    const errors: string[] = [];
+    const lines: string[] = [];
+    const removeFile = (path: string) => {
+      if (path.endsWith(names[0]!)) throw Object.assign(new Error('denied'), { code: 'EPERM' });
+      if (path.endsWith(names[1]!)) throw Object.assign(new Error('gone'), { code: 'ENOENT' });
+      rmSync(path);
+    };
+    const { deps: d } = deps({
+      pruneOld: true,
+      removeFile,
+      out: (line: string) => lines.push(line),
+      err: (line: string) => errors.push(line),
+    });
+    expect(await runBackup(d)).toBe(0);
+    expect(errors).toEqual([
+      `backup: backup verified; could not delete ${names[1]}: ENOENT`,
+      `backup: backup verified; could not delete ${names[0]}: EPERM`,
+    ]);
+    expect(lines).toContain(`backup: deleted old ${names[2]}`);
+    const left = readdirSync(out);
+    expect(left).not.toContain(names[2]);
+    expect(left).toContain('classhub-backup-2026-11-05T000000Z.tar.age');
+  });
+
+  it('R-BAK-11 --prune-old never deletes the archive it just wrote, whatever else is in --out', async () => {
+    const out = join(dir, 'out');
+    // Another site's backup, newer and in the same ISO week as this run's 2026-11-05.
+    writeFileSync(join(out, 'classhub-backup-2026-11-06T000000Z.tar.age'), 'other site');
+    const lines: string[] = [];
+    const { deps: d } = deps({ pruneOld: true, out: (line: string) => lines.push(line) });
+    expect(await runBackup(d)).toBe(0);
+    expect(readdirSync(out).sort()).toEqual([
+      'classhub-backup-2026-11-05T000000Z.tar.age',
+      'classhub-backup-2026-11-06T000000Z.tar.age',
+    ]);
+    expect(lines.filter((line) => line.startsWith('backup: deleted old '))).toEqual([]);
+  });
+
+  it('R-BAK-11 parses --prune-old as a bare flag, once', () => {
+    expect(parseBackupArgs(['--prune-old'])).toEqual({ pruneOld: true });
+    expect(parseBackupArgs(['--out', 'x', '--prune-old', '--recipient', recipient])).toEqual({
+      out: 'x',
+      pruneOld: true,
+      recipient,
+    });
+    expect(parseBackupArgs(['--prune-old', '--prune-old'])).toBeNull();
+    expect(parseBackupArgs(['--prune-old', 'x'])).toBeNull();
   });
 });

@@ -19,8 +19,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { acquireBackupLock, BACKUP_LOCK_PATH, LockHeldError } from './backup-lock.mjs';
+import { pruneOldSnapshots } from './backup-retention.mjs';
+import { secretsFrom } from './backup-scan.mjs';
 import { BACKUP_RUNS_INSERT, D1_CLOCK_SELECT } from './backup-sql.mjs';
-import { reason } from './cf-child.mjs';
+import { d1Remote, reason } from './cf-child.mjs';
 import { readEnvFile } from './env-file.mjs';
 import { uuidv7 } from './ids.mjs';
 import { createS3Client, validObjectKey } from './s3.mjs';
@@ -34,6 +36,8 @@ import {
   OBJECTS,
   onSignalCleanup,
   pipeCommands,
+  PORTABLE,
+  portableFiles,
   requiredObjects,
   runPendingCleanups,
   RESTORE_NOTES,
@@ -74,6 +78,9 @@ const rawResultSchema = z.array(
  *   outDir: string;
  *   ageAvailable?: () => boolean;
  *   encrypt?: (stage: string, name: string, recipient: string, destination: string) => Promise<void>;
+ *   secrets?: import('./backup-scan.mjs').Secret[];
+ *   pruneOld?: boolean;
+ *   removeFile?: (path: string) => void;
  *   lockPath?: string;
  *   tmpRoot?: string;
  *   out?: (line: string) => void;
@@ -95,6 +102,8 @@ export function backupDependencies(root, options = {}) {
     databaseId,
     bucket,
     recipient: file?.AGE_RECIPIENT,
+    // AC-BAK-08: the staged snapshot is scanned for these before it is encrypted.
+    secrets: secretsFrom(file),
     storage: createS3Client(
       {
         account: env.CLOUDFLARE_ACCOUNT_ID,
@@ -214,6 +223,10 @@ export async function runBackup(deps) {
     const guard = run(['api', `/r2/buckets/${deps.bucket}`]);
     if (guard.status !== 0) throw new Error(`the account guard refused (${reason(guard)})`);
 
+    // R-BAK-03: live row counts before the export; verification fails a dump holding fewer
+    // rows of a never-hard-deleted table (R-BAK-04, R-DB-13).
+    const liveCounts = await readLiveCounts(run);
+
     // The export time comes from D1's clock, read right before the export: INV-7 compares it
     // with Cloudflare's deploy time, and this machine's clock may be wrong (R-BAK-09).
     const clock = run(['d1-query', deps.databaseId], {
@@ -238,17 +251,25 @@ export async function runBackup(deps) {
     if (exported.status !== 0) throw new Error(`d1 export failed (${reason(exported)})`);
     if (!existsSync(sqlPath)) throw new Error('d1 export wrote no file');
     let dump;
+    /** @type {ReturnType<typeof portableFiles>} */
+    let portable;
+    let db;
     try {
-      const db = loadDump(sqlPath);
-      try {
-        dump = describeDump(db);
-      } finally {
-        db.close();
-      }
+      db = loadDump(sqlPath);
     } catch {
       throw new Error('the exported database.sql does not parse');
     }
+    try {
+      dump = describeDump(db);
+      // §13.1: the NDJSON interchange, from the dump in a local SQLite, no extra remote read.
+      portable = portableFiles(db, dump.tables);
+    } finally {
+      db.close();
+    }
     if (dump.schemaVersion === null) throw new Error('the export has no schema_version');
+    mkdirSync(join(snapshot, PORTABLE), { mode: 0o700 });
+    for (const [path, { text }] of portable)
+      writeFileSync(join(snapshot, ...path.split('/')), text, { mode: 0o600, flag: 'wx' });
 
     // 2. R2: every final object, in full.
     /** @type {{ key: string; size: number }[]} */
@@ -331,14 +352,21 @@ export async function runBackup(deps) {
         bytes: statSync(sqlPath).size,
       },
       tables: dump.tables,
+      liveCounts,
+      portable: Object.fromEntries([...portable].map(([path, { rows }]) => [path, rows])),
       objects: { count: objectCount, totalBytes },
       skipped,
       completed: false,
     };
     const manifestPath = join(snapshot, MANIFEST);
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
-    const { errors } = await verifySnapshot(snapshot, { requireCompleted: false });
+    const { errors, warnings } = await verifySnapshot(snapshot, {
+      requireCompleted: false,
+      secrets: deps.secrets ?? [],
+    });
     if (errors.length > 0) throw new Error(`verification failed: ${errors.join(' ')}`);
+    // AC-BAK-08: a provider host members or admins wrote is theirs to keep; the owner is told.
+    for (const warning of warnings) err(`backup: warning: ${warning}`);
     const final = `${JSON.stringify({ ...manifest, completed: true }, null, 2)}\n`;
     writeFileSync(manifestPath, final, { mode: 0o600 });
 
@@ -372,6 +400,23 @@ export async function runBackup(deps) {
       `backup: verified ${Object.values(dump.tables).reduce((sum, n) => sum + n, 0)} rows, ${objectCount} objects (${totalBytes} bytes)${skipped.length ? `, ${skipped.length} skipped as deleted` : ''}.`,
     );
     out('backup: copy it off this machine; keep the age identity key somewhere else.');
+    // R-BAK-11: only now, after the newest snapshot verified, and still under the lock.
+    // The new snapshot is written and recorded, so nothing here fails the run.
+    if (deps.pruneOld) {
+      try {
+        const pruned = pruneOldSnapshots(deps.outDir, {
+          protect: `${name}.tar.age`,
+          remove: deps.removeFile,
+        });
+        for (const deleted of pruned.deleted) out(`backup: deleted old ${deleted}`);
+        for (const { name: kept, reason: why } of pruned.failed)
+          err(`backup: backup verified; could not delete ${kept}: ${why}`);
+      } catch (error) {
+        err(
+          `backup: backup verified; could not prune old snapshots: ${/** @type {Error} */ (error).message}`,
+        );
+      }
+    }
     return 0;
   } catch (error) {
     // Messages name keys and counts, never SQL parameters or credentials.
@@ -381,6 +426,47 @@ export async function runBackup(deps) {
     unregister();
     cleanup();
   }
+}
+
+// Same filter as describeDump: D1's internal `_cf_` tables and SQLite's own are not data.
+const LIVE_TABLES_SELECT =
+  "select name from sqlite_master where type = 'table' and name not like 'sqlite\\_%' escape '\\' and name not like '\\_cf\\_%' escape '\\' order by name";
+
+/**
+ * R-BAK-03: COUNT(*) of every table, live. Through `d1 execute` (cf.mjs), since `d1-query`
+ * never reads `users` or content tables; counts only, no row leaves D1 here.
+ * @param {import('./cf-child.mjs').CfRunner} run @returns {Promise<Record<string, number>>}
+ */
+async function readLiveCounts(run) {
+  let names;
+  /** @type {Record<string, unknown>[][]} */
+  let counts;
+  try {
+    const [rows = []] = await d1Remote(run, [LIVE_TABLES_SELECT]);
+    names = rows.map((row) => row.name);
+    if (
+      !names.length ||
+      names.some((name) => typeof name !== 'string' || !/^[a-z_][a-z0-9_]*$/i.test(name))
+    )
+      throw new Error('unexpected table names');
+    counts = await d1Remote(
+      run,
+      names.map((name) => `select count(*) as n from ${name}`),
+    );
+  } catch (error) {
+    throw new Error(`cannot read the live row counts (${/** @type {Error} */ (error).message})`, {
+      cause: error,
+    });
+  }
+  /** @type {Record<string, number>} */
+  const live = {};
+  names.forEach((name, index) => {
+    const n = counts[index]?.[0]?.n;
+    if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 0)
+      throw new Error(`cannot read the live row count of ${name}`);
+    live[/** @type {string} */ (name)] = n;
+  });
+  return live;
 }
 
 /**
