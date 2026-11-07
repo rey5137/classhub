@@ -17,6 +17,7 @@ export const en: Record<keyof typeof vi, string> = {
   'shell.language': 'English',
   'shell.switchLanguage': 'Switch to Tiếng Việt',
   'shell.signOut': 'Sign out',
+  'shell.install': 'Install app',
   'shell.className': '{name} · {years}',
   'home.newPhotos': 'New photos',
   'home.discussing': 'Being discussed',

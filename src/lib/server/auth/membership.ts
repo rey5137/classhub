@@ -31,11 +31,11 @@ export async function resolveMember(
     // The activation writes `access_sub` itself, so there is nothing to compare.
     if (await activateInvitedUser(database, email, identity.subject, now)) {
       return {
-      id: user.id,
-      role: user.role,
-      displayName: user.displayName,
-      avatarMediaId: user.avatarMediaId,
-    };
+        id: user.id,
+        role: user.role,
+        displayName: user.displayName,
+        avatarMediaId: user.avatarMediaId,
+      };
     }
     // A concurrent first request (a second tab, a data request) may have won the
     // activation: accept the row if it is now active, as any later login would.
@@ -58,9 +58,9 @@ export async function resolveMember(
     return null;
   }
   return {
-      id: user.id,
-      role: user.role,
-      displayName: user.displayName,
-      avatarMediaId: user.avatarMediaId,
-    };
+    id: user.id,
+    role: user.role,
+    displayName: user.displayName,
+    avatarMediaId: user.avatarMediaId,
+  };
 }

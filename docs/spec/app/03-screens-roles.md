@@ -103,7 +103,8 @@ Android can build a real installed app.
   (iOS) or "in Chrome" (Android) through the in-app browser's menu, plus a Copy link button (Clipboard API, falling
   back to a selected read-only field); `desktop-menu` its menu step; `installed` "already installed". `ios` and
   in-app on iOS add: the Home Screen app signs in separately from Safari, so sign in once more the first time it
-  opens. `/profile` always links to `/install`. All copy is in both dictionaries (R-UI-10) except `offline.html`.
+  opens. `/profile` always links to `/install`; the account menu holds an Install app item (the `prompt()` button for
+  `prompt`, a link to `/install` otherwise, absent for `installed`). All copy is in both dictionaries (R-UI-10) except `offline.html`.
 - **R-NAV-11** **Home card.** Home shows a dismissible install card, rendered on the client after hydration, when the
   kind is `prompt`, or is `ios`, `android-menu` or `in-app` on a coarse pointer; never for `installed`,
   `desktop-menu` or `unsupported`. It holds one line, the Install button (`prompt`) or a link to `/install`, and a

@@ -6,6 +6,7 @@
   import { t as translate } from '$lib/i18n';
   import { useI18n } from '$lib/i18n/context';
   import type { NavArea, NavItem } from '$lib/nav';
+  import { installState } from '$lib/install/state.svelte';
   import Avatar from './Avatar.svelte';
 
   interface Props {
@@ -44,6 +45,12 @@
     if (!(event.relatedTarget instanceof Node) || !account?.contains(event.relatedTarget)) {
       closeMenu();
     }
+  }
+
+  // R-NAV-10: the browser's own prompt where one was captured, else the guide; nothing once installed.
+  async function installApp() {
+    closeMenu();
+    await installState.install();
   }
 
   function switchLanguage() {
@@ -131,6 +138,11 @@
           <a href={resolve('/notifications')}>{i18n.t('nav.notifications')}</a>
         {/if}
         <a href={resolve('/admin')}>{i18n.t('shell.admin')}</a>
+        {#if installState.ready && installState.kind === 'prompt'}
+          <button type="button" onclick={installApp}>{i18n.t('shell.install')}</button>
+        {:else if !installState.ready || installState.kind !== 'installed'}
+          <a href={resolve('/install')}>{i18n.t('shell.install')}</a>
+        {/if}
         <button type="button" onclick={switchLanguage}>{i18n.t('shell.switchLanguage')}</button>
         <!-- R-AUTH-16: the Access cookie is the session; Access's own endpoint clears it. -->
         <a class="sign-out" href="/cdn-cgi/access/logout" rel="external" data-sveltekit-reload

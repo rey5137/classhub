@@ -26,12 +26,13 @@
   style:--avatar-bg={tone === undefined ? undefined : `var(--avatar-${(tone % 10) + 1})`}
   style:--avatar-fg={tone === undefined ? undefined : 'var(--avatar-ink)'}
   aria-hidden="true"
+  data-initials={!mediaId && showInitials ? initials : undefined}
   >{#if mediaId}<img
       src="/api/v1/media/{mediaId}/image"
       alt=""
       loading="lazy"
       decoding="async"
-    />{:else if showInitials}{initials}{/if}</span
+    />{/if}</span
 >
 
 <style>
@@ -45,6 +46,12 @@
     font-weight: 700;
     line-height: 1;
     overflow: hidden;
+  }
+
+  /* Drawn, not text: the picture is decorative, and a labelled control holding it (the account button) keeps
+     its own name (axe label-content-name-mismatch). */
+  [data-initials]::before {
+    content: attr(data-initials);
   }
 
   img {

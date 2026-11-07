@@ -155,6 +155,14 @@ test('R-AUTH-16 the account menu signs out through Access', async ({ page }) => 
   await expect(signOut).toHaveAttribute('data-sveltekit-reload', '');
 });
 
+test('R-NAV-10 the account menu offers the app install', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('details.account summary').click();
+  const menu = page.locator('details.account .menu');
+  // The browser's own prompt (a button) where Chromium offers one, the /install guide otherwise.
+  await expect(menu.getByText('Cài ứng dụng')).toBeVisible();
+});
+
 test('R-UI-08 the bottom space is reserved once and the tab bar fits four items', async ({
   page,
 }) => {
