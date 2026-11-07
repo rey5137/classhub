@@ -4,6 +4,7 @@
   import InstallCard from '$lib/components/InstallCard.svelte';
   import MarkdownBody from '$lib/components/MarkdownBody.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
+  import PushCard from '$lib/components/PushCard.svelte';
   import PostCard from '$lib/components/PostCard.svelte';
   import Rail from '$lib/components/Rail.svelte';
   import Row from '$lib/components/Row.svelte';
@@ -23,6 +24,7 @@
 </script>
 
 <InstallCard />
+<PushCard />
 
 <!-- R-BRD-01: welcome, pinned, reunion, newest photos, active threads, in that order. -->
 <div class="head">

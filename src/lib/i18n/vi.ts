@@ -522,6 +522,12 @@ export const vi = {
   'info.empty': 'Trang này chưa có nội dung.',
   'info.error.slug_taken': 'Một trang khác đã dùng địa chỉ này.',
   'shell.skip': 'Tới nội dung',
+  'install.pushNext':
+    'Sau khi cài, mở ứng dụng từ màn hình chính và bật thông báo để biết ngay khi lớp có tin mới.',
+  'push.card.text': 'Bật thông báo để biết ngay khi lớp có tin nhắn hoặc bài viết mới.',
+  'push.card.button': 'Bật thông báo',
+  'push.card.settings': 'Chọn loại thông báo',
+  'push.card.close': 'Đóng',
   'install.title': 'Cài ứng dụng',
   'install.lede': 'Thêm {name} vào màn hình chính để mở nhanh như một ứng dụng.',
   'install.installed': 'Ứng dụng đã được cài trên thiết bị này.',

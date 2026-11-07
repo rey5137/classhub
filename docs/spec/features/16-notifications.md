@@ -128,6 +128,13 @@ on its own.
   date, *Remove*). *Turn off for this device* unsubscribes in the browser and deletes the row. On load, when
   permission is granted and the browser has a subscription the server doesn't list (after a restore, R-BAK-06, or a
   missed change), it is posted again once; nothing repeats while idle (AC-BUD-03).
+- **R-NTF-14** **Asked in the installed app.** Home shows a dismissible card, rendered on the client after hydration,
+  only in the installed app (R-NAV-09 kind `installed`, where Web Push works on every platform including iOS) when the
+  browser supports push, permission on this device is still `default`, the site has VAPID keys and `notifications` is
+  on, and the card was not dismissed in the last 30 days (`localStorage` `classhub:push-card-dismissed`). Its *Turn on
+  notifications* button runs the R-NTF-10 flow from that tap; on success the card says so and links to
+  `/notifications`, a refused prompt hides it. `/install` adds a line after its steps: once installed, open the app and
+  turn on notifications. It never shows with the install card (R-NAV-11), which is never shown for `installed`.
 - **R-NTF-12** **Service worker handlers** (amending R-NAV-08): `push` shows exactly one notification from the payload
   (title, body, tag, `renotify` true, the 192 px icon); for `chat` and `reply` tags it first reads the shown
   notification with the same tag (`getNotifications`) and merges, like a chat app: title "Class chat · 3 new
@@ -156,3 +163,4 @@ on its own.
 | AC-NTF-12 | `/notifications` at 390 px: the button asks permission only on tap (stubbed `pushManager`), kinds and mute persist across reloads, *Remove* drops a device, an iPhone UA outside standalone shows the `/install` link, an unlisted browser subscription is posted again once | R-NTF-10, 11 | e2e |
 | AC-NTF-13 | On the live site: the installed Android app and the installed iPhone app each get a chat push while closed and none while `/chat` is open; a 1-hour mute holds; tapping a reply push opens the thread | R-NTF-01, 07, 09, 12 | manual (plan 4f/4g checklist) |
 | AC-NTF-14 | After 10 unseen pushes a member gets no item push; the next event sends one `summary` with the right capped counts for their kinds only; the next comes no sooner than 6 h, then 12 h, then 24 h; `join` still arrives; one page load resets it and item pushes resume; an active member's page loads write nothing | R-NTF-13 | integration (fake clock, row counter; a summary beyond the event ceiling stays unclaimed; the reply count covers followed threads only) |
+| AC-NTF-15 | The home push card shows only for an installed app with permission `default`, supported push and no dismissal in the last 30 days; never in a browser tab | R-NTF-14 | unit (`pushCardVisible`) |

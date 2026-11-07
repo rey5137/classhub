@@ -519,6 +519,12 @@ export const en: Record<keyof typeof vi, string> = {
   'info.empty': 'Nothing written here yet.',
   'info.error.slug_taken': 'Another page already uses this address.',
   'shell.skip': 'Skip to content',
+  'install.pushNext':
+    'Once installed, open the app from your home screen and turn on notifications to hear about new activity right away.',
+  'push.card.text': 'Turn on notifications to hear about new messages and posts right away.',
+  'push.card.button': 'Turn on notifications',
+  'push.card.settings': 'Choose which ones',
+  'push.card.close': 'Close',
   'install.title': 'Install the app',
   'install.lede': 'Add {name} to your Home Screen to open it like an app.',
   'install.installed': 'The app is already installed on this device.',

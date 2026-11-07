@@ -83,6 +83,9 @@
       {#if needsSignInNote}
         <p class="note">{i18n.t('install.iosSignIn')}</p>
       {/if}
+      {#if kind !== 'installed' && kind !== 'unsupported'}
+        <p class="note">{i18n.t('install.pushNext')}</p>
+      {/if}
     {/if}
   </Card>
 

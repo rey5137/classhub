@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
+  import { getPushManager, postSubscription, pushSupported, turnOnPush } from '$lib/client/push';
   import Banner from '$lib/components/Banner.svelte';
   import Button from '$lib/components/Button.svelte';
   import Card from '$lib/components/Card.svelte';
@@ -15,7 +16,6 @@
   } from '$lib/contracts/notifications';
   import { useI18n } from '$lib/i18n/context';
   import { installState } from '$lib/install/state.svelte';
-  import { extractSubscriptionKeys } from '$lib/install/sw-core';
   import { fullTime, mediumDate } from '$lib/shared/time';
   import type { PageProps } from './$types';
 
@@ -51,32 +51,6 @@
 
   const isMuted = $derived(muteUntil !== null && muteUntil > Date.now());
 
-  function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
-    const padded = base64String.replace(/-/g, '+').replace(/_/g, '/');
-    const padLen = (4 - (padded.length % 4)) % 4;
-    const raw = atob(padded + '='.repeat(padLen));
-    const output = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i++) {
-      output[i] = raw.charCodeAt(i);
-    }
-    return output;
-  }
-
-  async function getPushManager(): Promise<PushManager | null> {
-    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return null;
-    try {
-      const existingReg = await navigator.serviceWorker.getRegistration?.();
-      if (existingReg?.pushManager) return existingReg.pushManager;
-      const readyReg = await Promise.race([
-        navigator.serviceWorker.ready,
-        new Promise<null>((r) => setTimeout(() => r(null), 1500)),
-      ]);
-      return readyReg?.pushManager ?? null;
-    } catch {
-      return null;
-    }
-  }
-
   async function refreshFromApi(): Promise<void> {
     const res = await fetch('/api/v1/notifications');
     if (!res.ok) return;
@@ -88,22 +62,9 @@
   }
 
   async function postBrowserSubscription(sub: PushSubscription): Promise<string | null> {
-    const extracted = extractSubscriptionKeys(sub);
-    if (!extracted) return null;
-    const label = deriveDeviceLabel(navigator.userAgent);
-    const res = await fetch('/api/v1/notifications/subscriptions', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ...extracted,
-        locale: i18n.locale,
-        deviceLabel: label,
-      }),
-    });
-    if (!res.ok) return null;
-    const json = (await res.json()) as { id?: string };
-    await refreshFromApi();
-    return json.id ?? null;
+    const id = await postSubscription(sub, i18n.locale);
+    if (id) await refreshFromApi();
+    return id;
   }
 
   // R-NTF-10, 11: inspect browser permission and subscription on load without ever prompting.
@@ -114,12 +75,7 @@
       browserState = 'unavailable';
       return;
     }
-    if (
-      typeof window === 'undefined' ||
-      !('Notification' in window) ||
-      !('serviceWorker' in navigator) ||
-      !('PushManager' in window)
-    ) {
+    if (!pushSupported()) {
       browserState = 'unsupported';
       return;
     }
@@ -160,33 +116,17 @@
     errorMessage = null;
     statusMessage = null;
     try {
-      if (typeof Notification === 'undefined') {
-        browserState = 'unsupported';
-        return;
-      }
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        browserState = permission === 'denied' ? 'blocked' : 'off';
-        return;
-      }
-      const pm = await getPushManager();
-      if (!pm) {
-        browserState = 'unsupported';
-        return;
-      }
-      const existing = await pm.getSubscription();
-      const sub =
-        existing ??
-        (await pm.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-        }));
-      const id = await postBrowserSubscription(sub);
-      if (!id) {
+      const result = await turnOnPush(vapidPublicKey, i18n.locale);
+      if (result.state === 'failed') {
         errorMessage = i18n.t('notifications.error.invalid');
         return;
       }
-      activeDeviceId = id;
+      if (result.state !== 'on') {
+        browserState = result.state;
+        return;
+      }
+      await refreshFromApi();
+      activeDeviceId = result.id;
       browserState = 'on';
       statusMessage = i18n.t('notifications.done.deviceAdded');
     } catch {
