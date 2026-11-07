@@ -67,7 +67,12 @@ describe('forged identity through the request pipeline', () => {
       headers: await own.as(`  ${PEOPLE.active.email.toUpperCase()} `),
     });
     expect(response.status).toBe(200);
-    expect(seen).toEqual({ id: PEOPLE.active.id, role: 'member', displayName: 'Active Member' });
+    expect(seen).toEqual({
+      id: PEOPLE.active.id,
+      role: 'member',
+      displayName: 'Active Member',
+      avatarMediaId: null,
+    });
   });
 
   it('R-AUTH-23 logs the member as a hash under the LOG_HASH_SALT secret', async () => {

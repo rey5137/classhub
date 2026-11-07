@@ -6,6 +6,7 @@
   import { t as translate } from '$lib/i18n';
   import { useI18n } from '$lib/i18n/context';
   import type { NavArea, NavItem } from '$lib/nav';
+  import Avatar from './Avatar.svelte';
 
   interface Props {
     /** `logoMediaId` is set for members only (site media is private, §7). */
@@ -23,6 +24,8 @@
   const pathname = $derived(page.url.pathname);
 
   let account: HTMLDetailsElement | undefined = $state();
+  // The signed-in member's own name and avatar (root layout); the generic icon until they load.
+  const me = $derived(page.data.me as { name: string; avatarMediaId: string | null } | null);
 
   function closeMenu() {
     if (account) account.open = false;
@@ -107,16 +110,20 @@
     <!-- Esc and focusout bubble from the summary and menu controls inside. -->
     <details class="account" bind:this={account} onkeydown={onKeydown} onfocusout={onFocusout}>
       <summary aria-label={i18n.t('shell.account')}>
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="8" r="3.4"></circle>
-          <path d="M5 20c.8-3.6 3.6-5.4 7-5.4s6.2 1.8 7 5.4"></path>
-        </svg>
+        {#if me}
+          <Avatar name={me.name} mediaId={me.avatarMediaId ?? undefined} />
+        {:else}
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="8" r="3.4"></circle>
+            <path d="M5 20c.8-3.6 3.6-5.4 7-5.4s6.2 1.8 7 5.4"></path>
+          </svg>
+        {/if}
       </summary>
       <div class="menu">
         <a href={resolve('/profile')}>{i18n.t('shell.profile')}</a>

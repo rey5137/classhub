@@ -21,6 +21,10 @@ export const load: LayoutServerLoad = async ({ locals, route }) => {
       // Site media is private (§7): public pages keep the shipped mark.
       logoMediaId: locals.member ? settings.logoMediaId : null,
     },
+    // The account button shows the member's own avatar or initials; nothing on public pages.
+    me: locals.member
+      ? { name: locals.member.displayName, avatarMediaId: locals.member.avatarMediaId ?? null }
+      : null,
     features: settings.features,
     locale: locals.locale,
     timeZone: locals.timeZone,

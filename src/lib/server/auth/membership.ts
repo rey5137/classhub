@@ -30,14 +30,24 @@ export async function resolveMember(
   if (user.status === 'invited') {
     // The activation writes `access_sub` itself, so there is nothing to compare.
     if (await activateInvitedUser(database, email, identity.subject, now)) {
-      return { id: user.id, role: user.role, displayName: user.displayName };
+      return {
+      id: user.id,
+      role: user.role,
+      displayName: user.displayName,
+      avatarMediaId: user.avatarMediaId,
+    };
     }
     // A concurrent first request (a second tab, a data request) may have won the
     // activation: accept the row if it is now active, as any later login would.
     const current = await findUserByEmail(database.db, email);
     if (current?.status !== 'active') return null;
     await recordAccessSub(database, current, identity.subject, now);
-    return { id: current.id, role: current.role, displayName: current.displayName };
+    return {
+      id: current.id,
+      role: current.role,
+      displayName: current.displayName,
+      avatarMediaId: current.avatarMediaId,
+    };
   } else if (user.status === 'active') {
     await recordAccessSub(database, user, identity.subject, now);
     // R-NTF-13: opening the app resets unseen_pushes, quiet_since and summaries_sent; a write only when > 0.
@@ -47,5 +57,10 @@ export async function resolveMember(
   } else {
     return null;
   }
-  return { id: user.id, role: user.role, displayName: user.displayName };
+  return {
+      id: user.id,
+      role: user.role,
+      displayName: user.displayName,
+      avatarMediaId: user.avatarMediaId,
+    };
 }

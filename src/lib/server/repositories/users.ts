@@ -7,6 +7,8 @@ export interface ActiveMember {
   id: string;
   role: 'member' | 'admin';
   displayName: string;
+  /** The member's own avatar, for the account button (R-NAV-01); absent where a caller builds a member by hand. */
+  avatarMediaId?: string | null;
 }
 
 export type UserStatus = 'invited' | 'active' | 'suspended';
@@ -41,6 +43,7 @@ export async function findUserByEmail(
       id: users.id,
       role: users.role,
       displayName: users.displayName,
+      avatarMediaId: users.avatarMediaId,
       status: users.status,
       accessSub: users.accessSub,
       unseenPushes: notificationPrefs.unseenPushes,
