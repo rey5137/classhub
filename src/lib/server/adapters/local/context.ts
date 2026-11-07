@@ -55,5 +55,11 @@ export function createLocalContext(options: LocalContextOptions = {}): AppContex
       siteKey: options.turnstileSiteKey,
       secret: options.turnstileSecret,
     }),
+    // R-AUTH-31: nothing leaves a dev machine; the invite email is printed instead.
+    mailer: {
+      async send(message) {
+        console.info(`[dev mail] to ${message.to}: ${message.subject}\n${message.text}`);
+      },
+    },
   };
 }

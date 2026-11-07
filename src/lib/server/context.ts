@@ -1,6 +1,7 @@
 import { createCloudflareContext } from './adapters/cloudflare/context';
 import type { Database } from './ports/database';
 import type { IdentityProvider } from './ports/identity';
+import type { Mailer } from './ports/mailer';
 import type { ObjectStorage } from './ports/object-storage';
 import type { PushTransport } from './ports/push-transport';
 import type { RealtimeHub } from './ports/realtime';
@@ -27,6 +28,8 @@ export interface AppContext {
   siteOrigin?: string;
   /** R-AUTH-27: absent while the Turnstile keys are unset, and then no `/join` submission passes. */
   turnstile?: TurnstileVerifier;
+  /** R-AUTH-31: absent while `GMAIL_USER`/`GMAIL_APP_PASSWORD` is unset; then no invite email is sent. */
+  mailer?: Mailer;
 }
 
 let localContext: Promise<AppContext> | undefined;

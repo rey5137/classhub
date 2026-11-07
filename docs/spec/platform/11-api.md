@@ -52,6 +52,7 @@
 | `POST` · `DELETE` | `/api/v1/notifications/subscriptions[/:id]` | store this device's subscription · remove one of own devices (R-NTF-08, 10) |
 | `GET` · `PATCH` | `/api/v1/admin/settings` | site settings (§10.1) |
 | `GET` · `POST` · `DELETE` | `/api/v1/admin/invites` | list with Access sync status · invite · revoke |
+| `POST` | `/api/v1/admin/invites/:id/email` | send the invite email (R-AUTH-31) |
 | `GET` · `POST` · `DELETE` | `/api/v1/admin/join-requests[/:id]` | pending requests · approve · reject (R-AUTH-30) |
 | `PATCH` | `/api/v1/admin/members/:id` | role, suspend, reactivate, complete deletion |
 | `POST` | `/api/v1/admin/info` | create an info page (R-BRD-02) |

@@ -14,6 +14,7 @@ import {
   adminListJoinRequests,
   adminRejectJoinRequest,
 } from '$lib/server/services/join';
+import { adminSendInviteEmail } from '$lib/server/services/invite-email';
 import { chatOverRetention } from '$lib/server/repositories/chat-archive';
 import { findAuthEmail } from '$lib/server/repositories/users';
 import { siteConfig } from '$lib/config';
@@ -46,6 +47,8 @@ export const load: PageServerLoad = async ({ locals }) => {
     },
     soleAdmin: (await countActiveAdmins(context.database.db)) < 2,
     selfId: member.id,
+    // R-AUTH-31: the invite email button shows only when the Gmail secrets are set.
+    mailer: Boolean(context.mailer),
     usage: await usageSummary(context, member),
     infoPages: (await adminInfoPages(context, member)) ?? [],
     // R-CHAT-14: messages over R-CHAT-13's limits with no verified archive yet.
@@ -121,6 +124,14 @@ export const actions: Actions = {
     const result = await adminRevokeInvite(context, member, { id: formText(form, 'id') });
     if (!result.ok) return formFailure('revoke', locals, result);
     return { action: 'revoke', done: 'revoked' };
+  },
+  inviteEmail: async ({ locals, request, url }) => {
+    const { member, context } = guarded(locals);
+    const id = formText(await request.formData(), 'id') ?? '';
+    const site = { name: locals.settings.name, origin: url.origin };
+    const result = await adminSendInviteEmail(context, member, id, site);
+    if (!result.ok) return formFailure('inviteEmail', locals, result, id);
+    return { action: 'inviteEmail', done: 'inviteEmailed' };
   },
   joinApprove: async ({ locals, request }) => {
     const { member, context } = guarded(locals);

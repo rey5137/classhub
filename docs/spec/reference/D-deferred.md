@@ -13,7 +13,7 @@
 | Comments on photos | the board covers discussion; adds a moderation surface |
 | Chat attachments, reactions, threads | outside the small text-chat goal and the R2 budget |
 | Full-text search | needs FTS or a hosted service; directory and title search cover v1.0 |
-| Email notifications | needs a mail sender service; push (§16) covers alerts |
+| Email notifications | needs a mail sender service; push (§16) covers alerts (only the invite email of R-AUTH-31 is sent) |
 | Several rooms or several classes per deployment | one class per deployment is a core boundary (§1) |
 | Video and originals | storage budget (§14) |
 | In-app Access policy edits from the Worker | would put a Cloudflare API token in the Worker; the CLI does it (R-AUTH-18) |

@@ -150,6 +150,14 @@
   path (R-AUTH-08, R-AUTH-18: invite row, Access policy sync or the manual step, the seat count of R-AUTH-19) and
   deletes the request in the same batch; reject deletes it. Both write an `audit_events` row without the email, name
   or note. Approve refuses (and keeps the request) when the email already has a suspended, active or deleted account, and does nothing once the request was rejected. Approval activates no one: the first verified login does (R-AUTH-08).
+- **R-AUTH-31** **Invite email.** A pending, unexpired invite on `/admin` has a "Send invite email" button (and
+  `POST /api/v1/admin/invites/:id/email`): the admin presses it once the address is in the Access policy (R-AUTH-18),
+  so the email never tells someone to sign in before they can; pressing it again resends. The Worker sends one
+  plain-text Vietnamese email from the owner's Gmail over SMTP (`GMAIL_USER` and `GMAIL_APP_PASSWORD` Worker secrets;
+  the sender name is the site name) with the site's address, the invitee's name, the inviter's name and the expiry
+  date. Nothing is sent automatically on invite or approval. Without both secrets the button is hidden and the route
+  answers `unavailable`. It takes the invite rate limit (R-AUTH-21) and writes an `invite.emailed` audit row with
+  ids only; a failed send logs no address.
 
 ## Acceptance criteria
 
@@ -174,3 +182,4 @@
 | AC-AUTH-17 | Without a valid Turnstile token, over the IP or site-wide rate, or with the queue full (cap or seats), nothing is stored, and a full queue shows the closed notice | R-AUTH-27, 29 | integration |
 | AC-AUTH-18 | Approve creates a pending invite and deletes the request in one batch, and the requester stays denied until their first verified login; reject deletes it; both write an audit row without content | R-AUTH-30 | integration |
 | AC-AUTH-19 | With `join` off, `/join` answers 404; on, it shows no member data or private media, and every other path still requires Access | R-AUTH-27 | integration + e2e |
+| AC-AUTH-20 | The invite email goes only to a pending, unexpired invite, when an admin asks, with the site address, names and expiry, and writes an `invite.emailed` audit row with ids only; without a mailer, for a member or another invite status nothing is sent | R-AUTH-31 | integration |

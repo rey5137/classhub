@@ -3,6 +3,7 @@ import type { AppContext } from '../../context';
 import { logLine } from '../../log';
 import { AccessIdentityProvider } from './access-identity';
 import { createD1Database } from './d1-database';
+import { createGmailMailer } from './gmail-mailer';
 import { resolvePushTransport, type PushServiceBinding } from './push-transport';
 import { createR2Storage } from './r2-storage';
 import { createDurableObjectHub } from './realtime-hub';
@@ -27,6 +28,9 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
   const turnstileSecret = stringVar(env.TURNSTILE_SECRET_KEY)?.trim();
   const vapidPublicKey = stringVar(env.VAPID_PUBLIC_KEY)?.trim();
   const vapidPrivateKey = stringVar(env.VAPID_PRIVATE_KEY)?.trim();
+  const gmailUser = stringVar(env.GMAIL_USER)?.trim();
+  // Google shows app passwords in groups of four; the spaces are not part of it.
+  const gmailPassword = stringVar(env.GMAIL_APP_PASSWORD)?.replace(/\s+/g, '');
   const hasVapid = Boolean(vapidPublicKey && vapidPrivateKey);
   if (!hasVapid && !import.meta.env.DEV && !loggedMissingVapid) {
     loggedMissingVapid = true;
@@ -55,6 +59,10 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
     // R-AUTH-27: the site key is a var, the secret a Worker secret; both or no /join submission passes.
     ...(turnstileSiteKey && turnstileSecret
       ? { turnstile: siteverifyTurnstile({ siteKey: turnstileSiteKey, secret: turnstileSecret }) }
+      : {}),
+    // R-AUTH-31: both Worker secrets, or no invite email.
+    ...(gmailUser && gmailPassword
+      ? { mailer: createGmailMailer({ user: gmailUser, appPassword: gmailPassword }) }
       : {}),
   };
 }

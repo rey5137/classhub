@@ -170,6 +170,17 @@
               </p>
             </div>
             <div class="actions">
+              {#if invite.status === 'pending' && data.mailer}
+                <form method="POST" action="?/inviteEmail" use:enhance>
+                  <input type="hidden" name="id" value={invite.id} />
+                  <Button
+                    type="submit"
+                    variant="ghost"
+                    aria-label={labelFor('admin.inviteEmail.send', invite)}
+                    >{i18n.t('admin.inviteEmail.send')}</Button
+                  >
+                </form>
+              {/if}
               {#if invite.status === 'pending' || invite.status === 'expired'}
                 <form method="POST" action="?/revoke" use:enhance>
                   <input type="hidden" name="id" value={invite.id} />

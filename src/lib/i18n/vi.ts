@@ -321,6 +321,10 @@ export const vi = {
   'admin.access.step':
     'Chính sách Access được đổi từ máy của bạn, không phải từ trang này. Sau mỗi thay đổi hãy chạy:',
   'admin.actionFor': '{action}: {name}',
+  'admin.inviteEmail.send': 'Gửi email mời',
+  'admin.inviteEmail.unavailable': 'Chưa cài đặt gửi email (GMAIL_USER, GMAIL_APP_PASSWORD).',
+  'admin.inviteEmail.failed': 'Không gửi được email. Kiểm tra mật khẩu ứng dụng Gmail rồi thử lại.',
+  'admin.done.inviteEmailed': 'Đã gửi email mời.',
   'admin.revoke': 'Thu hồi',
   'admin.suspend': 'Tạm khóa',
   'admin.reactivate': 'Mở khóa',

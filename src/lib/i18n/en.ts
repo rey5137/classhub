@@ -319,6 +319,11 @@ export const en: Record<keyof typeof vi, string> = {
   'admin.access.step':
     'The Access policy changes from your computer, never from this page. After each change run:',
   'admin.actionFor': '{action}: {name}',
+  'admin.inviteEmail.send': 'Send invite email',
+  'admin.inviteEmail.unavailable': 'Email sending is not set up (GMAIL_USER, GMAIL_APP_PASSWORD).',
+  'admin.inviteEmail.failed':
+    'The email could not be sent. Check the Gmail app password and try again.',
+  'admin.done.inviteEmailed': 'Invite email sent.',
   'admin.revoke': 'Revoke',
   'admin.suspend': 'Suspend',
   'admin.reactivate': 'Reactivate',

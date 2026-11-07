@@ -1,3 +1,4 @@
+import type { Mailer } from '../../src/lib/server/ports/mailer';
 import type { Handle, RequestEvent, ResolveOptions } from '@sveltejs/kit';
 import { AccessIdentityProvider } from '../../src/lib/server/adapters/cloudflare/access-identity';
 import type { AppContext } from '../../src/lib/server/context';
@@ -92,6 +93,8 @@ export async function createHarness(
     turnstile?: TurnstileVerifier;
     push?: PushTransport;
     vapid?: VapidKeys;
+    /** R-AUTH-31: the invite email sender; absent as in a deployment without the Gmail secrets. */
+    mailer?: Mailer;
     /** A production build: `LOG_HASH_SALT` must then be set (R-AUTH-23, R-AUTH-29). */
     production?: boolean;
   } = {},
@@ -112,6 +115,7 @@ export async function createHarness(
     ...(options.vapid ? { vapid: options.vapid } : {}),
     ...(options.logHashSalt ? { logHashSalt: options.logHashSalt } : {}),
     ...(options.turnstile ? { turnstile: options.turnstile } : {}),
+    ...(options.mailer ? { mailer: options.mailer } : {}),
   };
   const background: Promise<void>[] = [];
   const security = createSecurityHandle({

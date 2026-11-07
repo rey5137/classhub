@@ -237,6 +237,20 @@ Locally, `npm run dev:offline` uses Cloudflare's documented test keys (site key 
 traffic housekeeping run; at most 20 (`join.maxPending` in `site.config.ts`, 1–50) wait at once, and never more than
 the free seats.
 
+## Invite email (R-AUTH-31)
+
+Optional. With it, each pending invite on `/admin` gets a **Send invite email** button that emails the person, in
+Vietnamese, that they can now sign in. Press it after the address is in the Access policy. The email is sent from
+your own Gmail account:
+
+1. Turn on 2-Step Verification for that Google account, then create an app password at
+   <https://myaccount.google.com/apppasswords> (name it "Class Hub").
+2. `node scripts/cf.mjs secret put GMAIL_USER` and paste the Gmail address; `node scripts/cf.mjs secret put
+   GMAIL_APP_PASSWORD` and paste the 16-letter app password (spaces are fine). Both go in on stdin.
+3. `npm run deploy`. Gmail allows about 500 emails a day; recipients see your Gmail address as the sender.
+
+Locally, the offline build prints the email in the terminal instead of sending it.
+
 ## Backups (R-BAK-03, R-BAK-04, R-BAK-05)
 
 One-time preparation:
