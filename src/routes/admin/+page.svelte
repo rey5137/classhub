@@ -143,7 +143,7 @@
   </Card>
 
   {#if data.join.enabled || data.join.items.length > 0}
-    <JoinRequestsCard queue={data.join} {formatDate} />
+    <JoinRequestsCard queue={data.join} {formatDate} evaluated={data.accessEvaluation} />
   {/if}
 
   <Card class="sheet" aria-labelledby="list-head">

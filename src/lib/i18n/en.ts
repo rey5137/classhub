@@ -509,6 +509,8 @@ export const en: Record<keyof typeof vi, string> = {
   'admin.join.requested': 'Asked {date}',
   'admin.join.approve': 'Approve',
   'admin.join.reject': 'Reject',
+  'admin.join.hintEvaluated':
+    'Approving adds an invite to the class list, and the person can sign in right away. Rejecting deletes the request.',
   'admin.join.hint':
     'Approving adds an invite to the class list, then add the email to the Access policy as for any invite. Rejecting deletes the request.',
   'admin.done.joinApproved': 'Request approved: the invite is on the class list.',

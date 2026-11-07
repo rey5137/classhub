@@ -512,6 +512,8 @@ export const vi = {
   'admin.join.requested': 'Gửi lúc {date}',
   'admin.join.approve': 'Duyệt',
   'admin.join.reject': 'Từ chối',
+  'admin.join.hintEvaluated':
+    'Duyệt sẽ thêm một lời mời vào danh sách lớp, và người đó đăng nhập được ngay. Từ chối sẽ xoá yêu cầu.',
   'admin.join.hint':
     'Duyệt sẽ thêm một lời mời vào danh sách lớp, sau đó thêm email vào chính sách Access như mọi lời mời. Từ chối sẽ xoá yêu cầu.',
   'admin.done.joinApproved': 'Đã duyệt: lời mời đã có trong danh sách lớp.',

@@ -10,10 +10,12 @@
   interface Props {
     queue: { enabled: boolean; items: JoinRequestView[]; full: boolean };
     formatDate: (at: number) => string;
+    /** R-AUTH-33: Access asks the site, so approving is enough. */
+    evaluated: boolean;
   }
 
   // A failed approve or reject shows in the page's banner, like the invite list's actions.
-  let { queue, formatDate }: Props = $props();
+  let { queue, formatDate, evaluated }: Props = $props();
   const i18n = useI18n();
 
   const labelFor = (action: MessageKey, request: JoinRequestView) =>
@@ -68,7 +70,7 @@
       {/each}
     </ul>
   {/if}
-  <p class="hint">{i18n.t('admin.join.hint')}</p>
+  <p class="hint">{i18n.t(evaluated ? 'admin.join.hintEvaluated' : 'admin.join.hint')}</p>
 </Card>
 
 <style>
