@@ -1,6 +1,6 @@
 import type { Handle, HandleServerError, RequestEvent } from '@sveltejs/kit';
 import { normalizeEmail, resolveMember } from './auth/membership';
-import { touchLastSeen } from './repositories/users';
+import { mayPassAccess, touchLastSeen } from './repositories/users';
 import { isBootstrapAdmin } from './repositories/settings';
 import type { AppContext } from './context';
 import { apiError } from './errors';
@@ -22,6 +22,11 @@ export const SETUP_PATH = '/admin/setup';
 export const JOIN_PATH = '/join';
 /** R-AUTH-32: the public privacy notice, the Google sign-in screen's policy link. */
 export const PRIVACY_PATH = '/privacy';
+/** R-AUTH-33: Access's External Evaluation rule posts here at login, and reads the answer key from the keys path. */
+export const ACCESS_EVALUATE_PATH = '/access-eval';
+export const ACCESS_KEYS_PATH = '/access-eval/keys';
+/** R-AUTH-33: Access posts `{ "token": … }`; anything larger is not its request. */
+const ACCESS_EVAL_BODY_LIMIT = 16 * 1024;
 
 // R-API-01: everything else, and any other method on these, needs a verified identity and an active membership.
 const MANIFEST_PATH = '/manifest.webmanifest';
@@ -188,6 +193,68 @@ function finalize(event: RequestEvent, original: Response): Response {
   return response;
 }
 
+/** The body as text, refused past `limit` bytes without reading the rest. */
+async function boundedText(request: Request, limit: number): Promise<string> {
+  if (Number(request.headers.get('content-length') ?? 0) > limit) throw new Error('too large');
+  if (!request.body) return '';
+  const bytes = await readCapped(request.body, limit);
+  if (!bytes) throw new Error('too large');
+  return new TextDecoder().decode(bytes);
+}
+
+function json(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+/**
+ * R-AUTH-33: Cloudflare Access calls these server to server, outside the Access application (a Bypass
+ * path, like /health), with no Origin and no Access assertion. The answer says only whether the email
+ * inside Access's own signed token may pass; any request Access did not sign gets a 400 and no answer.
+ */
+async function accessEvaluationGate(
+  event: RequestEvent,
+  options: PipelineOptions,
+  log: LogFields,
+): Promise<Response> {
+  const context = await options.getContext(event);
+  const evaluator = context.accessEvaluator;
+  if (!evaluator) return json({ error: 'not_found' }, 404);
+  if (event.url.pathname === ACCESS_KEYS_PATH) {
+    if (!PUBLIC_METHODS.has(event.request.method))
+      return json({ error: 'method_not_allowed' }, 405);
+    return json(await evaluator.keys(), 200);
+  }
+  if (event.request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
+  let token: unknown;
+  try {
+    token = (
+      JSON.parse(await boundedText(event.request, ACCESS_EVAL_BODY_LIMIT)) as {
+        token?: unknown;
+      } | null
+    )?.token;
+  } catch {
+    token = undefined;
+  }
+  const now = (options.now ?? Date.now)();
+  const answer =
+    typeof token === 'string'
+      ? await evaluator.evaluate(token, (email) =>
+          mayPassAccess(context.database.db, normalizeEmail(email), now).then((allowed) => {
+            log.accessEval = allowed ? 'allow' : 'deny';
+            return allowed;
+          }),
+        )
+      : null;
+  if (!answer) {
+    log.accessEval = 'invalid';
+    return json({ error: 'bad_request' }, 400);
+  }
+  return json({ token: answer }, 200);
+}
+
 async function guard(
   event: RequestEvent,
   resolve: Parameters<Handle>[0]['resolve'],
@@ -196,6 +263,11 @@ async function guard(
 ): Promise<Response> {
   const { request } = event;
   const path = pathOf(event);
+
+  // R-AUTH-33: before the origin check, since Access's own server posts here; raw path, like the Bypass paths.
+  if (event.url.pathname === ACCESS_EVALUATE_PATH || event.url.pathname === ACCESS_KEYS_PATH) {
+    return accessEvaluationGate(event, options, log);
+  }
 
   // R-AUTH-17: a mutating request or socket upgrade from another origin never reaches identity.
   if (MUTATING.has(request.method) || isUpgrade(request)) {

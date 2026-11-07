@@ -1,6 +1,7 @@
 import type { D1Database, DurableObjectNamespace, R2Bucket } from '@cloudflare/workers-types';
 import type { AppContext } from '../../context';
 import { logLine } from '../../log';
+import { sharedAccessEvaluator } from './access-evaluator';
 import { AccessIdentityProvider } from './access-identity';
 import { createD1Database } from './d1-database';
 import { createGmailMailer } from './gmail-mailer';
@@ -31,6 +32,11 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
   const gmailUser = stringVar(env.GMAIL_USER)?.trim();
   // Google shows app passwords in groups of four; the spaces are not part of it.
   const gmailPassword = stringVar(env.GMAIL_APP_PASSWORD)?.replace(/\s+/g, '');
+  const accessEvalKey = stringVar(env.ACCESS_EVAL_KEY)?.trim();
+  const accessEvaluator =
+    teamDomain?.trim() && accessEvalKey
+      ? sharedAccessEvaluator(teamDomain, accessEvalKey)
+      : undefined;
   const hasVapid = Boolean(vapidPublicKey && vapidPrivateKey);
   if (!hasVapid && !import.meta.env.DEV && !loggedMissingVapid) {
     loggedMissingVapid = true;
@@ -64,5 +70,7 @@ export function createCloudflareContext(env: Record<string, unknown>): AppContex
     ...(gmailUser && gmailPassword
       ? { mailer: createGmailMailer({ user: gmailUser, appPassword: gmailPassword }) }
       : {}),
+    // R-AUTH-33: the External Evaluation answer key; without it the evaluation paths answer 404.
+    ...(accessEvaluator ? { accessEvaluator } : {}),
   };
 }

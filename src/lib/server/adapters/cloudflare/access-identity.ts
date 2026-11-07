@@ -120,6 +120,14 @@ function assertion(request: Request): string | undefined {
 
 const caches = new Map<string, JwksCache>();
 
+/** One cache per isolate and team, shared by every request's context. */
+export function sharedJwks(issuer: string): JwksCache {
+  const url = `${issuer}/cdn-cgi/access/certs`;
+  let cache = caches.get(url);
+  if (!cache) caches.set(url, (cache = new JwksCache(url)));
+  return cache;
+}
+
 export interface AccessIdentityOptions {
   teamDomain: string | undefined;
   audience: string | undefined;
@@ -139,15 +147,9 @@ export class AccessIdentityProvider implements IdentityProvider {
     } catch {
       return; // a malformed team domain verifies nobody, like a missing one
     }
-    const url = `${this.issuer}/cdn-cgi/access/certs`;
-    if (options.fetch) {
-      this.jwks = new JwksCache(url, options.fetch, options.now);
-    } else {
-      // One cache per isolate and team, shared by every request's context.
-      let cache = caches.get(url);
-      if (!cache) caches.set(url, (cache = new JwksCache(url)));
-      this.jwks = cache;
-    }
+    this.jwks = options.fetch
+      ? new JwksCache(`${this.issuer}/cdn-cgi/access/certs`, options.fetch, options.now)
+      : sharedJwks(this.issuer);
   }
 
   async requireIdentity(request: Request): Promise<VerifiedIdentity> {

@@ -162,6 +162,21 @@
   `/join`) and answers everyone, before the membership check, with a static Vietnamese summary of `docs/PRIVACY.md`
   and no member data or site media. It is the privacy-policy link on the Google sign-in consent screen, which Google
   requires before the OAuth app can be published for any Gmail account; a change to what the site stores updates both.
+- **R-AUTH-33** **Access asks the site (External Evaluation).** Optional, so an invite or approval on `/admin` lets the
+  person through Access without `npm run invite -- add`. The Access policy keeps its email include rules and adds an
+  External Evaluation include rule (`npm run access-eval -- rule <origin>`): at login Access posts `{ "token" }` to
+  `POST /access-eval`, and reads the answer key from `GET /access-eval/keys`. Both paths are in the Bypass application
+  and handled before the origin check, the lock and identity. The site verifies Access's token against the team keys
+  (R-AUTH-04: RS256, `exp`, a `nonce`, `iss` the team when present; the email only from `identity.email`; `aud`
+  is not checked, since one External Evaluation rule may serve several applications and the answer is useful only to
+  Access, which matches its own nonce) and answers `{ "token" }` signed with the RSA key
+  in the `ACCESS_EVAL_KEY` Worker secret (`npm run access-eval -- key`), carrying the same nonce, `exp` 60 s ahead and
+  `success`: true only for an active member or an invited one with a pending, unexpired invite, the same rule as
+  R-AUTH-07/08. The check only reads; activation still happens on the first request (R-AUTH-08). A token Access did
+  not sign, or one without a nonce or email, gets a 400 and no answer; without the secret, or with one that is not an RSA private JWK, both paths answer 404 and every other
+  path works. The keys answer holds only the public key (`kty`, `n`, `e`, `kid`, `alg`, `use`). The
+  log line carries `accessEval` (`allow`, `deny`, `invalid`) and no email. The Worker still holds no Cloudflare API
+  token (R-AUTH-18). Seats stay as in R-AUTH-19: only people the site allows pass Access.
 
 ## Acceptance criteria
 
@@ -188,3 +203,4 @@
 | AC-AUTH-19 | With `join` off, `/join` answers 404; on, it shows no member data or private media, and every other path still requires Access | R-AUTH-27 | integration + e2e |
 | AC-AUTH-20 | The invite email goes only to a pending, unexpired invite, when an admin asks, with the site address, names and expiry, and writes an `invite.emailed` audit row with ids only; without a mailer, for a member or another invite status nothing is sent | R-AUTH-31 | integration |
 | AC-AUTH-21 | `GET /privacy` answers 200 with no identity, in a locked or unlocked site alike, and shows no member data | R-AUTH-32 | `test:security` |
+| AC-AUTH-22 | The evaluation answer is signed by the key at `/access-eval/keys`, echoes the nonce, and has `success` true only for active members and pending, unexpired invitees (any email case); suspended, revoked, expired and unknown get false; a token not signed by the team, from another issuer, expired, without a nonce or `identity.email`, not a JWT, or over 16 KB gets 400; the keys answer has only `kty`, `n`, `e`, `kid`, `alg`, `use`; without the key or with a malformed one both paths are 404 and the context still builds; nothing reaches a route and no row changes | R-AUTH-33 | integration |

@@ -29,6 +29,7 @@
     "lock": "node scripts/unlock.mjs --lock",
     "smoke:test": "node scripts/smoke-test.mjs",
     "invite": "node scripts/invite.mjs",
+    "access-eval": "node scripts/access-eval.mjs",
     "smoke": "node scripts/smoke.mjs",
     "db:seed:demo": "tsx scripts/seed-demo.ts",
     "housekeeping": "node --import tsx scripts/housekeeping.mjs",

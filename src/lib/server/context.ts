@@ -1,4 +1,5 @@
 import { createCloudflareContext } from './adapters/cloudflare/context';
+import type { AccessEvaluator } from './ports/access-evaluator';
 import type { Database } from './ports/database';
 import type { IdentityProvider } from './ports/identity';
 import type { Mailer } from './ports/mailer';
@@ -30,6 +31,8 @@ export interface AppContext {
   turnstile?: TurnstileVerifier;
   /** R-AUTH-31: absent while `GMAIL_USER`/`GMAIL_APP_PASSWORD` is unset; then no invite email is sent. */
   mailer?: Mailer;
+  /** R-AUTH-33: absent while `ACCESS_EVAL_KEY` or the team domain is unset; then the evaluation paths answer 404. */
+  accessEvaluator?: AccessEvaluator;
 }
 
 let localContext: Promise<AppContext> | undefined;

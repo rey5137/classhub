@@ -240,7 +240,7 @@ the free seats.
 ## Invite email (R-AUTH-31)
 
 Optional. With it, each pending invite on `/admin` gets a **Send invite email** button that emails the person, in
-Vietnamese, that they can now sign in. Press it after the address is in the Access policy. The email is sent from
+Vietnamese, that they can now sign in. Press it after the address is in the Access policy, or right away with the External Evaluation rule (R-AUTH-33). The email is sent from
 your own Gmail account:
 
 1. Turn on 2-Step Verification for that Google account, then create an app password at
@@ -250,6 +250,22 @@ your own Gmail account:
 3. `npm run deploy`. Gmail allows about 500 emails a day; recipients see your Gmail address as the sender.
 
 Locally, the offline build prints the email in the terminal instead of sending it.
+
+## Access asks the site (optional, R-AUTH-33)
+
+With this, inviting or approving someone on `/admin` is enough: Access asks the site at login whether the email
+is an active member or has a pending invite, so `npm run invite -- add` is no longer needed for each person.
+
+1. `npm run access-eval -- key`: puts a new RSA key in the `ACCESS_EVAL_KEY` Worker secret (`--rotate` replaces it).
+2. `npm run deploy`, then check `https://<site>/access-eval/keys` answers a JSON key set (it is 404 without the key).
+3. In the Bypass application (Installable app, above), add the paths **`access-eval`** and **`access-eval/keys`**.
+4. `npm run access-eval -- rule https://<site>`: adds the External Evaluation include rule to the Access policy,
+   next to its email rules (needs the Access: Apps and Policies Edit token, like `invite`).
+
+Sign in with an invited address to try it. Removing someone is unchanged: suspend them on `/admin` (the site then
+answers no at their next login) and `npm run invite -- remove` if their email is also in the policy. After
+`key --rotate` and a deploy, logins that rely on the rule may fail until Access refetches the keys URL; the email
+rules keep working.
 
 ## Backups (R-BAK-03, R-BAK-04, R-BAK-05)
 

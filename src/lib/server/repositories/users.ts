@@ -57,6 +57,38 @@ export async function findUserByEmail(
 }
 
 /**
+ * R-AUTH-33: whether this email may pass Access, by the same rule `resolveMember` applies after it:
+ * an active member, or an invited one whose invite is still pending and unexpired. It reads only.
+ */
+export async function mayPassAccess(
+  db: DatabaseHandle,
+  normalizedEmail: string,
+  now: number,
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(
+        eq(users.authEmail, normalizedEmail),
+        or(
+          eq(users.status, 'active'),
+          and(
+            eq(users.status, 'invited'),
+            sql`exists (select 1 from ${invites} where ${and(
+              eq(invites.email, normalizedEmail),
+              eq(invites.status, 'pending'),
+              or(isNull(invites.expiresAt), gt(invites.expiresAt, now)),
+            )})`,
+          ),
+        ),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
  * R-AUTH-08: the guarded activation and the invite's acceptance in one batch. The
  * update changes a row only while a pending, unexpired invite exists, so a revoked
  * or expired invite changes nothing (AC-AUTH-13). Returns whether it activated.

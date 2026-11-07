@@ -1,5 +1,6 @@
 import type { Mailer } from '../../src/lib/server/ports/mailer';
 import type { Handle, RequestEvent, ResolveOptions } from '@sveltejs/kit';
+import { createAccessEvaluator } from '../../src/lib/server/adapters/cloudflare/access-evaluator';
 import { AccessIdentityProvider } from '../../src/lib/server/adapters/cloudflare/access-identity';
 import type { AppContext } from '../../src/lib/server/context';
 import { appearance, applyAppearance } from '../../src/lib/server/appearance';
@@ -95,6 +96,8 @@ export async function createHarness(
     vapid?: VapidKeys;
     /** R-AUTH-31: the invite email sender; absent as in a deployment without the Gmail secrets. */
     mailer?: Mailer;
+    /** R-AUTH-33: the `ACCESS_EVAL_KEY` private JWK (JSON); absent as in a deployment without it. */
+    accessEvalKey?: string;
     /** A production build: `LOG_HASH_SALT` must then be set (R-AUTH-23, R-AUTH-29). */
     production?: boolean;
   } = {},
@@ -117,6 +120,14 @@ export async function createHarness(
     ...(options.turnstile ? { turnstile: options.turnstile } : {}),
     ...(options.mailer ? { mailer: options.mailer } : {}),
   };
+  if (options.accessEvalKey) {
+    const evaluator = createAccessEvaluator({
+      teamDomain: TEAM_DOMAIN,
+      privateKey: options.accessEvalKey,
+      fetch: fakeJwksFetch(jwks(teamKey)).fetch,
+    });
+    if (evaluator) context.accessEvaluator = evaluator;
+  }
   const background: Promise<void>[] = [];
   const security = createSecurityHandle({
     onHousekeeping: (work) => {
