@@ -109,3 +109,77 @@ img {
     outline: 2px solid Highlight;
   }
 }
+
+/* R-NAV-12: page transitions in the installed app only (backstack.ts sets data-nav-transition).
+   The header and tab bar stay put; only the page slides (forward from the right, back to the right)
+   or cross-fades between tabs. */
+:root[data-nav-transition] header.top {
+  view-transition-name: app-header;
+}
+
+:root[data-nav-transition] nav.tabs {
+  view-transition-name: app-tabs;
+}
+
+:root[data-nav-transition] main {
+  view-transition-name: app-page;
+  background: var(--color-bg);
+}
+
+::view-transition-group(app-page) {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:root[data-nav-transition='forward']::view-transition-old(app-page) {
+  animation: 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both nav-out-left;
+}
+
+:root[data-nav-transition='forward']::view-transition-new(app-page) {
+  animation: 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both nav-in-right;
+}
+
+:root[data-nav-transition='back']::view-transition-old(app-page) {
+  animation: 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both nav-out-right;
+}
+
+:root[data-nav-transition='back']::view-transition-new(app-page) {
+  animation: 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both nav-in-left;
+}
+
+:root[data-nav-transition='tab']::view-transition-old(app-page),
+:root[data-nav-transition='tab']::view-transition-new(app-page) {
+  animation-duration: 160ms;
+}
+
+@keyframes nav-in-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes nav-out-left {
+  to {
+    transform: translateX(-30%);
+    opacity: 0.6;
+  }
+}
+
+@keyframes nav-in-left {
+  from {
+    transform: translateX(-30%);
+    opacity: 0.6;
+  }
+}
+
+@keyframes nav-out-right {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* The page coming in on a forward slide covers the one leaving. */
+:root[data-nav-transition='forward']::view-transition-new(app-page),
+:root[data-nav-transition='back']::view-transition-old(app-page) {
+  z-index: 1;
+}

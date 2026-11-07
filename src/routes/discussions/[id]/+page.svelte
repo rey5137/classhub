@@ -1,6 +1,7 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import { resolve } from '$app/paths';
+  import { goBack } from '$lib/client/backstack';
   import Avatar from '$lib/components/Avatar.svelte';
   import Banner from '$lib/components/Banner.svelte';
   import Button from '$lib/components/Button.svelte';
@@ -112,7 +113,11 @@
 
 <PageHeader title={post.title}>
   {#snippet actions()}
-    <a class="link" href={resolve('/discussions')}>{i18n.t('thread.back')}</a>
+    <a
+      class="link"
+      href={resolve('/discussions')}
+      onclick={(event) => goBack(event, '/discussions')}>{i18n.t('thread.back')}</a
+    >
   {/snippet}
 </PageHeader>
 
@@ -226,7 +231,7 @@
     {/if}
 
     {#if data.nextCursor}
-      <nav class="pager" aria-label={i18n.t('thread.pages')}>
+      <nav class="pager" data-sveltekit-replacestate aria-label={i18n.t('thread.pages')}>
         <a
           class="link"
           href="{resolve('/discussions/[id]', { id: post.id })}?cursor={encodeURIComponent(

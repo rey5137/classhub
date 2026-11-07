@@ -99,6 +99,7 @@
       {#if data.nextCursor}
         <a
           class="page-link next"
+          data-sveltekit-replacestate
           href="{resolve('/discussions')}?cursor={encodeURIComponent(data.nextCursor)}"
           >{i18n.t('brd.older')}</a
         >

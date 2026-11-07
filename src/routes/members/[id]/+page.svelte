@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { goBack } from '$lib/client/backstack';
   import Avatar from '$lib/components/Avatar.svelte';
   import Card from '$lib/components/Card.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
@@ -22,7 +23,9 @@
 
 <PageHeader title={person.displayName}>
   {#snippet actions()}
-    <a class="back" href={resolve('/members')}>{i18n.t('member.back')}</a>
+    <a class="back" href={resolve('/members')} onclick={(event) => goBack(event, '/members')}
+      >{i18n.t('member.back')}</a
+    >
   {/snippet}
 </PageHeader>
 

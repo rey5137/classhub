@@ -111,6 +111,17 @@ Android can build a real installed app.
   dismiss control. Dismissing stores the time in `localStorage` (`classhub:install-card-dismissed`) and hides the
   card for 30 days; an accepted `prompt()` hides it for good on that device. Nothing about installing is sent to the
   server or stored in D1.
+- **R-NAV-12** **Back stack.** `src/lib/client/backstack.ts` mirrors the in-app part of the browser history (keyed by
+  SvelteKit's history index, kept in `sessionStorage` across a reload) so Back behaves like a native app.
+  Everywhere: a detail page's own Back link (photo, thread, member, info page) steps back when the entry below is
+  its parent list, so the list returns with its filter and scroll position, and otherwise opens the list in place
+  of the page; filter chips and paging replace the entry instead of adding one. In the installed app only
+  (`display-mode` standalone, fullscreen or minimal-ui, or `navigator.standalone`): the tab bar and top area links
+  never stack. Home stays at the bottom with at most one tab above it, so Back goes tab → Home → leaves the app; a
+  tab tapped deep inside another tab first steps back to the entry above Home, then replaces it. Pages slide with a
+  view transition (forward in from the right, back out to the right, a short cross-fade between tabs) while the
+  header and tab bar stay still; none on the website, without `document.startViewTransition`, or with reduced
+  motion. Modified clicks (new tab or window) keep the browser's default.
 
 ## Acceptance criteria
 
@@ -126,3 +137,4 @@ Android can build a real installed app.
 | AC-NAV-08 | The detection table maps each fixture user agent (iPhone Safari and Chrome, iPad desktop UA, Android Chrome, Firefox and Samsung, Zalo, Messenger and Facebook on iOS and Android, desktop Chrome, Safari and Firefox, standalone) to its kind | R-NAV-09 | unit |
 | AC-NAV-09 | At 390 px the Home card shows; dismissing hides it across reloads until 30 days pass; a stubbed `beforeinstallprompt` shows the Install button and calls `prompt()`; standalone and desktop show no card; `/install` and the `/profile` link render | R-NAV-10, 11 | e2e |
 | AC-NAV-10 | On the live site through Access, Android Chrome installs the app (no Chrome badge on the icon) and iOS Safari adds it to the Home Screen; each opens standalone, signs in and reaches chat | R-NAV-07, 08, 10 | manual (plan 4e checklist) |
+| AC-NAV-11 | A detail page's Back link returns to the list with its filter by stepping back; a deep-linked detail page's Back replaces it with the list; a filter tap adds no entry; in a standalone-emulated app, Home → tab → tab → Back lands on Home, and a tab tapped from a photo leaves Home directly below it | R-NAV-12 | e2e |

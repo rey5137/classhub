@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { goBack } from '$lib/client/backstack';
   import Card from '$lib/components/Card.svelte';
   import MarkdownBody from '$lib/components/MarkdownBody.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
@@ -12,7 +13,9 @@
 
 <PageHeader title={data.page.title}>
   {#snippet actions()}
-    <a class="back" href={resolve('/')}>{i18n.t('info.back')}</a>
+    <a class="back" href={resolve('/')} onclick={(event) => goBack(event, '/')}
+      >{i18n.t('info.back')}</a
+    >
   {/snippet}
 </PageHeader>
 

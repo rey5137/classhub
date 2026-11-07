@@ -1,6 +1,7 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import { resolve } from '$app/paths';
+  import { goBack } from '$lib/client/backstack';
   import Avatar from '$lib/components/Avatar.svelte';
   import Banner from '$lib/components/Banner.svelte';
   import Button from '$lib/components/Button.svelte';
@@ -78,7 +79,9 @@
   </Card>
 
   <div class="tasks">
-    <a class="link" href={resolve('/memories')}>{i18n.t('photo.back')}</a>
+    <a class="link" href={resolve('/memories')} onclick={(event) => goBack(event, '/memories')}
+      >{i18n.t('photo.back')}</a
+    >
     <a
       class="link"
       href={resolve('/api/v1/media/[id]/[variant]', { id: photo.id, variant: 'image' })}

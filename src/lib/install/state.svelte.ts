@@ -10,7 +10,7 @@ interface InstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
-const STANDALONE_QUERY =
+export const STANDALONE_QUERY =
   '(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)';
 
 function read(key: string): string | null {

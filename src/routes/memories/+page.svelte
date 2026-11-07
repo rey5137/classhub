@@ -91,7 +91,7 @@
 
   <nav class="filters" aria-label={i18n.t('mem.filters')}>
     {#if data.years.length > 0}
-      <div class="chips">
+      <div class="chips" data-sveltekit-replacestate>
         <span class="label" id="year-filter">{i18n.t('mem.yearChips')}</span>
         <ul aria-labelledby="year-filter">
           <li>
@@ -115,7 +115,7 @@
       </div>
     {/if}
     {#if data.albums.length > 0}
-      <div class="chips">
+      <div class="chips" data-sveltekit-replacestate>
         <span class="label" id="album-filter">{i18n.t('mem.albums')}</span>
         <ul aria-labelledby="album-filter">
           <li>
@@ -197,11 +197,16 @@
   {#if data.nextCursor || data.filter.paged}
     <nav class="pager" aria-label={i18n.t('mem.pages')}>
       {#if data.filter.paged}
-        <a class="page-link" href="{resolve('/memories')}{wallQuery({})}">{i18n.t('mem.newest')}</a>
+        <a
+          class="page-link"
+          data-sveltekit-replacestate
+          href="{resolve('/memories')}{wallQuery({})}">{i18n.t('mem.newest')}</a
+        >
       {/if}
       {#if data.nextCursor}
         <a
           class="page-link next"
+          data-sveltekit-replacestate
           href="{resolve('/memories')}{wallQuery({ cursor: data.nextCursor })}"
           >{i18n.t('mem.older')}</a
         >

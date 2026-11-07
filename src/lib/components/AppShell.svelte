@@ -1,12 +1,13 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { afterNavigate } from '$app/navigation';
+  import { afterNavigate, onNavigate } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { t as translate } from '$lib/i18n';
   import { useI18n } from '$lib/i18n/context';
   import type { NavArea, NavItem } from '$lib/nav';
   import { installState } from '$lib/install/state.svelte';
+  import { openTab, track, transition } from '$lib/client/backstack';
   import Avatar from './Avatar.svelte';
 
   interface Props {
@@ -33,7 +34,13 @@
   }
 
   // The layout outlives client-side navigation, so the menu must be closed by hand.
-  afterNavigate(closeMenu);
+  afterNavigate((navigation) => {
+    closeMenu();
+    track(navigation);
+  });
+
+  // R-NAV-12: the installed app's back stack and page slides.
+  onNavigate(transition);
 
   function onKeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape' || !account?.open) return;
@@ -88,13 +95,19 @@
   {#if publicPage}
     <span class="brand">{@render mark()}</span>
   {:else}
-    <a class="brand" href={resolve('/')}>{@render mark()}</a>
+    <a class="brand" href={resolve('/')} onclick={(event) => openTab(event, '/')}
+      >{@render mark()}</a
+    >
   {/if}
 
   {#if !publicPage}
     <nav class="areas" aria-label={i18n.t('shell.areas')}>
       {#each nav as item (item.id)}
-        <a href={resolve(item.href)} aria-current={isCurrent(item.href) ? 'page' : undefined}>
+        <a
+          href={resolve(item.href)}
+          aria-current={isCurrent(item.href) ? 'page' : undefined}
+          onclick={(event) => openTab(event, item.href)}
+        >
           {i18n.t(`nav.${item.id}`)}
         </a>
       {/each}
@@ -160,7 +173,11 @@
 {#if !publicPage}
   <nav class="tabs" aria-label={i18n.t('shell.areas')}>
     {#each nav as item (item.id)}
-      <a href={resolve(item.href)} aria-current={isCurrent(item.href) ? 'page' : undefined}>
+      <a
+        href={resolve(item.href)}
+        aria-current={isCurrent(item.href) ? 'page' : undefined}
+        onclick={(event) => openTab(event, item.href)}
+      >
         <svg
           viewBox="0 0 24 24"
           fill="none"
