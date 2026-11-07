@@ -6,7 +6,13 @@ import { createHarness, ORIGIN, type Harness } from '../fixtures/pipeline-harnes
 import { fileRoutes, key, specRoutes, unique } from '../fixtures/route-manifest';
 
 // R-NAV-07: the manifest is public too; tests/security/install-public.test.ts sweeps it and /icons/.
-const PUBLIC = ['GET /health', 'GET /manifest.webmanifest', 'GET /denied', 'GET /locked'];
+const PUBLIC = [
+  'GET /health',
+  'GET /manifest.webmanifest',
+  'GET /denied',
+  'GET /locked',
+  'GET /privacy',
+];
 // R-AUTH-27: public only while `join` is on; tests/integration/join-requests.test.ts sweeps it.
 const JOIN = ['GET /join', 'POST /join'];
 

@@ -20,12 +20,14 @@ export const DENIED_PATH = '/denied';
 export const LOCKED_PATH = '/locked';
 export const SETUP_PATH = '/admin/setup';
 export const JOIN_PATH = '/join';
+/** R-AUTH-32: the public privacy notice, the Google sign-in screen's policy link. */
+export const PRIVACY_PATH = '/privacy';
 
 // R-API-01: everything else, and any other method on these, needs a verified identity and an active membership.
 const MANIFEST_PATH = '/manifest.webmanifest';
 // R-NAV-07: the install icons (Level B static files) sit in the same Access Bypass application.
 const ICON_PATHS = new Set(ICON_URLS);
-const PUBLIC_PATHS = new Set(['/health', DENIED_PATH, LOCKED_PATH]);
+const PUBLIC_PATHS = new Set(['/health', DENIED_PATH, LOCKED_PATH, PRIVACY_PATH]);
 const PUBLIC_METHODS = new Set(['GET', 'HEAD']);
 // R-AUTH-27: the form page and its post; any other method on /join needs Access.
 const JOIN_METHODS = new Set(['GET', 'HEAD', 'POST']);

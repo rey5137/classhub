@@ -7,8 +7,8 @@ export const load: LayoutServerLoad = async ({ locals, route }) => {
   const { settings } = locals;
   // R-NAV-02: a disabled feature leaves the nav; its pages 404 in their own layouts.
   const isVisible = (id: NavArea) => id === 'home' || id === 'members' || settings.features[id];
-  // R-AUTH-27: the page outside Access shows the site name and itself, nothing to navigate to.
-  const publicPage = route.id === '/join';
+  // R-AUTH-27/32: the pages outside Access show the site name and themselves, nothing to navigate to.
+  const publicPage = route.id === '/join' || route.id === '/privacy';
   const nav = publicPage
     ? []
     : siteConfig.nav.filter(isVisible).map((id) => ({ id, href: navHref[id] }));

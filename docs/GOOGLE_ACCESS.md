@@ -30,7 +30,10 @@ In [Google Cloud Console](https://console.cloud.google.com/), with any Google ac
    developer contact. Scopes: the basic `openid`, `email`, `profile` only.
    - **Publishing status.** In **Testing**, only the Google accounts listed as **test users** can sign in, so you must
      add every member's Gmail there (up to 100). The recommended choice is **Publish app**: the basic scopes need no
-     Google verification, and Access plus the app's invite list still decide who gets in.
+     Google verification, and Access plus the app's invite list still decide who gets in. Publishing needs, on
+     **Branding**: the home page `https://<worker-hostname>`, the privacy policy `https://<worker-hostname>/privacy`
+     (public, R-AUTH-32: add the path `privacy` to the "Class Hub public" Bypass application first), and the
+     authorized domains `cloudflareaccess.com` and your Worker's domain (e.g. `nktp.workers.dev`).
    > screenshot: the consent screen's publishing status and test users list
 3. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type **Web application**:
    - **Authorized JavaScript origins:** `https://<team>.cloudflareaccess.com`

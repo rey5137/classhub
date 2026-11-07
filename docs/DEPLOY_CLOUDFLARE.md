@@ -224,7 +224,7 @@ Before turning it on:
    `node scripts/cf.mjs secret put TURNSTILE_SECRET_KEY` and paste it when asked (it goes in on stdin, never in a
    file). Then `npm run deploy`. Without both, every request is refused with "try again" and nothing is stored.
 3. **The `/join` bypass.** Like the `/health` bypass (GOOGLE_ACCESS.md section 4): in the "Class Hub public"
-   application already created above (Installable app), add two more paths: **`join`** and **`_app`** (the public
+   application already created above (Installable app), add more paths: **`join`**, **`privacy`** (the public privacy page, R-AUTH-32) and **`_app`** (the public
    build assets: the page's styles, scripts and fonts, which hold no member data; without them `/join` loads
    unstyled for someone who isn't signed in). Every other path stays behind the Class Hub application, and the app
    still answers `/join` only while the setting is on.

@@ -158,6 +158,10 @@
   date. Nothing is sent automatically on invite or approval. Without both secrets the button is hidden and the route
   answers `unavailable`. It takes the invite rate limit (R-AUTH-21) and writes an `invite.emailed` audit row with
   ids only; a failed send logs no address.
+- **R-AUTH-32** **Privacy page.** `GET /privacy` sits outside Access (a path in the same Bypass application as
+  `/join`) and answers everyone, before the membership check, with a static Vietnamese summary of `docs/PRIVACY.md`
+  and no member data or site media. It is the privacy-policy link on the Google sign-in consent screen, which Google
+  requires before the OAuth app can be published for any Gmail account; a change to what the site stores updates both.
 
 ## Acceptance criteria
 
@@ -183,3 +187,4 @@
 | AC-AUTH-18 | Approve creates a pending invite and deletes the request in one batch, and the requester stays denied until their first verified login; reject deletes it; both write an audit row without content | R-AUTH-30 | integration |
 | AC-AUTH-19 | With `join` off, `/join` answers 404; on, it shows no member data or private media, and every other path still requires Access | R-AUTH-27 | integration + e2e |
 | AC-AUTH-20 | The invite email goes only to a pending, unexpired invite, when an admin asks, with the site address, names and expiry, and writes an `invite.emailed` audit row with ids only; without a mailer, for a member or another invite status nothing is sent | R-AUTH-31 | integration |
+| AC-AUTH-21 | `GET /privacy` answers 200 with no identity, in a locked or unlocked site alike, and shows no member data | R-AUTH-32 | `test:security` |
