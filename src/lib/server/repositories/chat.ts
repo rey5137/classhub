@@ -44,7 +44,13 @@ function selectMessages(database: Database) {
     })
     .from(chatMessages)
     .innerJoin(users, eq(users.id, chatMessages.senderId))
-    .leftJoin(profileContacts, eq(profileContacts.userId, chatMessages.senderId));
+    .leftJoin(
+      profileContacts,
+      eq(
+        profileContacts.userId,
+        sql`case when ${users.avatarMediaId} is not null then ${users.id} end`,
+      ),
+    );
 }
 
 type SelectedMessage = Awaited<ReturnType<ReturnType<typeof selectMessages>['limit']>>[number];

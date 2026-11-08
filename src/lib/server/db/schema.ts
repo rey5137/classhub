@@ -45,6 +45,8 @@ export const users = sqliteTable(
     check('users_auth_email_lower_check', sql`${table.authEmail} = lower(${table.authEmail})`),
     check('users_role_check', sql`${table.role} in ('member', 'admin')`),
     check('users_status_check', sql`${table.status} in ('invited', 'active', 'suspended')`),
+    // R-BUD-01: the admin count reads only the admins, not every member.
+    index('users_role_status_idx').on(table.role, table.status),
     index('users_status_display_name_norm_idx').on(table.status, table.displayNameNorm),
     index('users_status_preferred_name_norm_idx').on(table.status, table.preferredNameNorm),
   ],
@@ -104,7 +106,16 @@ export const infoPages = sqliteTable(
       .references(() => users.id, { onDelete: 'restrict' }),
     updatedAt: integer('updated_at', { mode: 'number' }).notNull().$defaultFn(now),
   },
-  (table) => [uniqueIndex('info_pages_slug_unique').on(table.slug)],
+  (table) => [
+    uniqueIndex('info_pages_slug_unique').on(table.slug),
+    // R-BUD-01, R-DB-07: `GET /api/v1/info` and Home's pinned list walk this order without scanning the table.
+    index('info_pages_order_idx').on(
+      sql`${table.isPinned} desc`,
+      table.sortOrder,
+      table.title,
+      table.id,
+    ),
+  ],
 );
 
 export const posts = sqliteTable(
@@ -152,16 +163,21 @@ export const comments = sqliteTable(
   (table) => [index('comments_post_idx').on(table.postId, table.createdAt, table.id)],
 );
 
-export const albums = sqliteTable('albums', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  yearTag: integer('year_tag', { mode: 'number' }),
-  description: text('description'),
-  createdBy: text('created_by')
-    .notNull()
-    .references(() => users.id, { onDelete: 'restrict' }),
-  createdAt: integer('created_at', { mode: 'number' }).notNull().$defaultFn(now),
-});
+export const albums = sqliteTable(
+  'albums',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    yearTag: integer('year_tag', { mode: 'number' }),
+    description: text('description'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    createdAt: integer('created_at', { mode: 'number' }).notNull().$defaultFn(now),
+  },
+  // R-BUD-01, R-DB-07: `listAlbumChoices` orders by `(name, id)` with a 50-row limit.
+  (table) => [index('albums_name_idx').on(table.name, table.id)],
+);
 
 export const media = sqliteTable(
   'media',

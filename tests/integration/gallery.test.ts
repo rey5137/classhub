@@ -2,7 +2,7 @@ import { applyD1Migrations, env } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { siteConfig } from '../../src/lib/config';
-import { galleryPageSchema } from '../../src/lib/contracts/media';
+import { albumPageSchema, galleryPageSchema } from '../../src/lib/contracts/media';
 import { createD1Database } from '../../src/lib/server/adapters/cloudflare/d1-database';
 import { R2ObjectStorage } from '../../src/lib/server/adapters/cloudflare/r2-storage';
 import type { Member } from '../../src/lib/server/auth/membership';
@@ -389,12 +389,16 @@ describe('photo page edit form (R-MEM-14)', () => {
       locale: 'vi',
       settings: defaultSettings,
     };
-    // 200 albums named before it, so the photo's own falls outside the select's list.
+    // 200 albums named before it (including 80-char Vietnamese names whose cursors exceed 200 chars).
+    const vnPad = 'Kỷ niệm trường xưa thân yêu mãi nhớ về thầy cô bạn bè dưới mái trường '.slice(
+      0,
+      74,
+    );
     for (let start = 0; start < 200; start += 20) {
       await database.db.insert(albums).values(
         Array.from({ length: 20 }, (_, index) => ({
           id: uuidv7(),
-          name: `A ${String(start + index).padStart(3, '0')}`,
+          name: `A ${String(start + index).padStart(3, '0')} ${vnPad}`.slice(0, 80),
           createdBy: PEOPLE.active.id,
           createdAt: BASE,
         })),
@@ -404,8 +408,24 @@ describe('photo page edit form (R-MEM-14)', () => {
     const row = await photo({ albumId: last.id, effectiveYear: 2001 });
     const loaded = (await photoLoad({ locals, params: { id: row.id } } as unknown as Parameters<
       typeof photoLoad
-    >[0])) as { albums: { id: string }[] };
+    >[0])) as { albums: { id: string }[]; albumsNextCursor: string | null };
     expect(loaded.albums.map((entry) => entry.id)).toContain(last.id);
+    expect(loaded.albumsNextCursor).toBeTruthy();
+
+    // Keyset-page through all 201 albums via GET /api/v1/albums.
+    const seenIds: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const res = await send(
+        `/api/v1/albums${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+      );
+      expect(res.status).toBe(200);
+      const parsed = albumPageSchema.parse(await res.json());
+      seenIds.push(...parsed.items.map((item) => item.id));
+      cursor = parsed.nextCursor ?? null;
+    } while (cursor);
+    expect(seenIds).toHaveLength(201);
+    expect(seenIds.at(-1)).toBe(last.id);
 
     const save = async (fields: Record<string, string>) => {
       const body = new FormData();

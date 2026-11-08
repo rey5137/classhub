@@ -11,7 +11,13 @@ import { saltedHash } from '../log';
 import type { DatabaseHandle } from '../ports/database';
 import { auditInsertWhere, type AuditEvent } from '../repositories/audit';
 import { forbidden, parse, rateLimit, refused, type AdminResult } from './admin';
-import { inviteMember, pendingInviteFor, seatsUsed, type MemberServices } from './members';
+import {
+  countSeats,
+  inviteMember,
+  pendingInviteFor,
+  seatsUsed,
+  type MemberServices,
+} from './members';
 import { pushAfterCommit, sendJoinPush } from './push-service';
 import { takeRateLimit } from './rate-limit';
 
@@ -19,7 +25,7 @@ import { takeRateLimit } from './rate-limit';
 
 /** R-AUTH-29: the cap or the free seats are reached, as one SQL expression. */
 function queueFull(now: number): SQL {
-  const pending = sql`(select count(*) from ${joinRequests})`;
+  const pending = sql`(select count(*) from (select 1 from ${joinRequests} limit ${siteConfig.join.maxPending}))`;
   return sql`(${pending} >= ${siteConfig.join.maxPending} or ${pending} >= ${SEAT_LIMIT} - ${seatsUsed(now)})`;
 }
 
@@ -92,22 +98,24 @@ export async function adminListJoinRequests(
   context: MemberServices,
   member: Member,
   now: number = Date.now(),
+  knownSeatsUsed?: number,
 ): Promise<AdminResult<JoinQueue>> {
   if (!can(member, 'members.manage')) return forbidden;
   const { db } = context.database;
-  const [items, full] = await Promise.all([
-    db
-      .select({
-        id: joinRequests.id,
-        name: joinRequests.name,
-        email: joinRequests.email,
-        note: joinRequests.note,
-        createdAt: joinRequests.createdAt,
-      })
-      .from(joinRequests)
-      .orderBy(asc(joinRequests.createdAt), asc(joinRequests.id)),
-    joinQueueFull(db, now),
-  ]);
+  const items = await db
+    .select({
+      id: joinRequests.id,
+      name: joinRequests.name,
+      email: joinRequests.email,
+      note: joinRequests.note,
+      createdAt: joinRequests.createdAt,
+    })
+    .from(joinRequests)
+    .orderBy(asc(joinRequests.createdAt), asc(joinRequests.id))
+    .limit(siteConfig.join.maxPending);
+  const full =
+    items.length >= siteConfig.join.maxPending ||
+    items.length >= SEAT_LIMIT - (knownSeatsUsed ?? (await countSeats(db, now)));
   return { ok: true, status: 200, body: { items, full } };
 }
 

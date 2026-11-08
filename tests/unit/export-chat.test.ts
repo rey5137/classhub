@@ -24,7 +24,9 @@ import {
   createLocalDatabase,
   type LocalDatabase,
 } from '../../src/lib/server/adapters/local/sqlite-database';
-import { chatArchives, chatMessages, users } from '../../src/lib/server/db/schema';
+import { chatArchives, chatMessages, profileContacts, users } from '../../src/lib/server/db/schema';
+import type { RealtimeHub } from '../../src/lib/server/ports/realtime';
+import { completeDeletion } from '../../src/lib/server/services/members';
 import {
   exportCandidates,
   ndjsonSha256,
@@ -60,20 +62,73 @@ afterEach(() => {
 });
 
 /** `count` messages one hour apart, the oldest `startDaysAgo` days before NOW. */
-async function seedMessages(count: number, startDaysAgo: number, deleted: number[] = []) {
+async function seedMessages(
+  count: number,
+  startDaysAgo: number,
+  deleted: number[] = [],
+  sender: (index: number) => string = () => 'u1',
+) {
   const start = NOW - startDaysAgo * DAY;
   for (let index = 0; index < count; index += 1) {
     const createdAt = start + index * 3_600_000;
     await database.db.insert(chatMessages).values({
       id: `m${String(index).padStart(4, '0')}`,
       roomId: 'main',
-      senderId: 'u1',
+      senderId: sender(index),
       clientNonce: `n${index}`,
       body: deleted.includes(index) ? '' : `synthetic message ${index}`,
       createdAt,
       deletedAt: deleted.includes(index) ? createdAt : null,
     });
   }
+}
+
+const realtime: RealtimeHub = {
+  connect: async () => new Response(null),
+  disconnectMember: async () => {},
+  notify: async () => {},
+};
+
+/** An admin and a member with a pending deletion request, plus contacts that must not leak. */
+async function seedDeletionUsers(keepContent: boolean): Promise<void> {
+  await database.db.insert(users).values([
+    {
+      id: 'u2',
+      authEmail: 'admin@example.test',
+      displayName: 'Admin',
+      displayNameNorm: 'admin',
+      status: 'active',
+      role: 'admin',
+    },
+    {
+      id: 'u3',
+      authEmail: 'real.person@example.test',
+      displayName: 'Real Person',
+      displayNameNorm: 'real person',
+      status: 'active',
+      role: 'member',
+      deletionRequestedAt: NOW - DAY,
+      deletionKeepContent: keepContent,
+    },
+  ]);
+  await database.db.insert(profileContacts).values({
+    userId: 'u3',
+    contactEmail: 'real.person@example.test',
+    phone: '+1 555 0100',
+    messagingUrl: 'https://chat.example.test/real-person',
+    city: 'Synthetic City',
+    bio: 'Synthetic bio',
+  });
+}
+
+async function completeSeedDeletion(): Promise<void> {
+  const outcome = await completeDeletion(
+    { database, realtime },
+    { id: 'u2', role: 'admin', displayName: 'Admin' },
+    'u3',
+    NOW,
+  );
+  expect(outcome).toEqual({ ok: true, changed: true });
 }
 
 function deps(overrides: Partial<ExportChatDeps> = {}): ExportChatDeps & { lines: string[] } {
@@ -99,6 +154,14 @@ function deps(overrides: Partial<ExportChatDeps> = {}): ExportChatDeps & { lines
     ...overrides,
   };
 }
+
+/** The message ids of an NDJSON archive, in file order. */
+const archivedIds = (text: string): string[] =>
+  text
+    .split('\n')
+    .filter((line) => line.startsWith('{') && line.includes('"id"'))
+    .map((line) => (JSON.parse(line) as { id: string }).id)
+    .filter((id) => id.startsWith('m'));
 
 const archiveRows = () => database.db.select().from(chatArchives);
 const chatFiles = () =>
@@ -197,7 +260,7 @@ describe('export-chat', () => {
     const [row] = await archiveRows();
     expect(row).toMatchObject({ fromId: 'm0000', toId: 'm0004', recordCount: 3 });
     const text = readFileSync(join(dir, 'backups', row!.fileName), 'utf8');
-    expect(text).not.toMatch(/"m0001"|"m0003"/);
+    expect(archivedIds(text)).toEqual(['m0000', 'm0002', 'm0004']);
     // record_count and the SHA-256 describe exactly the file's content.
     expect(text.trim().split('\n')).toHaveLength(row!.recordCount);
     expect(ndjsonSha256(text)).toBe(row!.sha256);
@@ -387,5 +450,32 @@ describe('export-chat', () => {
     const out = join(dir, 'plain.ndjson');
     await decryptFileWithAge(file, identity, out);
     expect(ndjsonSha256(readFileSync(out, 'utf8'))).toBe(row!.sha256);
+  });
+
+  it('AC-PROF-05 a completed delete-content deletion is absent from the archive', async () => {
+    await seedDeletionUsers(false);
+    await seedMessages(10, 6, [], (index) => ([0, 2, 4].includes(index) ? 'u3' : 'u1'));
+    await completeSeedDeletion();
+
+    expect(await runExportChat(deps())).toBe(0);
+
+    const [row] = await archiveRows();
+    const text = readFileSync(join(dir, 'backups', row!.fileName), 'utf8');
+    expect(archivedIds(text)).toEqual(['m0001', 'm0003']);
+    expect(text).not.toMatch(/real\.person@example\.test|555 0100|chat\.example\.test/);
+  });
+
+  it('AC-PROF-06 a completed keep-content deletion stays in the archive without contact data', async () => {
+    await seedDeletionUsers(true);
+    await seedMessages(10, 6, [], (index) => ([0, 2, 4].includes(index) ? 'u3' : 'u1'));
+    await completeSeedDeletion();
+
+    expect(await runExportChat(deps())).toBe(0);
+
+    const [row] = await archiveRows();
+    const text = readFileSync(join(dir, 'backups', row!.fileName), 'utf8');
+    expect(archivedIds(text)).toEqual(['m0000', 'm0001', 'm0002', 'm0003', 'm0004']);
+    expect(text).toContain('"senderId":"u3"');
+    expect(text).not.toMatch(/real\.person@example\.test|555 0100|chat\.example\.test/);
   });
 });

@@ -106,7 +106,11 @@ Delete both (or make new ones) and run the restore again.
    login (R-AUTH-25), with no audit event, since the subject was cleared, not changed.
 6. Push notifications start off: the restored site holds no subscription. Members who used them turn them on again
    on the notifications screen (R-NTF-11).
-7. Cut over the domain only after the restored site is tested, then revoke the old site's tokens.
+7. Re-apply deletions completed since the backup was taken: the restored data still holds those members' contact
+   details and content. If the restored data still holds the deletion request, complete it again in `/admin`. If the
+   backup was made before the request, no request exists to complete (only the member can file one): suspend the
+   account at once and ask the person to request deletion again. Do this before cutting over.
+8. Cut over the domain only after the restored site is tested, then revoke the old site's tokens.
 
 ## Disaster recovery rehearsal into a second account
 
@@ -157,3 +161,7 @@ that are missing (`ON CONFLICT DO NOTHING`): it never updates or deletes one, an
 whose deletion request completed (R-PROF-11). A message deleted after its archive was exported is never brought
 back: `prune-chat` leaves it in place as an empty tombstone, so its id is already there (R-CHAT-14). It prints counts
 only. Running it twice adds nothing the second time.
+
+An archive made before a member's deletion was completed still holds that member's messages until the file is deleted
+(no retention period is set for chat archives). Restoring it skips those messages only while the target database still records the completed deletion; after a
+restore from an older backup, re-apply the deletions first (step 7 of "After the restore").

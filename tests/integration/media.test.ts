@@ -390,7 +390,9 @@ describe('private media upload protocol on D1/R2', () => {
     const winner = finish(row.id);
     await ready;
     vi.spyOn(storage, 'head').mockRejectedValueOnce(new Error('synthetic duplicate failure'));
-    expect((await finish(row.id)).status).toBe(503);
+    const failedDuplicate = await finish(row.id);
+    expect(failedDuplicate.status).toBe(500);
+    expect(errorBodySchema.parse(await failedDuplicate.json()).error.code).toBe('internal');
     expect((await findReservation(database, row.id))!.state).toBe('open');
     expect(await storage.head(final.objectKey)).not.toBeNull();
     resume();

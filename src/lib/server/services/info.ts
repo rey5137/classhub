@@ -5,6 +5,7 @@ import {
   infoMutationResponseSchema,
   infoPageSchema,
   infoPatchSchema,
+  infoQuerySchema,
   infoSlugParamsSchema,
   type InfoList,
   type InfoPage,
@@ -14,6 +15,7 @@ import type { Locale } from '../../i18n';
 import type { Member } from '../auth/membership';
 import { can } from '../auth/permissions';
 import type { AppContext } from '../context';
+import { decodeCursor, encodeCursor } from '../cursor';
 import { extractPhotoIds, renderMarkdown } from '../markdown';
 import { findReferencedPhotos } from '../repositories/discussions';
 import {
@@ -22,7 +24,9 @@ import {
   insertInfoPage,
   listInfoPages,
   listInfoPagesWithBody,
+  listPinnedInfoPages,
   updateInfoPage,
+  type InfoCursor,
   type InfoPageRow,
 } from '../repositories/info';
 import { parse, type AdminFailure, type AdminResult } from './admin';
@@ -71,20 +75,92 @@ async function toInfoPage(
   });
 }
 
-/** `GET /api/v1/info`. */
+function encodeInfoCursor(row: {
+  isPinned: boolean;
+  sortOrder: number;
+  title: string;
+  id: string;
+}): string {
+  return encodeCursor([row.isPinned ? 1 : 0, row.sortOrder, row.title, row.id]);
+}
+
+function decodeInfoCursor(cursor: string): InfoCursor | null {
+  const value = decodeCursor(cursor);
+  if (
+    value?.length !== 4 ||
+    (value[0] !== 0 && value[0] !== 1) ||
+    typeof value[1] !== 'number' ||
+    !Number.isInteger(value[1]) ||
+    typeof value[2] !== 'string' ||
+    typeof value[3] !== 'string'
+  ) {
+    return null;
+  }
+  return { isPinned: value[0] === 1, sortOrder: value[1], title: value[2], id: value[3] };
+}
+
+/** `GET /api/v1/info?cursor=&limit=&pinned=`. */
 export async function listInfo(
   context: AppContext,
   member: Member,
+  input: unknown = {},
 ): Promise<AdminResult<InfoList>> {
   if (!can(member, 'content.read')) return forbidden;
-  const items = await listInfoPages(context.database);
-  return { ok: true, status: 200, body: infoListSchema.parse({ items, nextCursor: null }) };
+  const parsed = parse(infoQuerySchema, input);
+  if (!parsed.ok) return parsed;
+  const withBody = parsed.data.body !== undefined;
+  if (withBody && !can(member, 'settings.edit')) return forbidden;
+  const after = parsed.data.cursor ? decodeInfoCursor(parsed.data.cursor) : null;
+  if (parsed.data.cursor && !after)
+    return { ok: false, code: 'validation', fields: { cursor: 'custom' } };
+  const pinnedOnly = parsed.data.pinned !== undefined;
+  const { rows, more } = withBody
+    ? await listInfoPagesWithBody(context.database, { after, limit: parsed.data.limit })
+    : await listInfoPages(context.database, {
+        after,
+        limit: parsed.data.limit,
+        pinnedOnly,
+        excludeSlug: pinnedOnly ? 'reunion' : undefined,
+      });
+  const last = rows.at(-1);
+  return {
+    ok: true,
+    status: 200,
+    body: infoListSchema.parse({
+      items: rows,
+      nextCursor: more && last ? encodeInfoCursor(last) : null,
+    }),
+  };
+}
+
+/** R-BRD-01: Home's pinned info links (`reunion` has its own card below). */
+export async function pinnedInfo(
+  context: AppContext,
+  member: Member,
+  cursor?: string | null,
+): Promise<{ items: { slug: string; title: string }[]; nextCursor: string | null }> {
+  if (!can(member, 'content.read')) return { items: [], nextCursor: null };
+  const after = cursor ? decodeInfoCursor(cursor) : null;
+  if (cursor && !after) return { items: [], nextCursor: null };
+  const { rows, more } = await listPinnedInfoPages(context.database, { after });
+  const last = rows.at(-1);
+  return {
+    items: rows.map(({ slug, title }) => ({ slug, title })),
+    nextCursor: more && last ? encodeInfoCursor(last) : null,
+  };
 }
 
 /** The `/admin` editor's pages with their Markdown; null for anyone but an admin. */
-export async function adminInfoPages(context: AppContext, member: Member) {
+export async function adminInfoPages(context: AppContext, member: Member, cursor?: string | null) {
   if (!can(member, 'settings.edit')) return null;
-  return listInfoPagesWithBody(context.database);
+  const after = cursor ? decodeInfoCursor(cursor) : null;
+  if (cursor && !after) return { items: [], nextCursor: null };
+  const { rows, more } = await listInfoPagesWithBody(context.database, { after });
+  const last = rows.at(-1);
+  return {
+    items: rows,
+    nextCursor: more && last ? encodeInfoCursor(last) : null,
+  };
 }
 
 /** `GET /api/v1/info/:slug` and `/info/[slug]`. */

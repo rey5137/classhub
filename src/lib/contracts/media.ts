@@ -72,7 +72,7 @@ export const galleryQuerySchema = z
   .object({
     album: z.uuid().optional(),
     year: z.coerce.number().pipe(year).optional(),
-    cursor: z.string().max(200).optional(),
+    cursor: z.string().max(1024).optional(),
   })
   .strict();
 export const mediaPatchSchema = z
@@ -84,6 +84,15 @@ export const mediaPatchSchema = z
   .refine((value) => Object.keys(value).length > 0, { message: 'validation' });
 export type MediaPatch = z.infer<typeof mediaPatchSchema>;
 
+export const ALBUMS_PAGE = 50;
+
+export const albumsQuerySchema = z
+  .object({
+    cursor: z.string().trim().min(1).max(1024).optional(),
+    limit: z.coerce.number().int().min(1).max(ALBUMS_PAGE).default(ALBUMS_PAGE),
+  })
+  .strict();
+
 export const albumSchema = z.object({
   id: z.uuid(),
   name: z.string(),
@@ -92,6 +101,11 @@ export const albumSchema = z.object({
   canEdit: z.boolean(),
 });
 export type Album = z.infer<typeof albumSchema>;
+export const albumPageSchema = z.object({
+  items: z.array(albumSchema),
+  nextCursor: z.string().nullable(),
+});
+export type AlbumPage = z.infer<typeof albumPageSchema>;
 export const uploaderSchema = z.object({
   id: z.string(),
   displayName: z.string(),

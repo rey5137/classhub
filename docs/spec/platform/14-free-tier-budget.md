@@ -40,7 +40,7 @@ confirms it on the Zero Trust plan screen in the dashboard (1d owner step).
 ## 14.2 When a limit is hit
 
 - **R-BUD-05** R2 near the cap: uploads stop, browsing continues. D1 write errors: content writes fail with
-  `unavailable` and a clear message; reads continue. Worker or DO limits: the client shows a temporary error and
+  `unavailable` and a clear message; reads continue (the hourly `users.last_seen_at` write and piggy-backed housekeeping writes are best-effort, caught and logged so a write failure never breaks a read; identity writes still fail closed, R-BUD-06; unexpected R2 runtime errors and non-transient server errors on `/api/` routes answer 500 `internal`, R-API-02). A D1 error counts as transient (`unavailable`, 503) when it is one of Cloudflare's documented D1 errors for overload, queueing, a reset (CPU or memory limit, code update), a transient remote-node issue, a timeout or the free plan's daily read/write limit; constraint, type and SQL syntax errors are bugs and answer `internal`. SvelteKit's own action and `__data.json` requests keep SvelteKit's error body with status 503 so the form or page shows the message. Worker or DO limits: the client shows a temporary error and
   retry guidance; chat never shows unsaved messages as sent (INV-8).
 - **R-BUD-06** Authorization fails closed under every failure (INV-1); no Worker route uses fail-open behaviour.
 - **R-BUD-07** **Honesty about cost:** the README's first screen and `docs/DEPLOY_CLOUDFLARE.md` state that R2 needs
@@ -53,7 +53,7 @@ confirms it on the Zero Trust plan screen in the dashboard (1d owner step).
 | ID | Criterion | Rules | Proved by |
 |---|---|---|---|
 | AC-BUD-01 | Each §14.1 figure is confirmed on Cloudflare's current pages and corrected if it differs | — | manual 1d |
-| AC-BUD-02 | A page view of each route stays within its row-read budget with the demo seed: 30 rows for single-record routes, and 2 × page size + 10 for list routes such as `/members` (a 50-row page, so ≤ 110); the per-route budgets live beside the test | R-BUD-01 | integration (row counter on the adapter) |
+| AC-BUD-02 | A page view of each route stays within its row-read budget with the demo seed: 30 rows for single-record routes, 2 × page size + 10 for single-list routes such as `/members` (a 50-row page, so ≤ 110), and the sum of each list's (2 × page size + 10) plus 30 for single-record reads on multi-list routes (`/`, `/admin`, `/api/v1/admin/invites`, `/memories`, `/memories/:id`; `/admin`'s R-BUD-01 full-index usage and retention counts excluded on volume); the per-route budgets live beside the test | R-BUD-01 | integration (row counter on the adapter) |
 | AC-BUD-03 | Opening any page performs no repeating request while idle for 5 minutes | R-BUD-02 | e2e network log |
 | AC-BUD-04 | With D1 writes failing, reads still render and writes show `unavailable` | R-BUD-05 | integration |
 | AC-BUD-05 | The README and deploy guide carry the R-BUD-07 statements | R-BUD-07 | review 6a |

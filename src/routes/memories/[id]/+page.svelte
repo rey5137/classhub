@@ -7,6 +7,7 @@
   import Button from '$lib/components/Button.svelte';
   import Card from '$lib/components/Card.svelte';
   import FormField from '$lib/components/FormField.svelte';
+  import LoadMore, { createPagedList } from '$lib/components/LoadMore.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import { useI18n } from '$lib/i18n/context';
   import { mediumDate } from '$lib/shared/time';
@@ -14,8 +15,17 @@
 
   let { data, form }: PageProps = $props();
   const i18n = useI18n();
-
   const photo = $derived(data.photo);
+  const albumsPager = createPagedList({
+    initialItems: () => data.albums,
+    initialCursor: () => data.albumsNextCursor,
+    keyOf: (entry) => entry.id,
+    endpoint: (cursor) => `/api/v1/albums?cursor=${encodeURIComponent(cursor)}`,
+    fallbackError: () => i18n.t('common.loadMoreFailed'),
+    focusFallback: () =>
+      typeof document !== 'undefined' ? document.querySelector<HTMLElement>('#photo-album') : null,
+  });
+  const albums = $derived(albumsPager.items);
   const byline = $derived(i18n.t('mem.photoBy', { name: photo.uploader.displayName }));
   const failure = $derived(form && 'message' in form ? form.message : null);
   const saved = $derived(form && 'done' in form && form.done === 'saved');
@@ -101,17 +111,18 @@
           maxlength={500}
           multiline
         />
-        {#if data.albums.length > 0}
+        {#if albums.length > 0}
           <div class="field">
             <label for="photo-album">{i18n.t('mem.upload.album')}</label>
             <select id="photo-album" name="albumId">
               <option value="" selected={!photo.album}>{i18n.t('mem.upload.noAlbum')}</option>
-              {#each data.albums as album (album.id)}
+              {#each albums as album (album.id)}
                 <option value={album.id} selected={photo.album?.id === album.id}
                   >{album.name}</option
                 >
               {/each}
             </select>
+            <LoadMore pager={albumsPager} variant="button" />
           </div>
         {/if}
         <Button type="submit" variant="primary">{i18n.t('photo.save')}</Button>

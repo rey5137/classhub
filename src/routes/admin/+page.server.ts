@@ -32,14 +32,23 @@ const featureKeys: Feature[] = ['memories', 'discussions', 'chat', 'join', 'noti
 // R-NAV-03: the invite screen loads here, after the membership check; R-NAV-05 refuses
 // everyone but admins before any row is read.
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, url }) => {
   const { member, context } = guarded(locals);
   if (!can(member, 'members.manage')) error(403, t(locals.locale, 'error.forbidden'));
-  const list = await adminListInvites(context, member);
-  if (!list.ok) error(403, t(locals.locale, 'error.forbidden'));
-  const joinQueue = await adminListJoinRequests(context, member);
+  const invitesCursor = url?.searchParams.get('invitesCursor') ?? undefined;
+  const infoCursor = url?.searchParams.get('infoCursor') ?? undefined;
+  const list = await adminListInvites(
+    context,
+    member,
+    invitesCursor ? { cursor: invitesCursor } : {},
+  );
+  if (!list.ok)
+    error(list.code === 'validation' ? 400 : 403, t(locals.locale, `error.${list.code}`));
+  const joinQueue = await adminListJoinRequests(context, member, Date.now(), list.body.seats.used);
+  const info = await adminInfoPages(context, member, infoCursor);
   return {
     invites: list.body.items,
+    invitesNextCursor: list.body.nextCursor,
     seats: list.body.seats,
     // R-AUTH-30: the queue card; shown while join is on or requests still wait.
     join: {
@@ -64,7 +73,8 @@ export const load: PageServerLoad = async ({ locals }) => {
     usage: await usageSummary(context, member),
     // R-BAK-09: the last verified backup's date and size; `usage.view` covers backup status.
     backup: can(member, 'usage.view') ? { last: await lastVerifiedBackup(context.database) } : null,
-    infoPages: (await adminInfoPages(context, member)) ?? [],
+    infoPages: info?.items ?? [],
+    infoPagesNextCursor: info?.nextCursor ?? null,
     // R-CHAT-14: messages over R-CHAT-13's limits with no verified archive yet.
     chatOverRetention: await chatOverRetention(context.database, siteConfig.chat, Date.now()),
     // R-UI-01: the effective settings this request already read; `settings.edit` is admin-only too.

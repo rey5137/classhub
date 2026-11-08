@@ -1,10 +1,11 @@
 import type { Mailer } from '../../src/lib/server/ports/mailer';
+import { isHttpError, isRedirect } from '@sveltejs/kit';
 import type { Handle, RequestEvent, ResolveOptions } from '@sveltejs/kit';
 import { createAccessEvaluator } from '../../src/lib/server/adapters/cloudflare/access-evaluator';
 import { AccessIdentityProvider } from '../../src/lib/server/adapters/cloudflare/access-identity';
 import type { AppContext } from '../../src/lib/server/context';
 import { appearance, applyAppearance } from '../../src/lib/server/appearance';
-import { createSecurityHandle } from '../../src/lib/server/pipeline';
+import { createSecurityHandle, handleServerError } from '../../src/lib/server/pipeline';
 import type { Database } from '../../src/lib/server/ports/database';
 import type { ObjectStorage } from '../../src/lib/server/ports/object-storage';
 import type { PushTransport } from '../../src/lib/server/ports/push-transport';
@@ -181,7 +182,7 @@ export async function createHarness(
         event,
         resolve: async (resolvedEvent: RequestEvent, opts?: ResolveOptions) => {
           resolved.push(`${resolvedEvent.request.method} ${resolvedEvent.url.pathname}`);
-          const response = await (options.resolve ?? render)(resolvedEvent);
+          const response = await resolveLikeKit(options.resolve ?? render, resolvedEvent);
           const transform = opts?.transformPageChunk;
           if (!transform || !response.headers.get('content-type')?.startsWith('text/html')) {
             return response;
@@ -192,6 +193,46 @@ export async function createHarness(
       });
     },
   };
+}
+
+/**
+ * SvelteKit's `resolve` never throws for a handler's error: it runs `handleError` and answers
+ * 500. Redirects and `error()` pass through as they were thrown before.
+ */
+async function resolveLikeKit(
+  run: (event: RequestEvent) => Response | Promise<Response>,
+  event: RequestEvent,
+): Promise<Response> {
+  try {
+    return await run(event);
+  } catch (error) {
+    if (isRedirect(error) || isHttpError(error)) throw error;
+    const body = await handleServerError({
+      error,
+      event,
+      status: 500,
+      message: 'Internal Error',
+    });
+    const wantsHtml =
+      (event.request.method === 'GET' || event.request.method === 'HEAD') &&
+      !event.url.pathname.startsWith('/api/') &&
+      !event.isDataRequest &&
+      (event.request.headers.get('accept') ?? '').includes('text/html');
+    if (wantsHtml && body) {
+      return new Response(
+        `<!doctype html><html><body><p>${body.message}</p><p>${body.requestId}</p></body></html>`,
+        { status: 500, headers: { 'content-type': 'text/html; charset=utf-8' } },
+      );
+    }
+    const isKitProtocol =
+      event.isDataRequest ||
+      event.url.pathname.endsWith('/__data.json') ||
+      event.request.headers.get('x-sveltekit-action') === 'true';
+    return new Response(JSON.stringify(isKitProtocol ? { type: 'error', error: body } : body), {
+      status: 500,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
 }
 
 /** AC-AUTH-05: status, headers and body, with the request id dropped and the nonce masked. */

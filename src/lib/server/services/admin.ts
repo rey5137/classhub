@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import {
   inviteCreateSchema,
   inviteRevokeSchema,
+  invitesQuerySchema,
   memberPatchSchema,
   type InviteList,
 } from '../../contracts/admin';
@@ -9,12 +10,13 @@ import type { ErrorCode } from '../../contracts/errors';
 import type { MessageKey } from '../../i18n';
 import type { Member } from '../auth/membership';
 import { can } from '../auth/permissions';
+import { decodeCursor, encodeCursor } from '../cursor';
 import {
   changeRole,
   completeDeletion,
   countSeats,
   inviteMember,
-  listInvites,
+  listInvitesPage,
   reactivateMember,
   revokeInvite,
   SEAT_LIMIT,
@@ -87,20 +89,38 @@ function done<T>(outcome: Outcome<T>, status = 200): AdminResult<Outcome<T> & { 
 }
 
 /** R-AUTH-10/19: every invite with its member state and Access sync time, and the seats. */
+function decodeInviteCursor(cursor: string): string | null {
+  const value = decodeCursor(cursor);
+  return value?.length === 1 && typeof value[0] === 'string' && value[0].length > 0
+    ? value[0]
+    : null;
+}
+
 export async function adminListInvites(
   context: MemberServices,
   member: Member,
+  input: unknown = {},
 ): Promise<AdminResult<InviteList>> {
   if (!can(member, 'members.manage')) return forbidden;
+  const parsed = parse(invitesQuerySchema, input);
+  if (!parsed.ok) return parsed;
+  const after = parsed.data.cursor ? decodeInviteCursor(parsed.data.cursor) : null;
+  if (parsed.data.cursor && !after)
+    return { ok: false, code: 'validation', fields: { cursor: 'custom' } };
   const now = Date.now();
-  const [items, used] = await Promise.all([
-    listInvites(context.database.db, now),
+  const [{ items, more }, used] = await Promise.all([
+    listInvitesPage(context.database.db, { after, limit: parsed.data.limit }, now),
     countSeats(context.database.db, now),
   ]);
+  const last = items.at(-1);
   return {
     ok: true,
     status: 200,
-    body: { items, nextCursor: null, seats: { used, warnAt: SEAT_WARNING, limit: SEAT_LIMIT } },
+    body: {
+      items,
+      nextCursor: more && last ? encodeCursor([last.email]) : null,
+      seats: { used, warnAt: SEAT_WARNING, limit: SEAT_LIMIT },
+    },
   };
 }
 

@@ -339,4 +339,67 @@ describe('info pages (R-BRD-02)', () => {
     expect(off).not.toContain(photo.id);
     expect(off).not.toContain('Lều xanh');
   });
+
+  it('R-BRD-02 keyset-pages past 50 info pages including identical titles across pinned and unpinned', async () => {
+    const vnTitle =
+      'Trùng tên kỷ niệm trường xưa thân yêu mãi nhớ về thầy cô bạn bè dưới mái trường thân thương của chúng ta năm ấy vẫn còn mãi trong tim mỗi người học trò xưa'.slice(
+        0,
+        160,
+      );
+    for (let start = 0; start < 60; start += 10) {
+      await database.db.insert(infoPages).values(
+        Array.from({ length: 10 }, (_, index) => {
+          const i = start + index;
+          return {
+            id: `01900000-0000-7000-8000-${String(i + 1).padStart(12, '0')}`,
+            slug: `page-${String(i).padStart(3, '0')}`,
+            title: i % 2 === 0 ? vnTitle : `Trang ${String(i).padStart(3, '0')}`,
+            bodyMd: `Nội dung ${i}`,
+            isPinned: i < 30,
+            sortOrder: Math.floor(i / 4),
+            updatedBy: PEOPLE.admin.id,
+            updatedAt: 1_700_000_000_000 + i,
+          };
+        }),
+      );
+    }
+    const slugs: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const response = await send(
+        `/api/v1/info${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+        'GET',
+        memberHeaders,
+      );
+      expect(response.status).toBe(200);
+      const parsed = infoListSchema.parse(await response.json());
+      expect(parsed.items.every((item) => item.bodyMd === undefined)).toBe(true);
+      slugs.push(...parsed.items.map((item) => item.slug));
+      cursor = parsed.nextCursor ?? null;
+      pages += 1;
+    } while (cursor);
+    expect(pages).toBe(2);
+    expect(new Set(slugs).size).toBe(60);
+    expect(slugs).toHaveLength(60);
+
+    // Admin body mode (?body=1) returns bodyMd for the editor and rejects non-admins.
+    expect((await send('/api/v1/info?body=1', 'GET', memberHeaders)).status).toBe(403);
+    const adminFirst = infoListSchema.parse(
+      await (await send('/api/v1/info?body=1', 'GET', adminHeaders)).json(),
+    );
+    expect(adminFirst.items[0]?.bodyMd).toMatch(/^Nội dung /);
+    expect(adminFirst.nextCursor).toBeTruthy();
+    const adminSecond = infoListSchema.parse(
+      await (
+        await send(
+          `/api/v1/info?body=1&cursor=${encodeURIComponent(adminFirst.nextCursor!)}`,
+          'GET',
+          adminHeaders,
+        )
+      ).json(),
+    );
+    expect(adminSecond.items).toHaveLength(10);
+    expect(adminSecond.items.every((item) => typeof item.bodyMd === 'string')).toBe(true);
+  });
 });

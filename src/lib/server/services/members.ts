@@ -1,4 +1,5 @@
-import { and, asc, count, eq, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
+import { INVITES_PAGE } from '../../contracts/admin';
 import { siteConfig } from '../../config';
 import { t } from '../../i18n';
 import { normalizeName } from '../../shared/normalize';
@@ -74,9 +75,14 @@ export function pendingInviteFor(email: string, now: number): SQL {
   return sql`exists (select 1 from ${invites} where ${invites.email} = ${email} and ${invites.status} = 'pending' and (${invites.expiresAt} is null or ${invites.expiresAt} > ${now}))`;
 }
 
-/** R-AUTH-19: active members plus pending, unexpired invites, as one SQL expression. */
+/**
+ * R-AUTH-19: active members plus pending, unexpired invites, as one SQL expression. Each side
+ * counts at most `SEAT_LIMIT + 1` rows: every use compares the sum with the limit, so a bigger
+ * count changes nothing and the read stays bounded (R-BUD-01).
+ */
 export function seatsUsed(now: number): SQL {
-  return sql`((select count(*) from ${users} where ${users.status} = 'active') + (select count(*) from ${invites} where ${invites.status} = 'pending' and (${invites.expiresAt} is null or ${invites.expiresAt} > ${now})))`;
+  const cap = SEAT_LIMIT + 1;
+  return sql`(select count(*) from (select 1 from ${users} where ${users.status} = 'active' union all select 1 from ${invites} where ${invites.status} = 'pending' and (${invites.expiresAt} is null or ${invites.expiresAt} > ${now}) limit ${cap}))`;
 }
 
 export async function countSeats(db: DatabaseHandle, now: number = Date.now()): Promise<number> {
@@ -84,11 +90,13 @@ export async function countSeats(db: DatabaseHandle, now: number = Date.now()): 
   return Number(row?.n ?? 0);
 }
 
-/** The admin invite screen's list (R-AUTH-10); emails reach admins only (R-NAV-05). */
-export async function listInvites(
+/** The admin invite screen's list (R-AUTH-10, R-DB-07); keyset-paged on `invites.email`, 50 per page. */
+export async function listInvitesPage(
   db: DatabaseHandle,
+  options: { after?: string | null; limit?: number } = {},
   now: number = Date.now(),
-): Promise<InviteView[]> {
+): Promise<{ items: InviteView[]; more: boolean }> {
+  const limit = options.limit ?? INVITES_PAGE;
   const rows = await db
     .select({
       id: invites.id,
@@ -98,31 +106,57 @@ export async function listInvites(
       createdAt: invites.createdAt,
       expiresAt: invites.expiresAt,
       accessSyncedAt: invites.accessSyncedAt,
-      userId: users.id,
-      userRole: users.role,
-      userStatus: users.status,
-      displayName: users.displayName,
-      deletionRequestedAt: users.deletionRequestedAt,
     })
     .from(invites)
-    .leftJoin(users, eq(users.authEmail, invites.email))
-    .orderBy(asc(invites.email));
-  return rows.map((row) => ({
-    id: row.id,
-    email: row.email,
-    role: row.userRole ?? row.role,
-    status:
-      row.status === 'pending' && row.expiresAt !== null && row.expiresAt <= now
-        ? 'expired'
-        : row.status,
-    userId: row.userId,
-    userStatus: row.userStatus,
-    displayName: row.displayName,
-    deletionRequestedAt: row.deletionRequestedAt,
-    createdAt: row.createdAt,
-    expiresAt: row.expiresAt,
-    accessSyncedAt: row.accessSyncedAt,
-  }));
+    .where(options.after ? sql`${invites.email} > ${options.after}` : undefined)
+    .orderBy(asc(invites.email))
+    .limit(limit + 1);
+  const slice = rows.slice(0, limit);
+  const emails = slice.map((row) => row.email);
+  const userRows =
+    emails.length > 0
+      ? await db
+          .select({
+            authEmail: users.authEmail,
+            userId: users.id,
+            userRole: users.role,
+            userStatus: users.status,
+            displayName: users.displayName,
+            deletionRequestedAt: users.deletionRequestedAt,
+          })
+          .from(users)
+          .where(inArray(users.authEmail, emails))
+      : [];
+  const byEmail = new Map(userRows.map((user) => [user.authEmail, user]));
+  return {
+    items: slice.map((row) => {
+      const user = byEmail.get(row.email);
+      return {
+        id: row.id,
+        email: row.email,
+        role: user?.userRole ?? row.role,
+        status:
+          row.status === 'pending' && row.expiresAt !== null && row.expiresAt <= now
+            ? 'expired'
+            : row.status,
+        userId: user?.userId ?? null,
+        userStatus: user?.userStatus ?? null,
+        displayName: user?.displayName ?? null,
+        deletionRequestedAt: user?.deletionRequestedAt ?? null,
+        createdAt: row.createdAt,
+        expiresAt: row.expiresAt,
+        accessSyncedAt: row.accessSyncedAt,
+      };
+    }),
+    more: rows.length > limit,
+  };
+}
+
+export async function listInvites(
+  db: DatabaseHandle,
+  now: number = Date.now(),
+): Promise<InviteView[]> {
+  return (await listInvitesPage(db, {}, now)).items;
 }
 
 async function findInviteByEmail(db: DatabaseHandle, email: string) {

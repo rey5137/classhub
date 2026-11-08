@@ -5,6 +5,7 @@
   import Button from '$lib/components/Button.svelte';
   import EmptyState from '$lib/components/EmptyState.svelte';
   import FormField from '$lib/components/FormField.svelte';
+  import LoadMore, { createPagedList } from '$lib/components/LoadMore.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import UploadSheet from '$lib/components/UploadSheet.svelte';
   import { useI18n } from '$lib/i18n/context';
@@ -13,17 +14,40 @@
   let { data, form }: PageProps = $props();
   const i18n = useI18n();
   let uploading = $state(false);
-
-  const album = $derived(data.albums.find((entry) => entry.id === data.filter.album) ?? null);
+  const albumsPager = createPagedList({
+    initialItems: () => data.albums,
+    initialCursor: () => data.albumsNextCursor,
+    keyOf: (entry) => entry.id,
+    endpoint: (cursor) => `/api/v1/albums?cursor=${encodeURIComponent(cursor)}`,
+    fallbackError: () => i18n.t('common.loadMoreFailed'),
+    focusItem: (key) => {
+      if (typeof document === 'undefined') return null;
+      if (uploading) return document.querySelector<HTMLElement>('#upload-album');
+      for (const el of document.querySelectorAll<HTMLElement>('[data-more-item]')) {
+        if (el.dataset.moreItem === key) return el;
+      }
+      return null;
+    },
+    focusFallback: () =>
+      typeof document !== 'undefined' ? document.querySelector<HTMLElement>('#upload-album') : null,
+  });
+  const albums = $derived(albumsPager.items);
+  const album = $derived(albums.find((entry) => entry.id === data.filter.album) ?? null);
 
   /** A wall query that keeps the other filter; a new filter always starts at the newest page. */
-  function wallQuery(next: { album?: string | null; year?: number | null; cursor?: string }) {
+  function wallQuery(next: {
+    album?: string | null;
+    year?: number | null;
+    cursor?: string;
+    albumsCursor?: string;
+  }) {
     const albumId = next.album === undefined ? data.filter.album : next.album;
     const year = next.year === undefined ? data.filter.year : next.year;
     const params = [
       albumId ? `album=${encodeURIComponent(albumId)}` : '',
       year ? `year=${year}` : '',
       next.cursor ? `cursor=${encodeURIComponent(next.cursor)}` : '',
+      next.albumsCursor ? `albumsCursor=${encodeURIComponent(next.albumsCursor)}` : '',
     ].filter(Boolean);
     return params.length ? `?${params.join('&')}` : '';
   }
@@ -80,7 +104,7 @@
   {/snippet}
 </PageHeader>
 
-<UploadSheet open={uploading} albums={data.albums} onclose={() => (uploading = false)} />
+<UploadSheet open={uploading} {albums} {albumsPager} onclose={() => (uploading = false)} />
 
 <div class="stack">
   {#if failure}
@@ -114,7 +138,7 @@
         </ul>
       </div>
     {/if}
-    {#if data.albums.length > 0}
+    {#if albums.length > 0}
       <div class="chips" data-sveltekit-replacestate>
         <span class="label" id="album-filter">{i18n.t('mem.albums')}</span>
         <ul aria-labelledby="album-filter">
@@ -126,15 +150,25 @@
               >{i18n.t('mem.allAlbums')}</a
             >
           </li>
-          {#each data.albums as entry (entry.id)}
+          {#each albums as entry (entry.id)}
             <li>
               <a
                 class="chip"
+                data-more-item={entry.id}
                 href="{resolve('/memories')}{wallQuery({ album: entry.id })}"
                 aria-current={data.filter.album === entry.id ? 'true' : undefined}>{entry.name}</a
               >
             </li>
           {/each}
+          {#if albumsPager.cursor || albumsPager.loadedMore || albumsPager.error}
+            <li>
+              <LoadMore
+                pager={albumsPager}
+                variant="chip"
+                href={(cursor) => `${resolve('/memories')}${wallQuery({ albumsCursor: cursor })}`}
+              />
+            </li>
+          {/if}
         </ul>
       </div>
     {/if}

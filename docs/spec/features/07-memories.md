@@ -94,7 +94,7 @@
   seconds); for `daily` it is 900. Traffic housekeeping (R-MEM-11) soft-deletes up to 20 live avatar rows older than
   one hour that are no member's current `avatar_media_id` (a `complete` whose `PATCH /me` never followed); R-MEM-20
   purges them after the grace period. The CLI run does not do this.
-- **R-MEM-14** Albums have a name (1–80), an optional year tag (four digits) and description (≤ 500). The gallery
+- **R-MEM-14** Albums have a name (1–80), an optional year tag (four digits) and description (≤ 500); `GET /api/v1/albums` and the album picker are keyset paged on `(name, id)`, 50 per page (R-DB-07). The gallery
   filters by album and by year, newest first, 30 per page, keyset paged. The year is the stored
   `media.effective_year` (album year tag, else the photo's `taken_year`), set when the photo is completed or moved to
   another album and rewritten for the album's photos when an album's year tag changes (R-DB-06): the album row and

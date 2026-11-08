@@ -13,7 +13,8 @@ import {
 } from '../../src/lib/server/adapters/local/sqlite-database';
 import { chatArchives, chatMessages, users } from '../../src/lib/server/db/schema';
 import { pruneArchived } from '../../src/lib/server/repositories/chat-archive';
-import { tombstoneEmail } from '../../src/lib/server/services/members';
+import type { RealtimeHub } from '../../src/lib/server/ports/realtime';
+import { completeDeletion, tombstoneEmail } from '../../src/lib/server/services/members';
 
 // Synthetic only (INV-6): made-up members and messages; "age" is a copy here.
 const NOW = Date.UTC(2026, 10, 6, 12);
@@ -178,6 +179,47 @@ describe('npm run restore -- --chat', () => {
       [],
     );
   });
+
+  it.each([
+    ['AC-PROF-05', false],
+    ['AC-PROF-06', true],
+  ])(
+    '%s restore --chat from an archive made before a completed deletion (keepContent=%s) skips that member',
+    async (_id, keepContent) => {
+      await database.db
+        .update(users)
+        .set({ deletionRequestedAt: NOW - DAY, deletionKeepContent: keepContent })
+        .where(eq(users.id, 'u2'));
+      await database.db.insert(users).values({
+        id: 'admin',
+        authEmail: 'admin@example.test',
+        displayName: 'Admin',
+        displayNameNorm: 'admin',
+        status: 'active',
+        role: 'admin',
+      });
+      const realtime: RealtimeHub = {
+        connect: async () => new Response(null),
+        disconnectMember: async () => {},
+        notify: async () => {},
+      };
+      expect(
+        await completeDeletion(
+          { database, realtime },
+          { id: 'admin', role: 'admin', displayName: 'Admin' },
+          'u2',
+          NOW,
+        ),
+      ).toEqual({ ok: true, changed: true });
+      // The live room lost the member's messages (or kept them); either way the old archive must
+      // not bring them back, so empty the room to make every archived row "missing".
+      await database.db.delete(chatMessages).where(eq(chatMessages.roomId, 'main'));
+      const { result, lines } = restore();
+      expect(await result).toBe(0);
+      expect(lines.join('\n')).toContain('3 messages added, 0 already there, 3 skipped');
+      expect((await messages()).every((row) => row.senderId === 'u1')).toBe(true);
+    },
+  );
 
   it('AC-CHAT-16 a second run adds nothing', async () => {
     await database.db.delete(chatMessages).where(eq(chatMessages.roomId, 'main'));

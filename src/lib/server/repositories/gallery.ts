@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull, notExists, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, notExists, sql, type SQL } from 'drizzle-orm';
 import type { AlbumPatch, MediaPatch } from '../../contracts/media';
 import { albums, media, profileContacts, schemaMeta, users } from '../db/schema';
 import { uuidv7 } from '../ids';
@@ -106,11 +106,65 @@ export async function listGallery(
       sql`(${media.createdAt}, ${media.id}) < (${options.after.createdAt}, ${options.after.id})`,
     );
   }
-  const rows = await select(database)
+  const rawRows = await database.db
+    .select({
+      id: media.id,
+      ownerId: media.ownerId,
+      caption: media.caption,
+      albumId: media.albumId,
+      year: media.effectiveYear,
+      width: media.width,
+      height: media.height,
+      createdAt: media.createdAt,
+    })
+    .from(media)
     .where(and(...conditions))
     .orderBy(desc(media.createdAt), desc(media.id))
     .limit(options.limit + 1);
-  return { rows: rows.slice(0, options.limit).map(toRow), more: rows.length > options.limit };
+  const slice = rawRows.slice(0, options.limit);
+  if (slice.length === 0) return { rows: [], more: false };
+  const ownerIds = [...new Set(slice.map((row) => row.ownerId))];
+  const albumIds = [...new Set(slice.flatMap((row) => (row.albumId ? [row.albumId] : [])))];
+  const [ownerRows, albumRows] = await Promise.all([
+    database.db
+      .select({
+        id: users.id,
+        displayName: users.displayName,
+        status: users.status,
+        preferredName: users.preferredName,
+        avatarMediaId: users.avatarMediaId,
+        deletionRequestedAt: users.deletionRequestedAt,
+        visibilityJson: profileContacts.visibilityJson,
+      })
+      .from(users)
+      .leftJoin(profileContacts, eq(profileContacts.userId, users.id))
+      .where(inArray(users.id, ownerIds)),
+    albumIds.length > 0
+      ? database.db
+          .select({ id: albums.id, name: albums.name })
+          .from(albums)
+          .where(inArray(albums.id, albumIds))
+      : Promise.resolve([]),
+  ]);
+  const ownersById = new Map(ownerRows.map((owner) => [owner.id, owner]));
+  const albumsById = new Map(albumRows.map((album) => [album.id, album.name]));
+  const rows: GalleryRow[] = slice.flatMap((row) => {
+    const owner = ownersById.get(row.ownerId);
+    if (!owner) return [];
+    return [
+      toRow({
+        ...row,
+        albumName: row.albumId ? (albumsById.get(row.albumId) ?? null) : null,
+        displayName: owner.displayName,
+        status: owner.status,
+        preferredName: owner.preferredName,
+        avatarMediaId: owner.avatarMediaId,
+        deletionRequestedAt: owner.deletionRequestedAt,
+        visibilityJson: owner.visibilityJson,
+      }),
+    ];
+  });
+  return { rows, more: rawRows.length > options.limit };
 }
 
 export async function findGalleryPhoto(database: Database, id: string) {
@@ -120,15 +174,24 @@ export async function findGalleryPhoto(database: Database, id: string) {
   return row ? toRow(row) : undefined;
 }
 
-/** The year chips: the years live photos carry, newest first. */
+/**
+ * The year chips: the years live photos carry, newest first. A skip-scan over
+ * `media_effective_year_idx` (each step jumps to the next lower year), so the read scales with
+ * the number of years, not photos (R-BUD-01); `select distinct` would read every photo.
+ */
 export async function listGalleryYears(database: Database, limit: number): Promise<number[]> {
-  const rows = await database.db
-    .selectDistinct({ year: media.effectiveYear })
-    .from(media)
-    .where(and(isNotNull(media.effectiveYear), live))
-    .orderBy(desc(media.effectiveYear))
-    .limit(limit);
-  return rows.flatMap((row) => (row.year === null ? [] : [row.year]));
+  const liveYear = sql`${media.mediaType} = 'photo' and ${media.deletedAt} is null`;
+  const rows = await database.db.all<{ year: number | null }>(sql`
+    with recursive years(year) as (
+      select max(${media.effectiveYear}) from ${media} indexed by media_effective_year_idx
+        where ${liveYear}
+      union all
+      select (select max(${media.effectiveYear}) from ${media} indexed by media_effective_year_idx
+        where ${media.effectiveYear} < years.year and ${liveYear})
+      from years where years.year is not null
+    )
+    select year from years where year is not null limit ${limit}`);
+  return rows.flatMap((row) => (row.year === null ? [] : [Number(row.year)]));
 }
 
 /** R-MEM-18: counted over the default gallery index, on the admin screen only. */

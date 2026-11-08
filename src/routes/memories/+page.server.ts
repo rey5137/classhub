@@ -7,7 +7,8 @@ import { can } from '$lib/server/auth/permissions';
 import {
   createAlbum,
   editAlbum,
-  listAlbums,
+  getAlbumChoice,
+  listAlbumsPage,
   listPhotos,
   listYears,
 } from '$lib/server/services/gallery';
@@ -22,17 +23,24 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     const value = url.searchParams.get(name);
     if (value) query[name] = value;
   }
-  const [page, albums, years] = await Promise.all([
+  const albumsCursor = url.searchParams.get('albumsCursor');
+  const [page, albumsPage, years] = await Promise.all([
     listPhotos(context, member, query),
-    listAlbums(context, member),
+    listAlbumsPage(context, member, albumsCursor ? { cursor: albumsCursor } : {}),
     listYears(context, member),
   ]);
-  if (!page.ok) error(400, t(locals.locale, 'error.validation'));
+  if (!page.ok || !albumsPage.ok) error(400, t(locals.locale, 'error.validation'));
+  const albums = [...albumsPage.body.items];
+  if (query.album && !albums.some((album) => album.id === query.album)) {
+    const active = await getAlbumChoice(context, member, query.album);
+    if (active) albums.push(active);
+  }
   return {
     canUpload: can(member, 'content.create'),
     photos: page.body.items,
     nextCursor: page.body.nextCursor,
     albums,
+    albumsNextCursor: albumsPage.body.nextCursor,
     years,
     filter: {
       album: query.album ?? null,

@@ -1,4 +1,5 @@
 import type { Handle, HandleServerError, RequestEvent } from '@sveltejs/kit';
+import { t } from '../i18n';
 import { normalizeEmail, resolveMember } from './auth/membership';
 import { mayPassAccess, touchLastSeen } from './repositories/users';
 import { isBootstrapAdmin } from './repositories/settings';
@@ -456,7 +457,21 @@ export function createSecurityHandle(options: PipelineOptions): Handle {
     } catch (error) {
       // Fail closed: a missing binding or a database error shows nothing private.
       log.error = describeError(error);
-      response = apiError('unavailable', errorContext(event));
+      response = unavailableResponse(event);
+    }
+
+    // R-BUD-05: SvelteKit turned a handler's, load's or action's D1 failure into a 500
+    // before it got here (`handleServerError` marked it); the visitor sees `unavailable`.
+    if (event.locals.storageFailed) {
+      response = unavailableResponse(event, response);
+    } else if (
+      response.status >= 500 &&
+      // `apiError` already stamped its envelope with the request id; leave those alone.
+      !response.headers.has('x-request-id') &&
+      routeKey(event.route.id, pathOf(event)).startsWith('/api/')
+    ) {
+      // R-API-02: every `/api/` error uses the `{ error: { code, message, requestId } }` envelope.
+      response = apiError('internal', errorContext(event));
     }
 
     response = finalize(event, response);
@@ -464,6 +479,52 @@ export function createSecurityHandle(options: PipelineOptions): Handle {
     logLine(log);
     return response;
   };
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!,
+  );
+}
+
+function isKitProtocol(event: RequestEvent): boolean {
+  return (
+    event.isDataRequest ||
+    event.url.pathname.endsWith('/__data.json') ||
+    event.request.headers.get('x-sveltekit-action') === 'true'
+  );
+}
+
+function unavailableResponse(event: RequestEvent, current?: Response): Response {
+  const locale = event.locals.locale ?? 'vi';
+  if (isKitProtocol(event)) {
+    if (current && (current.headers.get('content-type') ?? '').includes('application/json')) {
+      return new Response(current.body, { status: 503, headers: current.headers });
+    }
+    return new Response(
+      JSON.stringify({
+        type: 'error',
+        status: 503,
+        error: { message: t(locale, 'error.unavailable'), requestId: event.locals.requestId },
+      }),
+      { status: 503, headers: { 'content-type': 'application/json' } },
+    );
+  }
+  const wantsHtml =
+    isNavigation(event) &&
+    !event.isDataRequest &&
+    (event.request.headers.get('accept') ?? '').includes('text/html');
+  if (!wantsHtml) return apiError('unavailable', errorContext(event));
+  if (current && (current.headers.get('content-type') ?? '').includes('text/html')) {
+    return new Response(current.body, { status: 503, headers: current.headers });
+  }
+  const message = escapeHtml(t(locale, 'error.unavailable'));
+  const requestId = escapeHtml(event.locals.requestId);
+  return new Response(
+    `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><title>503</title></head><body><main><h1>503</h1><p>${message}</p><p><small>${requestId}</small></p></main></body></html>`,
+    { status: 503, headers: { 'content-type': 'text/html; charset=utf-8' } },
+  );
 }
 
 /** The platform's `ctx.waitUntil`, bound, when the runtime offers one. */
@@ -478,14 +539,44 @@ function describeError(error: unknown): string {
   return 'non-error thrown';
 }
 
+// Cloudflare D1 documented errors: https://developers.cloudflare.com/d1/observability/debug-d1/#error-list
+const TRANSIENT_STORAGE =
+  /\b(SQLITE_READONLY|SQLITE_BUSY|SQLITE_LOCKED|SQLITE_IOERR|SQLITE_FULL|SQLITE_NOMEM|overloaded|unavailable|timeout|timed out|network connection lost|storage|reset|transient|exceeded|queued|isolate|quota|daily limit)\b/i;
+const NON_TRANSIENT_STORAGE =
+  /\b(SQLITE_CONSTRAINT|SQLITE_ERROR|SQLITE_MISMATCH|D1_TYPE_ERROR|constraint failed|syntax error)\b/i;
+
+/** A transient D1 failure (drizzle wraps the driver error as `cause`), as opposed to a bug or constraint error. */
+function isStorageFailure(error: unknown): boolean {
+  for (let depth = 0; error instanceof Error && depth < 4; depth += 1) {
+    const text = `${error.name}: ${error.message}`;
+    if (
+      (error.name === 'D1Error' ||
+        /\bD1(_ERROR|\s+(DB|Database|unavailable|read|write|quota|limit))\b/i.test(
+          error.message,
+        )) &&
+      !NON_TRANSIENT_STORAGE.test(text) &&
+      TRANSIENT_STORAGE.test(text)
+    ) {
+      return true;
+    }
+    error = error.cause;
+  }
+  return false;
+}
+
 /** R-AUTH-23: unexpected errors are logged redacted; the page sees only the request id. */
 export const handleServerError: HandleServerError = ({ error, event, status, message }) => {
+  const storage = isStorageFailure(error);
+  if (storage) event.locals.storageFailed = true;
   logLine({
     requestId: event.locals.requestId,
     route: event.route.id ?? 'unmatched',
-    status,
+    status: storage ? 503 : status,
     // A 4xx message can quote the raw path (`Not found: /…`); only server errors need the text.
     ...(status >= 500 ? { error: describeError(error) } : {}),
   });
-  return { message, requestId: event.locals.requestId };
+  return {
+    message: storage ? t(event.locals.locale ?? 'vi', 'error.unavailable') : message,
+    requestId: event.locals.requestId,
+  };
 };

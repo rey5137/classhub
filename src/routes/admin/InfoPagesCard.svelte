@@ -4,6 +4,7 @@
   import Button from '$lib/components/Button.svelte';
   import Card from '$lib/components/Card.svelte';
   import FormField from '$lib/components/FormField.svelte';
+  import LoadMore, { createPagedList } from '$lib/components/LoadMore.svelte';
   import { useI18n } from '$lib/i18n/context';
   import type { MessageKey } from '$lib/i18n';
 
@@ -18,12 +19,21 @@
 
   interface Props {
     pages: InfoRow[];
+    nextCursor?: string | null;
     /** The page's last form result, when it came from one of these forms. */
     form: { action?: string; target?: string; fields?: Record<string, string> } | null;
   }
 
-  let { pages, form }: Props = $props();
+  let { pages, nextCursor = null, form }: Props = $props();
   const i18n = useI18n();
+  const infoPager = createPagedList({
+    initialItems: () => pages,
+    initialCursor: () => nextCursor,
+    keyOf: (entry) => entry.id,
+    endpoint: (cursor) => `/api/v1/info?body=1&cursor=${encodeURIComponent(cursor)}`,
+    fallbackError: () => i18n.t('common.loadMoreFailed'),
+  });
+  const allPages = $derived(infoPager.items);
 
   // R-BRD-02: each editor and the create form show only their own field errors.
   function fieldError(action: string, name: string, target?: string): string | undefined {
@@ -91,12 +101,12 @@
   </div>
   <p class="hint">{i18n.t('admin.info.hint')}</p>
 
-  {#if pages.length === 0}
+  {#if allPages.length === 0}
     <p class="muted">{i18n.t('admin.info.empty')}</p>
   {:else}
     <ul class="pages">
-      {#each pages as page (page.id)}
-        <li class="page">
+      {#each allPages as page (page.id)}
+        <li class="page" data-more-item={page.id} tabindex="-1">
           <div class="who">
             <p class="name">
               <a href={resolve('/info/[slug]', { slug: page.slug })}>{page.title}</a>
@@ -137,6 +147,10 @@
         </li>
       {/each}
     </ul>
+    <LoadMore
+      pager={infoPager}
+      href={(cursor) => `${resolve('/admin')}?infoCursor=${encodeURIComponent(cursor)}`}
+    />
   {/if}
 
   <details class="task" open={form?.action === 'infoCreate' ? true : undefined}>

@@ -97,6 +97,29 @@ export function withAuthor<T extends AuthorColumns>(row: T) {
   return { ...rest, author };
 }
 
+export async function loadAuthors(
+  database: Database,
+  ids: readonly string[],
+): Promise<Map<string, ProfileOwner>> {
+  const uniqueIds = [...new Set(ids)];
+  if (uniqueIds.length === 0) return new Map();
+  const rows = await database.db
+    .select({
+      authorId: users.id,
+      displayName: users.displayName,
+      status: users.status,
+      preferredName: users.preferredName,
+      avatarMediaId: users.avatarMediaId,
+      deletionRequestedAt: users.deletionRequestedAt,
+      visibilityJson: profileContacts.visibilityJson,
+    })
+    .from(users)
+    .leftJoin(profileContacts, eq(profileContacts.userId, users.id))
+    .where(inArray(users.id, uniqueIds))
+    .limit(uniqueIds.length);
+  return new Map(rows.map((row) => [row.authorId, withAuthor(row).author]));
+}
+
 function selectPosts(database: Database) {
   return database.db
     .select({
@@ -160,9 +183,10 @@ function toCommentRow(row: SelectedComment): CommentRow {
 /** R-BRD-06, R-DB-06, R-DB-07: board query walking `posts_pinned_activity_idx`. */
 export function buildBoardQuery(
   database: Database,
-  options: { after: PostCursor | null; limit: number },
+  options: { after: PostCursor | null; limit: number; pinnedOnly?: boolean },
 ) {
   const conditions: (SQL | undefined)[] = [isNull(posts.deletedAt)];
+  if (options.pinnedOnly) conditions.push(eq(posts.isPinned, true));
   if (options.after) {
     const pinnedInt = options.after.isPinned ? 1 : 0;
     conditions.push(
@@ -177,7 +201,7 @@ export function buildBoardQuery(
 
 export async function listBoardPosts(
   database: Database,
-  options: { after: PostCursor | null; limit: number },
+  options: { after: PostCursor | null; limit: number; pinnedOnly?: boolean },
 ): Promise<{ rows: PostRow[]; more: boolean }> {
   const rows = await buildBoardQuery(database, options);
   return { rows: rows.slice(0, options.limit).map(toPostRow), more: rows.length > options.limit };
@@ -386,7 +410,17 @@ export function buildCommentsQuery(
       sql`(${comments.createdAt}, ${comments.id}) > (${options.after.createdAt}, ${options.after.id})`,
     );
   }
-  return selectComments(database)
+  return database.db
+    .select({
+      id: comments.id,
+      postId: comments.postId,
+      authorId: comments.authorId,
+      bodyMd: comments.bodyMd,
+      createdAt: comments.createdAt,
+      updatedAt: comments.updatedAt,
+      deletedAt: comments.deletedAt,
+    })
+    .from(comments)
     .where(and(...conditions))
     .orderBy(asc(comments.createdAt), asc(comments.id))
     .limit(options.limit + 1);
@@ -418,8 +452,16 @@ export async function listPostComments(
   options: { postId: string; after: CommentCursor | null; limit: number },
 ): Promise<{ rows: CommentRow[]; more: boolean }> {
   const rows = await buildCommentsQuery(database, options);
+  const page = rows.slice(0, options.limit);
+  const authors = await loadAuthors(
+    database,
+    page.map((row) => row.authorId),
+  );
   return {
-    rows: rows.slice(0, options.limit).map(toCommentRow),
+    rows: page.flatMap((row) => {
+      const author = authors.get(row.authorId);
+      return author ? [{ ...row, author }] : [];
+    }),
     more: rows.length > options.limit,
   };
 }

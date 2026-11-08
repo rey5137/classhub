@@ -1,6 +1,6 @@
 import { applyD1Migrations, env } from 'cloudflare:test';
 import type { RequestEvent } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { errorBodySchema } from '../../src/lib/contracts/errors';
 import { inviteListSchema } from '../../src/lib/contracts/admin';
@@ -270,6 +270,61 @@ describe('admin invites API (§11.2)', () => {
     );
     expect(self.status).toBe(409);
     expect(await errorCode(self)).toBe('conflict');
+  });
+
+  it('R-AUTH-08 / R-DB-07 keyset-pages past 50 invites when accepted and revoked rows exist', async () => {
+    const longPrefix = `paged.${'a'.repeat(160)}`;
+    for (let start = 0; start < 60; start += 15) {
+      await database.db.insert(invites).values(
+        Array.from({ length: 15 }, (_, index) => {
+          const i = start + index;
+          return {
+            id: `01900000-0000-7000-8000-00000000b${String(i).padStart(3, '0')}`,
+            email: `${longPrefix}.${String(i).padStart(3, '0')}@example.test`,
+            invitedBy: PEOPLE.admin.id,
+            role: 'member' as const,
+            status: i < 40 ? ('revoked' as const) : ('pending' as const),
+          };
+        }),
+      );
+    }
+    const items: {
+      email: string;
+      status: string;
+      userStatus: string | null;
+      displayName: string | null;
+    }[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const res = await send(
+        PEOPLE.admin.email,
+        'GET',
+        `/api/v1/admin/invites${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        items: {
+          email: string;
+          status: string;
+          userStatus: string | null;
+          displayName: string | null;
+        }[];
+        nextCursor?: string | null;
+      };
+      items.push(...body.items);
+      cursor = body.nextCursor ?? null;
+      pages += 1;
+    } while (cursor);
+    expect(pages).toBeGreaterThanOrEqual(2);
+    expect(items.filter((item) => item.email.startsWith('paged.'))).toHaveLength(60);
+    // R-AUTH-08: a revoked invite whose user row was kept still carries its user columns.
+    expect(items.find((item) => item.email === PEOPLE.revoked.email)).toMatchObject({
+      status: 'revoked',
+      userStatus: 'invited',
+      displayName: 'Revoked Invite',
+    });
+    await database.db.delete(invites).where(sql`${invites.email} like 'paged.%@example.test'`);
   });
 
   it('AC-AUTH-09 invite changes past 30 per hour per admin answer 429 with Retry-After', async () => {

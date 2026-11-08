@@ -228,7 +228,7 @@ export async function homeThreads(
 ): Promise<{ pinned: PostSummary[]; active: PostSummary[] }> {
   if (!can(viewer, 'content.read')) return { pinned: [], active: [] };
   const [board, recent] = await Promise.all([
-    listBoardPosts(context.database, { after: null, limit: POSTS_PAGE }),
+    listBoardPosts(context.database, { after: null, limit: POSTS_PAGE, pinnedOnly: true }),
     listRecentPosts(context.database, {
       after: null,
       limit: HOME_ACTIVE_THREADS,
@@ -236,7 +236,7 @@ export async function homeThreads(
     }),
   ]);
   return {
-    pinned: board.rows.filter((row) => row.isPinned).map((row) => toPostSummary(viewer, row)),
+    pinned: board.rows.map((row) => toPostSummary(viewer, row)),
     active: recent.rows.map((row) => toPostSummary(viewer, row)),
   };
 }

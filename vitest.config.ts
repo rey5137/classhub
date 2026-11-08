@@ -1,10 +1,14 @@
 import { fileURLToPath } from 'node:url';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
     projects: [
       {
+        // `src/lib/client/*.svelte.ts` uses runes; compile them for the browser as the app does.
+        plugins: [svelte()],
+        resolve: { conditions: ['browser'] },
         test: {
           name: 'unit',
           include: ['tests/unit/**/*.test.ts', 'tests/contract/run-local.test.ts'],

@@ -60,7 +60,7 @@ describe('log capture', () => {
       true,
     );
     expect(
-      parsed.some((line) => line.status === 503 && String(line.error).includes('[email]')),
+      parsed.some((line) => line.status === 500 && String(line.error).includes('[email]')),
     ).toBe(true);
     for (const line of lines) expect(forbiddenInLogs(line), line).toBeNull();
     expect(lines.join('\n')).not.toContain(PEOPLE.active.id);

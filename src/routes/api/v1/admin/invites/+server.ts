@@ -4,9 +4,12 @@ import { adminCreateInvite, adminListInvites, adminRevokeInvite } from '$lib/ser
 
 // §11.2: list with Access sync status · invite · revoke (admins only, R-API-01).
 
-export const GET: RequestHandler = async ({ locals }) => {
+export const GET: RequestHandler = async ({ locals, url }) => {
   const { member, context } = guarded(locals);
-  return toResponse(locals, await adminListInvites(context, member));
+  return toResponse(
+    locals,
+    await adminListInvites(context, member, Object.fromEntries(url.searchParams)),
+  );
 };
 
 export const POST: RequestHandler = async ({ locals, request }) => {

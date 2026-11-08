@@ -16,22 +16,105 @@ const summary = {
   updatedAt: infoPages.updatedAt,
 };
 
-const order = [desc(infoPages.isPinned), asc(infoPages.sortOrder), asc(infoPages.title)];
+const order = [
+  desc(infoPages.isPinned),
+  asc(infoPages.sortOrder),
+  asc(infoPages.title),
+  asc(infoPages.id),
+];
 
-/** R-BRD-01/02: pinned first, then the admin's order, then title. */
-export async function listInfoPages(database: Database) {
-  return database.db
-    .select(summary)
+/** R-DB-07, R-BRD-02: `GET /api/v1/info`, Home's pinned list and the `/admin` editor page 50 at a time. */
+export const INFO_PAGES_LIMIT = 50;
+
+export interface InfoCursor {
+  isPinned: boolean;
+  sortOrder: number;
+  title: string;
+  id: string;
+}
+
+const afterTuple = (after: InfoCursor) =>
+  sql`(${infoPages.sortOrder}, ${infoPages.title}, ${infoPages.id}) > (${after.sortOrder}, ${after.title}, ${after.id})`;
+
+async function pageInfoRows<T extends Record<string, unknown>>(
+  database: Database,
+  selection: T,
+  options: {
+    after?: InfoCursor | null;
+    limit?: number;
+    pinnedOnly?: boolean;
+    excludeSlug?: string;
+  } = {},
+) {
+  const limit = options.limit ?? INFO_PAGES_LIMIT;
+  const target = limit + 1;
+  const base: (SQL | undefined)[] = [
+    options.pinnedOnly ? eq(infoPages.isPinned, true) : undefined,
+    options.excludeSlug ? ne(infoPages.slug, options.excludeSlug) : undefined,
+  ];
+  const { after } = options;
+  if (!after) {
+    const rows = await database.db
+      .select(selection as never)
+      .from(infoPages)
+      .where(and(...base))
+      .orderBy(...order)
+      .limit(target);
+    return { rows: rows.slice(0, limit), more: rows.length > limit };
+  }
+  if (options.pinnedOnly && !after.isPinned) {
+    return { rows: [], more: false };
+  }
+  const first = await database.db
+    .select(selection as never)
     .from(infoPages)
-    .orderBy(...order);
+    .where(and(...base, eq(infoPages.isPinned, after.isPinned), afterTuple(after)))
+    .orderBy(...order)
+    .limit(target);
+  if (first.length >= target || !after.isPinned || options.pinnedOnly) {
+    return { rows: first.slice(0, limit), more: first.length > limit };
+  }
+  const rest = await database.db
+    .select(selection as never)
+    .from(infoPages)
+    .where(and(...base, eq(infoPages.isPinned, false)))
+    .orderBy(...order)
+    .limit(target - first.length);
+  const combined = [...first, ...rest];
+  return { rows: combined.slice(0, limit), more: combined.length > limit };
+}
+
+/** R-BRD-01/02: pinned first, then the admin's order, then title, then id. */
+export async function listInfoPages(
+  database: Database,
+  options: {
+    after?: InfoCursor | null;
+    limit?: number;
+    pinnedOnly?: boolean;
+    excludeSlug?: string;
+  } = {},
+) {
+  return pageInfoRows(database, summary, options);
+}
+
+/** R-BRD-01: Home's pinned info links (excluding `reunion`, which has its own card). */
+export async function listPinnedInfoPages(
+  database: Database,
+  options: { after?: InfoCursor | null; limit?: number } = {},
+) {
+  return pageInfoRows(database, summary, {
+    ...options,
+    pinnedOnly: true,
+    excludeSlug: 'reunion',
+  });
 }
 
 /** The same list with each page's Markdown, for the `/admin` editor. */
-export async function listInfoPagesWithBody(database: Database) {
-  return database.db
-    .select({ ...summary, bodyMd: infoPages.bodyMd })
-    .from(infoPages)
-    .orderBy(...order);
+export async function listInfoPagesWithBody(
+  database: Database,
+  options: { after?: InfoCursor | null; limit?: number } = {},
+) {
+  return pageInfoRows(database, { ...summary, bodyMd: infoPages.bodyMd }, options);
 }
 
 export async function findInfoPage(database: Database, where: { id: string } | { slug: string }) {

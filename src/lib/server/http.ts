@@ -67,6 +67,7 @@ export function formFailure(
     not_found: 404,
     locked: 423,
     rate_limited: 429,
+    unavailable: 503,
   }[result.code as 'validation'];
   return fail(status ?? 409, {
     action,

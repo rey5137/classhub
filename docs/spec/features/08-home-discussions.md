@@ -14,7 +14,7 @@
   card with its title and rendered body; it is not listed again among the pinned info pages); the 12 newest photos; the 5 most recently active
   unpinned threads (pinned ones are already listed above).
 - **R-BRD-02** Admins create, edit, pin, order and delete info pages (`slug` 1–40 of `[a-z0-9-]`, title ≤ 160, body
-  Markdown ≤ 20,000). Each is reachable at `/info/[slug]`.
+  Markdown ≤ 20,000); `GET /api/v1/info`, the `/admin` editor and Home's pinned list are keyset paged on `(is_pinned DESC, sort_order, title, id)`, 50 per page (R-DB-07). Each is reachable at `/info/[slug]`.
 
 ## 8.2 Markdown
 

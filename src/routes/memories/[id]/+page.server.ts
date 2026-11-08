@@ -4,17 +4,22 @@ import { t } from '$lib/i18n';
 import { requireFeature } from '$lib/server/features';
 import { formFailure, formText, guarded } from '$lib/server/http';
 import { can } from '$lib/server/auth/permissions';
-import { deletePhoto, editPhoto, getPhoto, listAlbums } from '$lib/server/services/gallery';
+import { deletePhoto, editPhoto, getPhoto, listAlbumsPage } from '$lib/server/services/gallery';
 
 // §7.2 /memories/[id]: an unknown, deleted or malformed id is one "not found", so the
 // page never says which (R-MEM-20).
-export const load: PageServerLoad = async ({ locals, params }) => {
+export const load: PageServerLoad = async ({ locals, params, url }) => {
   requireFeature(locals, 'memories');
   const { member, context } = guarded(locals);
   const photo = await getPhoto(context, member, params.id);
   if (!photo) error(404, t(locals.locale, 'error.not_found'));
-  const albums = photo.canEdit ? await listAlbums(context, member) : [];
-  // The select lists at most 200 albums; the photo's own is always one of them, or a
+  const albumsCursor = url?.searchParams.get('albumsCursor') ?? undefined;
+  const albumsPage = photo.canEdit
+    ? await listAlbumsPage(context, member, albumsCursor ? { cursor: albumsCursor } : {})
+    : { ok: true as const, status: 200, body: { items: [], nextCursor: null } };
+  if (!albumsPage.ok) error(400, t(locals.locale, 'error.validation'));
+  const albums = [...albumsPage.body.items];
+  // The select pages 50 albums at a time; the photo's own is always one of them, or a
   // caption-only save would post "no album" and move the photo out (R-MEM-14).
   if (photo.album && !albums.some((album) => album.id === photo.album!.id))
     albums.push({ ...photo.album, yearTag: null, description: null, canEdit: false });
@@ -22,6 +27,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
     photo,
     canDelete: can(member, 'content.delete', { ownerId: photo.uploader.id }),
     albums,
+    albumsNextCursor: albumsPage.body.nextCursor,
   };
 };
 

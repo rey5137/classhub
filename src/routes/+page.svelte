@@ -2,6 +2,7 @@
   import { resolve } from '$app/paths';
   import Card from '$lib/components/Card.svelte';
   import InstallCard from '$lib/components/InstallCard.svelte';
+  import LoadMore, { createPagedList } from '$lib/components/LoadMore.svelte';
   import MarkdownBody from '$lib/components/MarkdownBody.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import PushCard from '$lib/components/PushCard.svelte';
@@ -16,6 +17,14 @@
 
   let { data }: PageProps = $props();
   const i18n = useI18n();
+  const pinnedPager = createPagedList({
+    initialItems: () => data.pinnedInfo,
+    initialCursor: () => data.pinnedInfoNextCursor,
+    keyOf: (entry) => entry.slug,
+    endpoint: (cursor) => `/api/v1/info?pinned=1&cursor=${encodeURIComponent(cursor)}`,
+    fallbackError: () => i18n.t('common.loadMoreFailed'),
+  });
+  const pinnedInfo = $derived(pinnedPager.items);
 
   const replies = (count: number) =>
     i18n.t(pluralKey(i18n.locale, 'brd.replies', count), { count });
@@ -43,11 +52,19 @@
 
   <section class="pinned" aria-labelledby="home-pinned">
     <h2 id="home-pinned">{i18n.t('home.pinned')}</h2>
-    {#if data.pinnedInfo.length || data.threads?.pinned.length}
+    {#if pinnedInfo.length || data.threads?.pinned.length}
       <Card>
-        {#each data.pinnedInfo as info (info.slug)}
-          <a class="info-link" href={resolve('/info/[slug]', { slug: info.slug })}>{info.title}</a>
+        {#each pinnedInfo as info (info.slug)}
+          <a
+            class="info-link"
+            data-more-item={info.slug}
+            href={resolve('/info/[slug]', { slug: info.slug })}>{info.title}</a
+          >
         {/each}
+        <LoadMore
+          pager={pinnedPager}
+          href={(cursor) => `${resolve('/')}?pinnedCursor=${encodeURIComponent(cursor)}`}
+        />
         {#each data.threads?.pinned ?? [] as post (post.id)}
           <PostCard
             title={post.title}
@@ -215,14 +232,6 @@
 
   .head :global(.reunion h2) {
     font: var(--text-heading);
-  }
-
-  .more {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    color: var(--color-accent);
-    font-weight: 600;
   }
 
   .wall {

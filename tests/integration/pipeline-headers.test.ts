@@ -76,7 +76,7 @@ describe('response headers on the Workers runtime', () => {
     };
     for (const [name, response] of Object.entries(responses)) expectHeaders(name, response);
     expect(responses['member page']!.status).toBe(200);
-    expect(responses['route error']!.status).toBe(503);
+    expect(responses['route error']!.status).toBe(500);
   });
 
   it('AC-AUTH-08 a rendered page keeps its script nonce and gains it on style-src', async () => {

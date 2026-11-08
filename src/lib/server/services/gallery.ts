@@ -1,8 +1,10 @@
 import { siteConfig } from '../../config';
 import {
   albumCreateSchema,
+  albumPageSchema,
   albumPatchSchema,
   albumSchema,
+  albumsQuerySchema,
   galleryItemSchema,
   galleryPageSchema,
   galleryQuerySchema,
@@ -10,6 +12,7 @@ import {
   mediaMutationResponseSchema,
   mediaPatchSchema,
   type Album,
+  type AlbumPage,
   type GalleryItem,
   type GalleryPage,
 } from '../../contracts/media';
@@ -126,11 +129,30 @@ export async function listYears(context: AppContext, viewer: Member): Promise<nu
   return can(viewer, 'content.read') ? listGalleryYears(context.database, YEAR_CHIPS) : [];
 }
 
-/** `GET /api/v1/albums`: every album by name, with whether the viewer may edit it. */
-export async function listAlbums(context: AppContext, viewer: Member): Promise<Album[]> {
-  if (!can(viewer, 'content.read')) return [];
-  const rows = await listAlbumChoices(context.database);
-  return rows.map((row) =>
+function decodeAlbumCursor(cursor: string): { name: string; id: string } | null {
+  const value = decodeCursor(cursor);
+  return value?.length === 2 && typeof value[0] === 'string' && typeof value[1] === 'string'
+    ? { name: value[0], id: value[1] }
+    : null;
+}
+
+/** `GET /api/v1/albums?cursor=&limit=`: keyset-paged albums by `(name, id)`, with edit rights (R-MEM-14, R-DB-07). */
+export async function listAlbumsPage(
+  context: AppContext,
+  viewer: Member,
+  input: unknown = {},
+): Promise<AdminResult<AlbumPage>> {
+  if (!can(viewer, 'content.read')) return denied;
+  const parsed = parse(albumsQuerySchema, input);
+  if (!parsed.ok) return parsed;
+  const after = parsed.data.cursor ? decodeAlbumCursor(parsed.data.cursor) : null;
+  if (parsed.data.cursor && !after)
+    return { ok: false, code: 'validation', fields: { cursor: 'custom' } };
+  const { rows, more } = await listAlbumChoices(context.database, {
+    after,
+    limit: parsed.data.limit,
+  });
+  const items = rows.map((row) =>
     albumSchema.parse({
       id: row.id,
       name: row.name,
@@ -139,6 +161,37 @@ export async function listAlbums(context: AppContext, viewer: Member): Promise<A
       canEdit: can(viewer, 'album.edit', { ownerId: row.createdBy }),
     }),
   );
+  const last = rows.at(-1);
+  return {
+    ok: true,
+    status: 200,
+    body: albumPageSchema.parse({
+      items,
+      nextCursor: more && last ? encodeCursor([last.name, last.id]) : null,
+    }),
+  };
+}
+
+export async function listAlbums(context: AppContext, viewer: Member): Promise<Album[]> {
+  const page = await listAlbumsPage(context, viewer);
+  return page.ok ? page.body.items : [];
+}
+
+export async function getAlbumChoice(
+  context: AppContext,
+  viewer: Member,
+  id: string,
+): Promise<Album | null> {
+  if (!can(viewer, 'content.read') || !mediaIdSchema.safeParse({ id }).success) return null;
+  const row = await findAlbum(context.database, id);
+  if (!row) return null;
+  return albumSchema.parse({
+    id: row.id,
+    name: row.name,
+    yearTag: row.yearTag,
+    description: row.description,
+    canEdit: can(viewer, 'album.edit', { ownerId: row.createdBy }),
+  });
 }
 
 export async function createAlbum(

@@ -59,7 +59,8 @@
   · `comments(post_id, created_at, id)` · `media(album_id, created_at DESC, id DESC)` ·
   `media(owner_id, created_at)` · `media(media_type, deleted_at, created_at DESC, id DESC)` (the default gallery) · `media(effective_year, created_at DESC, id DESC)` ·
   `chat_messages(room_id, created_at DESC, id DESC)` ·
-  `chat_messages(created_at)` · `users(status, display_name_norm)` · `invites(status, email)` ·
+  `chat_messages(created_at)` · `users(status, display_name_norm)` · `users(role, status)` · `invites(status, email)` ·
+  `info_pages(is_pinned DESC, sort_order, title, id)` · `albums(name, id)` ·
   `media(deleted_at, purged_at)` · `users(status, preferred_name_norm)` · `upload_reservations(state, expires_at)` · `upload_reservations(state_run_id)` · `rate_events(bucket, at)` · `audit_events(created_at)`.
 
 ## 5.4 Query rules

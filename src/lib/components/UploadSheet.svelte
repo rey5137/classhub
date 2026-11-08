@@ -10,6 +10,8 @@
   import Button from './Button.svelte';
   import Dialog from './Dialog.svelte';
   import FormField from './FormField.svelte';
+  import type { PagedList } from '$lib/client/paged-list.svelte';
+  import LoadMore from './LoadMore.svelte';
 
   // §7.1–7.2: pick, encode in the browser, preview the stored copy, then upload one
   // photo at a time. Each photo gets its own caption; album and year carry over.
@@ -19,13 +21,22 @@
   interface Props {
     open: boolean;
     albums?: { id: string; name: string }[];
+    albumsPager?: PagedList<{ id: string; name: string }>;
     purpose?: 'photo' | 'site';
     title?: string;
     onuploaded?: (mediaId: string) => void;
     onclose: () => void;
   }
 
-  let { open, albums = [], purpose = 'photo', title, onuploaded, onclose }: Props = $props();
+  let {
+    open,
+    albums = [],
+    albumsPager,
+    purpose = 'photo',
+    title,
+    onuploaded,
+    onclose,
+  }: Props = $props();
   const i18n = useI18n();
 
   type Phase = 'pick' | 'preparing' | 'ready' | 'uploading' | 'stopped' | 'done';
@@ -276,6 +287,9 @@
                   <option value={album.id}>{album.name}</option>
                 {/each}
               </select>
+              {#if albumsPager}
+                <LoadMore pager={albumsPager} variant="button" />
+              {/if}
             </div>
           {/if}
           <FormField

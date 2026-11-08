@@ -45,10 +45,19 @@ export const inviteViewSchema = z.object({
   accessSyncedAt: z.number().nullable(),
 });
 
+export const INVITES_PAGE = 50;
+
+export const invitesQuerySchema = z
+  .object({
+    cursor: z.string().trim().min(1).max(1024).optional(),
+    limit: z.coerce.number().int().min(1).max(INVITES_PAGE).default(INVITES_PAGE),
+  })
+  .strict();
+
 /** `GET /api/v1/admin/invites` (R-AUTH-10, R-AUTH-19). */
 export const inviteListSchema = z.object({
   items: z.array(inviteViewSchema),
-  nextCursor: z.null(),
+  nextCursor: z.string().nullable(),
   seats: z.object({ used: z.number(), warnAt: z.number(), limit: z.number() }),
 });
 export type InviteList = z.infer<typeof inviteListSchema>;

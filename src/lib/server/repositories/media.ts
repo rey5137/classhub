@@ -243,11 +243,20 @@ export async function releaseReservation(database: Database, row: Reservation, n
   ]);
 }
 
-/** Bounded: the upload sheet, the album filter and `GET /api/v1/albums` list at most this many, by name. */
-export const ALBUM_CHOICES = 200;
+/** R-DB-07, R-MEM-14: the upload sheet, the album filter and `GET /api/v1/albums` page 50 at a time, by `(name, id)`. */
+export const ALBUM_CHOICES = 50;
 
-export async function listAlbumChoices(database: Database) {
-  return database.db
+export interface AlbumCursor {
+  name: string;
+  id: string;
+}
+
+export async function listAlbumChoices(
+  database: Database,
+  options: { after?: AlbumCursor | null; limit?: number } = {},
+) {
+  const limit = options.limit ?? ALBUM_CHOICES;
+  const rows = await database.db
     .select({
       id: albums.id,
       name: albums.name,
@@ -256,8 +265,14 @@ export async function listAlbumChoices(database: Database) {
       createdBy: albums.createdBy,
     })
     .from(albums)
+    .where(
+      options.after
+        ? sql`(${albums.name}, ${albums.id}) > (${options.after.name}, ${options.after.id})`
+        : undefined,
+    )
     .orderBy(asc(albums.name), asc(albums.id))
-    .limit(ALBUM_CHOICES);
+    .limit(limit + 1);
+  return { rows: rows.slice(0, limit), more: rows.length > limit };
 }
 
 export async function findAlbum(database: Database, id: string) {

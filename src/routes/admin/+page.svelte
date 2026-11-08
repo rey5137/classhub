@@ -5,6 +5,7 @@
   import Button from '$lib/components/Button.svelte';
   import Card from '$lib/components/Card.svelte';
   import FormField from '$lib/components/FormField.svelte';
+  import LoadMore, { createPagedList } from '$lib/components/LoadMore.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import InfoPagesCard from './InfoPagesCard.svelte';
   import JoinRequestsCard from './JoinRequestsCard.svelte';
@@ -16,6 +17,14 @@
 
   let { data, form }: PageProps = $props();
   const i18n = useI18n();
+  const invitesPager = createPagedList({
+    initialItems: () => data.invites,
+    initialCursor: () => data.invitesNextCursor,
+    keyOf: (entry) => entry.id,
+    endpoint: (cursor) => `/api/v1/admin/invites?cursor=${encodeURIComponent(cursor)}`,
+    fallbackError: () => i18n.t('common.loadMoreFailed'),
+  });
+  const invites = $derived(invitesPager.items);
 
   // R-AUTH-19: warn from 45 seats, refuse at 50.
   const seatsFull = $derived(data.seats.used >= data.seats.limit);
@@ -150,12 +159,12 @@
     <div class="head">
       <h2 id="list-head">{i18n.t('admin.list')}</h2>
     </div>
-    {#if data.invites.length === 0}
+    {#if invites.length === 0}
       <p class="muted">{i18n.t('admin.empty')}</p>
     {:else}
       <ul class="people">
-        {#each data.invites as invite (invite.id)}
-          <li class="person">
+        {#each invites as invite (invite.id)}
+          <li class="person" data-more-item={invite.id} tabindex="-1">
             <div class="who">
               <p class="name">
                 {invite.displayName ?? invite.email}
@@ -284,6 +293,10 @@
           </li>
         {/each}
       </ul>
+      <LoadMore
+        pager={invitesPager}
+        href={(cursor) => `${resolve('/admin')}?invitesCursor=${encodeURIComponent(cursor)}`}
+      />
     {/if}
     <!-- R-AUTH-18: the Worker holds no Cloudflare token; the policy changes from the CLI. -->
     {#if data.accessEvaluation}
@@ -381,7 +394,7 @@
 
   <SiteSettingsCard settings={data.settings} themes={data.themes} form={form ?? null} />
 
-  <InfoPagesCard pages={data.infoPages} form={form ?? null} />
+  <InfoPagesCard pages={data.infoPages} nextCursor={data.infoPagesNextCursor} form={form ?? null} />
 </div>
 
 <style>

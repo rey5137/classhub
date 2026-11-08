@@ -106,7 +106,7 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
   directory is ever deleted, and never the archive this run wrote. The output directory holds one site's snapshots
   (several sites need their own). A file that cannot be deleted is reported; the rest still go and the run still
   succeeds. Completed deletion requests age out of backups
-  with this schedule (R-PROF-12).
+  with this schedule (R-PROF-12); `export-chat` archives have no retention period (the admins delete them). After any restore the admins re-apply deletions completed since that backup (`docs/BACKUP_RESTORE.md`): complete the request again if the restored data still holds it, else suspend the account and ask the person to request deletion again (no admin-initiated deletion exists).
 - **R-BAK-12** D1 Time Travel (point-in-time recovery) is a convenience, not a backup.
 
 ## 13.4 Disaster recovery

@@ -39,16 +39,28 @@ export const infoSummarySchema = z.object({
   id: z.string(),
   slug: z.string(),
   title: z.string(),
+  bodyMd: z.string().optional(),
   isPinned: z.boolean(),
   sortOrder: z.number().int(),
   updatedAt: z.number().int(),
 });
 export type InfoSummary = z.infer<typeof infoSummarySchema>;
 
-/** `GET /api/v1/info`: pinned first, then `sort_order`, then title (R-API-03 shape; one page). */
+export const INFO_PAGES_LIMIT = 50;
+
+export const infoQuerySchema = z
+  .object({
+    cursor: z.string().trim().min(1).max(1024).optional(),
+    limit: z.coerce.number().int().min(1).max(INFO_PAGES_LIMIT).default(INFO_PAGES_LIMIT),
+    pinned: z.enum(['1', 'true']).optional(),
+    body: z.enum(['1', 'true']).optional(),
+  })
+  .strict();
+
+/** `GET /api/v1/info`: pinned first, then `sort_order`, then title, then id (R-API-03, R-DB-07). */
 export const infoListSchema = z.object({
   items: z.array(infoSummarySchema),
-  nextCursor: z.null(),
+  nextCursor: z.string().nullable(),
 });
 export type InfoList = z.infer<typeof infoListSchema>;
 
