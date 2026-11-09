@@ -1,0 +1,61 @@
+name: Deploy
+
+# Off by default. Set the repository variable ENABLE_DEPLOY to 'true' and run this
+# workflow manually; without it every job is skipped. It never runs on push.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.ENABLE_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    # Set required reviewers on this environment (see docs/DEPLOY_CLOUDFLARE.md).
+    environment: production
+    steps:
+      # Actions are pinned to full commit SHAs (looked up with git ls-remote).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      # scripts/cf.mjs reads .env.cloudflare, never an inherited login.
+      - name: Write the guarded account configuration
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCESS_TEAM_DOMAIN: ${{ secrets.ACCESS_TEAM_DOMAIN }}
+          ACCESS_AUD: ${{ secrets.ACCESS_AUD }}
+          AGE_RECIPIENT: ${{ secrets.AGE_RECIPIENT }}
+        run: |
+          {
+            printf 'CLOUDFLARE_ACCOUNT_ID=%s\n' "$CLOUDFLARE_ACCOUNT_ID"
+            printf 'CLOUDFLARE_API_TOKEN=%s\n' "$CLOUDFLARE_API_TOKEN"
+            if [ -n "$ACCESS_TEAM_DOMAIN" ]; then printf 'ACCESS_TEAM_DOMAIN=%s\n' "$ACCESS_TEAM_DOMAIN"; fi
+            if [ -n "$ACCESS_AUD" ]; then printf 'ACCESS_AUD=%s\n' "$ACCESS_AUD"; fi
+            if [ -n "$AGE_RECIPIENT" ]; then printf 'AGE_RECIPIENT=%s\n' "$AGE_RECIPIENT"; fi
+          } > .env.cloudflare
+
+      # wrangler.jsonc is gitignored (it holds the account and binding ids). Store the
+      # generated file as the WRANGLER_JSONC secret, from the same checkout's setup run.
+      - name: Write the generated Worker configuration
+        env:
+          WRANGLER_JSONC: ${{ secrets.WRANGLER_JSONC }}
+        run: printf '%s\n' "$WRANGLER_JSONC" > wrangler.jsonc
+
+      - name: Deploy through the account guard
+        run: npm run deploy
+
+      - name: Remove the local configuration
+        if: always()
+        run: rm -f .env.cloudflare wrangler.jsonc

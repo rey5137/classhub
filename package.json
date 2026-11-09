@@ -23,6 +23,7 @@
     "test:security": "vitest run --project security --project security-workers",
     "test:e2e": "playwright test",
     "screenshots": "node scripts/screenshots.mjs",
+    "ac:report": "node scripts/ac-report.mjs",
     "setup": "node scripts/setup.mjs",
     "preflight": "node scripts/preflight.mjs",
     "unlock": "node scripts/unlock.mjs",
@@ -39,7 +40,7 @@
     "export-chat": "node --import tsx scripts/export-chat.mjs",
     "prune-chat": "node --import tsx scripts/prune-chat.mjs",
     "db:migrate:remote": "node scripts/db-migrate-remote.mjs",
-    "verify": "npm run lint && npm run check && npm run test && npm run test:migrations && npm run test:security && npm run build && npm run build:worker-check",
+    "verify": "npm run lint && npm run ac:report && npm run check && npm run test && npm run test:migrations && npm run test:security && npm run build && npm run build:worker-check",
     "deploy": "node scripts/cf.mjs --check-deploy && node scripts/deploy-check.mjs && npm run build && npm run build:worker-check && node scripts/cf.mjs deploy"
   },
   "devDependencies": {

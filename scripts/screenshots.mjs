@@ -230,7 +230,9 @@ async function run() {
       for (const { width, height } of sizes) {
         await page.setViewportSize({ width, height });
         const response = await page.goto(url(target, theme, mode), { waitUntil: 'load' });
-        if (!response || response.status() !== 200) {
+        // /denied is the uniform denial page and answers 403 by design (R-AUTH-03).
+        const expected = route === '/denied' ? [200, 403] : [200];
+        if (!response || !expected.includes(response.status())) {
           throw new Error(`${route} ${theme}/${mode} ${width} returned ${response?.status()}`);
         }
         await page.waitForFunction(
@@ -255,9 +257,13 @@ async function run() {
         const folder = path.join(OUT, `${theme}-${mode}`, `${width}`);
         await mkdir(folder, { recursive: true });
         const file = path.join(folder, `${slug(route)}.png`);
-        // /chat scrolls to its newest message under a pinned composer: a full-page shot
-        // would draw the sticky bars mid-page, so it shows the viewport as a member sees it.
-        await page.screenshot({ path: file, fullPage: route !== '/chat' });
+        // /chat scrolls to its newest message under a pinned composer: a full-page shot would
+        // draw the bars mid-page, so these show the viewport as a member sees it.
+        const viewportOnly = ['/chat', '/home-install-card'].includes(route);
+        // Full-page shots would draw the fixed bottom tabs and sticky top bar mid-page.
+        if (!viewportOnly)
+          await page.addStyleTag({ content: '.tabs, .top { position: static !important; }' });
+        await page.screenshot({ path: file, fullPage: !viewportOnly });
 
         if (slice) {
           await mkdir(COPY_DIR, { recursive: true });

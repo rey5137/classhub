@@ -52,7 +52,7 @@ Access application created in a different account does **not** protect the Worke
 ## 3. Quick start
 
 ```bash
-git clone https://github.com/<OWNER>/classhub.git && cd classhub && npm ci
+git clone https://github.com/rey5137/classhub.git && cd classhub && npm ci
 cp .env.cloudflare.example .env.cloudflare   # fill CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN
 npm run setup        # D1, private R2, wrangler.jsonc, secrets, migrations, bootstrap admin invite
 npm run deploy       # deploys locked
@@ -131,6 +131,27 @@ through the account guard (`node scripts/cf.mjs …`), never `npx wrangler`.
 
 A first deploy before Access exists is safe: with no `ACCESS_*` values every page shows `/locked` and nothing private
 is reachable (R-AUTH-12).
+
+### Optional: deploy from GitHub Actions
+
+`.github/workflows/deploy.yml` is off by default. It runs only when you start it by hand (`workflow_dispatch`) **and**
+the repository variable `ENABLE_DEPLOY` is `true`; it never runs on a push.
+The job uses the `production` environment: in the repository settings, add required reviewers to it so a deploy
+needs a second approval. Runs queue one at a time and are never cancelled midway. The actions are pinned to commit
+SHAs.
+
+Store these repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | What it is |
+|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` | the dedicated account id from `.env.cloudflare` |
+| `CLOUDFLARE_API_TOKEN` | the account-scoped token from section 2 |
+| `WRANGLER_JSONC` | the whole generated `wrangler.jsonc` from a working checkout (it is gitignored because it holds the account and binding ids) |
+| `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` | optional; written to `.env.cloudflare` so `deploy` refreshes the Worker vars |
+| `AGE_RECIPIENT` | optional; kept for other commands that read `.env.cloudflare` |
+
+The workflow writes `.env.cloudflare` and `wrangler.jsonc` from those secrets, runs `npm run deploy` (which goes
+through `scripts/cf.mjs`, INV-9), and deletes both files at the end. No other remote command is allowed from it.
 
 ## 6. Access and Google
 

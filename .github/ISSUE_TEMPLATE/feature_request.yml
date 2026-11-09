@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest a change that fits the product boundary in the spec.
+title: 'feat: '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Class Hub is deliberately small: one class per deployment, no public social features, no video, no chat
+        attachments. Read docs/spec/SPEC.md §1 and §D before proposing a feature. Do not include real member data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that the app does not let you do today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What should happen, and for whom? Note any rule or acceptance criterion it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other ways to solve the problem, including doing nothing.
+    validations:
+      required: false
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Product boundary
+      options:
+        - label: This request keeps one class per deployment and does not add a public, unauthenticated surface.
+          required: true
+        - label: This request does not require real member data to be shared publicly.
+          required: true

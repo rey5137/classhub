@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in Class Hub does not work as the spec says.
+title: 'bug: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include real member data, photos, emails, Cloudflare account ids or
+        tokens. Use synthetic examples. For a security vulnerability, do not open an issue: see SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The release tag or the commit you are running (`git rev-parse --short HEAD`).
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you did, in order, and what happened.
+      placeholder: |
+        1. Open /memories
+        2. Upload a photo
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What the spec or the docs say should happen. Cite the rule id if you know it.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser, device, operating system, and whether the site runs locally or on Cloudflare.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Paste only synthetic or redacted output. Screenshots must use the demo seed.
+    validations:
+      required: false

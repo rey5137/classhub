@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PUSH_CARD_DISMISS_MS, pushCardVisible } from '../../src/lib/client/push';
 
 // AC-NTF-15 (R-NTF-14)
-describe('pushCardVisible', () => {
+describe('AC-NTF-15 pushCardVisible', () => {
   const now = 1_800_000_000_000;
   const base = {
     installed: true,

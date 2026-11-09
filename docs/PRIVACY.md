@@ -115,7 +115,8 @@ From `/profile` you can:
 
 - **Change who sees each field** at any time. The change applies at once.
 - **Download your data**: a file with your own profile, contact details, posts, comments, chat messages and photo
-  details, with links to your photos. It contains no other member's contact details.
+  details, with links to your photos, plus your notification kinds, mute setting and device labels (never push
+  endpoints or keys). It contains no other member's contact details.
 - **Clear your profile**: empties every optional field and removes your profile picture. Both leave the site at once;
   the picture's files are purged after the grace period.
 - **Ask for your account to be deleted.** From the moment you ask, your contact details are hidden from everyone but

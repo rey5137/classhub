@@ -11,6 +11,12 @@ import { takeRateLimit } from '../../src/lib/server/services/rate-limit';
 import { actions as adminActions } from '../../src/routes/admin/+page.server';
 import { load as setupLoad } from '../../src/routes/admin/setup/+page.server';
 import * as invitesApi from '../../src/routes/api/v1/admin/invites/+server';
+import * as infoApi from '../../src/routes/api/v1/admin/info/+server';
+import * as infoItemApi from '../../src/routes/api/v1/admin/info/[id]/+server';
+import * as joinRequestsApi from '../../src/routes/api/v1/admin/join-requests/+server';
+import * as joinRequestApi from '../../src/routes/api/v1/admin/join-requests/[id]/+server';
+import * as inviteEmailApi from '../../src/routes/api/v1/admin/invites/[id]/email/+server';
+import * as settingsApi from '../../src/routes/api/v1/admin/settings/+server';
 import * as membersApi from '../../src/routes/api/v1/admin/members/[id]/+server';
 import { PEOPLE, seedMembership, setSetupState } from '../fixtures/membership';
 import { createHarness, ORIGIN, recordingHub, type Harness } from '../fixtures/pipeline-harness';
@@ -21,6 +27,12 @@ type Handler = (event: RequestEvent) => Response | Promise<Response>;
 const handlers: Record<string, Record<string, Handler>> = {
   '/api/v1/admin/invites': invitesApi as unknown as Record<string, Handler>,
   '/api/v1/admin/members': membersApi as unknown as Record<string, Handler>,
+  '/api/v1/admin/settings': settingsApi as unknown as Record<string, Handler>,
+  '/api/v1/admin/info': infoApi as unknown as Record<string, Handler>,
+  '/api/v1/admin/join-requests': joinRequestsApi as unknown as Record<string, Handler>,
+  '/api/v1/admin/info/[id]': infoItemApi as unknown as Record<string, Handler>,
+  '/api/v1/admin/join-requests/[id]': joinRequestApi as unknown as Record<string, Handler>,
+  '/api/v1/admin/invites/[id]/email': inviteEmailApi as unknown as Record<string, Handler>,
 };
 
 async function route(event: RequestEvent): Promise<Response> {
@@ -40,8 +52,14 @@ async function route(event: RequestEvent): Promise<Response> {
     });
   }
   const base = event.url.pathname.replace(/\/[^/]+$/, '');
+  // Routes with an id segment are keyed by their template.
+  const template = event.url.pathname
+    .replace(/^(\/api\/v1\/admin\/(?:info|join-requests))\/[^/]+$/, '$1/[id]')
+    .replace(/^(\/api\/v1\/admin\/invites)\/[^/]+\/email$/, '$1/[id]/email');
   const handler =
-    handlers[event.url.pathname]?.[event.request.method] ?? handlers[base]?.[event.request.method];
+    handlers[template]?.[event.request.method] ??
+    handlers[event.url.pathname]?.[event.request.method] ??
+    handlers[base]?.[event.request.method];
   if (!handler) return new Response('no route', { status: 404 });
   return handler(event);
 }
@@ -98,7 +116,7 @@ describe('/admin form actions', () => {
     return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   }
 
-  it('AC-NAV-02 refuses each action to a member and changes nothing', async () => {
+  it('AC-NAV-02 AC-API-02 refuses each action to a member and changes nothing', async () => {
     const state = () =>
       database.db.select({ id: users.id, status: users.status, role: users.role }).from(users);
     const before = await state();
@@ -162,7 +180,7 @@ describe('/admin form actions', () => {
 });
 
 describe('admin invites API (§11.2)', () => {
-  it('AC-NAV-02 refuses every invite and member action to a member, through the API', async () => {
+  it('AC-NAV-02 AC-API-02 refuses every invite and member action to a member, through the API', async () => {
     const calls: [string, string, unknown?, Record<string, string>?][] = [
       ['GET', '/api/v1/admin/invites'],
       ['POST', '/api/v1/admin/invites', { email: 'x@example.test', displayName: 'X' }],
@@ -180,6 +198,19 @@ describe('admin invites API (§11.2)', () => {
         { id: PEOPLE.active.id },
       ],
     ];
+    const other = '01900000-0000-7000-8000-0000000000b1';
+    const byId = { id: other };
+    calls.push(
+      ['GET', '/api/v1/admin/settings'],
+      ['PATCH', '/api/v1/admin/settings', {}],
+      ['GET', '/api/v1/admin/join-requests'],
+      ['POST', `/api/v1/admin/join-requests/${other}`, {}, byId],
+      ['DELETE', `/api/v1/admin/join-requests/${other}`, undefined, byId],
+      ['POST', '/api/v1/admin/info', {}],
+      ['PATCH', `/api/v1/admin/info/${other}`, {}, byId],
+      ['DELETE', `/api/v1/admin/info/${other}`, undefined, byId],
+      ['POST', `/api/v1/admin/invites/${other}/email`, {}, byId],
+    );
     for (const [method, path, body, params] of calls) {
       const response = await send(PEOPLE.active.email, method, path, body, params);
       expect([method, path, response.status]).toEqual([method, path, 403]);

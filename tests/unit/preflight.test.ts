@@ -426,6 +426,29 @@ describe('preflight (R-OPS-10)', () => {
   });
 });
 
+describe('preflight media bucket privacy (AC-MEM-08, R-MEM-16)', () => {
+  const bucket = async () => (await preflight()).find((check) => check.id === 'bucket');
+
+  it('AC-MEM-08 fails when the bucket has a public r2.dev URL', async () => {
+    box.writeState({ ...box.readState(), devUrl: { 'classhub-media': true } });
+    const check = await bucket();
+    expect(check).toMatchObject({ status: 'fail' });
+    expect(check?.detail).toContain('public r2.dev URL enabled');
+    expect(check?.fix).toContain('dev-url disable');
+  });
+
+  it('AC-MEM-08 fails when a custom domain is attached to the bucket', async () => {
+    box.writeState({
+      ...box.readState(),
+      customDomains: { 'classhub-media': ['media.example.test'] },
+    });
+    const check = await bucket();
+    expect(check).toMatchObject({ status: 'fail' });
+    expect(check?.detail).toContain('a custom domain is connected');
+    expect(check?.fix).toContain('remove custom domains');
+  });
+});
+
 describe('preflight admin rule and probe (R-OPS-10, R-AUTH-12)', () => {
   const secondAdmin = () =>
     sql(
