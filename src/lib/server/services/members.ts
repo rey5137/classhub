@@ -423,18 +423,24 @@ export function tombstoneEmail(userId: string): string {
  * the live one, R-NAV-06 holds), so a refused or repeated completion changes nothing.
  * The content goes first, then the invite and contacts, and the `users` row last,
  * since its update ends the guard. Authorship rows keep their foreign keys (R-DB-04).
+ *
+ * R-PROF-11a: `onBehalf` completes it for a suspended account with no request standing
+ * (one completed on the old site before a restore), with the admin's keep/delete choice:
+ * the same batch, only the guard and the audit action differ. A repeat is refused.
  */
 export async function completeDeletion(
   services: MemberServices,
   actor: Member,
   userId: string,
   now: number = Date.now(),
+  onBehalf?: { keepContent: boolean },
 ): Promise<Outcome<{ changed: boolean }>> {
   const { database } = services;
   const { db } = database;
   const rows = await db
     .select({
       authEmail: users.authEmail,
+      status: users.status,
       deletionRequestedAt: users.deletionRequestedAt,
       deletionKeepContent: users.deletionKeepContent,
     })
@@ -444,18 +450,28 @@ export async function completeDeletion(
   const row = rows[0];
   if (!row) return { ok: false, refusal: 'not_found' };
   const tombstone = tombstoneEmail(userId);
-  if (row.authEmail === tombstone) return { ok: true, changed: false };
-  if (row.deletionRequestedAt === null) return { ok: false, refusal: 'wrong_status' };
+  if (row.authEmail === tombstone) {
+    return onBehalf ? { ok: false, refusal: 'wrong_status' } : { ok: true, changed: false };
+  }
+  if (onBehalf) {
+    // A standing request is completed as the member chose it, never overridden here.
+    if (row.status !== 'suspended' || row.deletionRequestedAt !== null) {
+      return { ok: false, refusal: 'wrong_status' };
+    }
+  } else if (row.deletionRequestedAt === null) return { ok: false, refusal: 'wrong_status' };
 
   const guard = and(
     eq(users.id, userId),
     eq(users.authEmail, row.authEmail),
-    isNotNull(users.deletionRequestedAt),
+    onBehalf
+      ? and(eq(users.status, 'suspended'), isNull(users.deletionRequestedAt))
+      : isNotNull(users.deletionRequestedAt),
     keepsAnAdmin(),
   );
   const live = sql`exists (select 1 from ${users} where ${guard})`;
+  const keepContent = onBehalf ? onBehalf.keepContent : row.deletionKeepContent;
   // Deleted content keeps no text: the row stays for its foreign keys, the words go.
-  const content = row.deletionKeepContent
+  const content = keepContent
     ? []
     : [
         db
@@ -501,7 +517,7 @@ export async function completeDeletion(
       db,
       {
         actorId: actor.id,
-        action: 'member.deletion_completed',
+        action: onBehalf ? 'deletion.completed_on_behalf' : 'member.deletion_completed',
         entityType: 'user',
         entityId: userId,
         createdAt: now,
@@ -543,7 +559,7 @@ export async function completeDeletion(
       .where(eq(users.id, userId));
     if (!current) return { ok: false, refusal: 'not_found' };
     // A concurrent completion won: the same end state.
-    if (current.authEmail === tombstone) return { ok: true, changed: false };
+    if (current.authEmail === tombstone && !onBehalf) return { ok: true, changed: false };
     if (current.role === 'admin' && current.status === 'active') {
       return { ok: false, refusal: 'last_admin' };
     }

@@ -20,14 +20,10 @@
     keyOf: (entry) => entry.id,
     endpoint: (cursor) => `/api/v1/albums?cursor=${encodeURIComponent(cursor)}`,
     fallbackError: () => i18n.t('common.loadMoreFailed'),
-    focusItem: (key) => {
-      if (typeof document === 'undefined') return null;
-      if (uploading) return document.querySelector<HTMLElement>('#upload-album');
-      for (const el of document.querySelectorAll<HTMLElement>('[data-more-item]')) {
-        if (el.dataset.moreItem === key) return el;
-      }
-      return null;
-    },
+    focusItem: () =>
+      uploading && typeof document !== 'undefined'
+        ? document.querySelector<HTMLElement>('#upload-album')
+        : null,
     focusFallback: () =>
       typeof document !== 'undefined' ? document.querySelector<HTMLElement>('#upload-album') : null,
   });

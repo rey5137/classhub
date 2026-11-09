@@ -1,5 +1,5 @@
 import { and, asc, eq, gt, isNull, sql } from 'drizzle-orm';
-import type { ReservationInput, CompleteInput } from '../../contracts/media';
+import { ALBUMS_PAGE, type ReservationInput, type CompleteInput } from '../../contracts/media';
 import { siteConfig } from '../../config';
 import {
   albums,
@@ -243,9 +243,6 @@ export async function releaseReservation(database: Database, row: Reservation, n
   ]);
 }
 
-/** R-DB-07, R-MEM-14: the upload sheet, the album filter and `GET /api/v1/albums` page 50 at a time, by `(name, id)`. */
-export const ALBUM_CHOICES = 50;
-
 export interface AlbumCursor {
   name: string;
   id: string;
@@ -255,7 +252,7 @@ export async function listAlbumChoices(
   database: Database,
   options: { after?: AlbumCursor | null; limit?: number } = {},
 ) {
-  const limit = options.limit ?? ALBUM_CHOICES;
+  const limit = options.limit ?? ALBUMS_PAGE;
   const rows = await database.db
     .select({
       id: albums.id,

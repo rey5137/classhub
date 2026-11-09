@@ -452,7 +452,7 @@ describe('export-chat', () => {
     expect(ndjsonSha256(readFileSync(out, 'utf8'))).toBe(row!.sha256);
   });
 
-  it('AC-PROF-05 a completed delete-content deletion is absent from the archive', async () => {
+  it('AC-PROF-06 a completed delete-content deletion is absent from the archive', async () => {
     await seedDeletionUsers(false);
     await seedMessages(10, 6, [], (index) => ([0, 2, 4].includes(index) ? 'u3' : 'u1'));
     await completeSeedDeletion();

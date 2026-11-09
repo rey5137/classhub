@@ -28,6 +28,8 @@ export const memberPatchSchema = z.union([
   z.object({ status: z.enum(['active', 'suspended']) }).strict(),
   // R-PROF-11: complete the member's standing deletion request.
   z.object({ deletion: z.literal('complete') }).strict(),
+  // R-PROF-11a: complete it for a suspended account with no request, as the admin chooses.
+  z.object({ deletion: z.literal('on_behalf'), keepContent: z.boolean() }).strict(),
 ]);
 
 export const inviteViewSchema = z.object({

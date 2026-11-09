@@ -181,12 +181,16 @@ export const actions: Actions = {
     // R-PROF-11: the tombstone replaces the login email, so read it first; the admin
     // still has to drop it from the Access policy, and sees it only on success.
     const email = deletion ? await findAuthEmail(context.database.db, userId) : null;
-    const result = await adminPatchMember(
-      context,
-      member,
-      userId,
-      role ? { role } : deletion ? { deletion } : { status },
-    );
+    // R-PROF-11a: the on-behalf form carries the admin's keep/delete choice.
+    const keep = formText(form, 'keepContent');
+    const change = role
+      ? { role }
+      : deletion === 'on_behalf'
+        ? { deletion, keepContent: keep === 'true' ? true : keep === 'false' ? false : keep }
+        : deletion
+          ? { deletion }
+          : { status };
+    const result = await adminPatchMember(context, member, userId, change);
     if (!result.ok) return formFailure('member', locals, result);
     if (deletion && result.body.changed && email) {
       return { action: 'member', done: 'deleted', email };

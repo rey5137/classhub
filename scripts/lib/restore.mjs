@@ -31,7 +31,7 @@ import {
   RESTORE_TARGET_TABLES,
   restoreCountSelect,
 } from './backup-sql.mjs';
-import { d1Remote, reason } from './cf-child.mjs';
+import { bucketExposures, d1Remote, reason } from './cf-child.mjs';
 import { compareMigrations, localMigrations } from './migrations.mjs';
 import {
   CHECKSUMS,
@@ -466,6 +466,12 @@ async function restoreNew(target, dir, manifest, plan, expectedRows, tmpRoot, ou
   if (listed.objects.length)
     throw new RestoreError(
       `bucket ${target.bucket} is not empty; restore only into a new, empty bucket.`,
+    );
+  // INV-3: no photo goes into a bucket with a public address; refuse on any doubt, before the import.
+  const exposures = bucketExposures(run, target.bucket);
+  if (exposures.length)
+    throw new RestoreError(
+      `bucket ${target.bucket}: ${exposures.join('; ')}. Disable the r2.dev URL and remove custom domains (node scripts/cf.mjs r2 bucket dev-url disable ${target.bucket}), then run restore again; nothing restored.`,
     );
 
   const partial = `The new database and bucket may be partly written; nothing touched the live site. Delete ${database} and ${target.bucket} (or make new ones) and run restore again.`;

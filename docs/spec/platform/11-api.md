@@ -54,7 +54,7 @@
 | `GET` · `POST` · `DELETE` | `/api/v1/admin/invites` | list with Access sync status · invite · revoke |
 | `POST` | `/api/v1/admin/invites/:id/email` | send the invite email (R-AUTH-31) |
 | `GET` · `POST` · `DELETE` | `/api/v1/admin/join-requests[/:id]` | pending requests · approve · reject (R-AUTH-30) |
-| `PATCH` | `/api/v1/admin/members/:id` | role, suspend, reactivate, complete deletion |
+| `PATCH` | `/api/v1/admin/members/:id` | role, suspend, reactivate, complete deletion (`{deletion: 'complete'}`), delete on a suspended person's behalf (`{deletion: 'on_behalf', keepContent}`, R-PROF-11a) |
 | `POST` | `/api/v1/admin/info` | create an info page (R-BRD-02) |
 | `PATCH` · `DELETE` | `/api/v1/admin/info/:id` | edit, pin, order · delete an info page |
 | `GET` | `/api/v1/admin/usage` | quota, operations estimate, seats, backup and archive status |

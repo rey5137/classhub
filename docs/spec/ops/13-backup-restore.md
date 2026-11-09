@@ -65,7 +65,7 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
   is no `--no-encrypt`. `export-chat` archives are encrypted the same way (R-CHAT-14). The docs explain keeping the
   identity key apart from the archive and off the machine that holds the archive.
 - **R-BAK-06** **`npm run restore -- <archive> --target new`** restores into a **new, empty** D1 database and bucket
-  named by flags. It refuses a database holding any table (so any row), a **non-empty bucket**, and any database id or
+  named by flags. It refuses a database holding any table (so any row), a **non-empty bucket**, a bucket with the r2.dev URL on or a custom domain attached (or whose public access cannot be read; INV-3, checked with preflight's read before anything is written), and any database id or
   bucket name equal to the live binding in `wrangler.jsonc`. Order: verify (R-BAK-04); import the SQL, which ends by
   emptying `push_subscriptions` (they belong to the old site's VAPID key and devices; members turn push on again,
   R-NTF-11), clearing `users.access_sub` (the new Access application issues new subjects; accounts re-link by verified email on first login, R-AUTH-25, R-BAK-14) and setting `setup_state='locked'` so `preflight` and `unlock` must run on the new instance before it serves anyone; copy the objects; then re-verify hashes and references and run the integrity checks (every foreign key resolves; every media row has its objects; the counts, the empty `push_subscriptions`, no `access_sub` and the lock) with read-only queries.
@@ -98,7 +98,7 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
 | Every 3 months | test restore to `--target local` | local |
 | Before chat pruning | verified chat NDJSON archive (R-CHAT-14) | off-provider location |
 
-- **R-BAK-10** The live R2 bucket is never the only backup destination; the S3 client only reads from the live bucket for a backup and never deletes or syncs (R-BAK-17); `restore --target new` writes only into the new, empty bucket, with its own `R2_RESTORE_*` pair (R-BAK-06).
+- **R-BAK-10** The live R2 bucket is never the only backup destination. `backup` and `verify-backup` only read the live bucket and never delete or sync (R-BAK-17); `restore` never deletes anywhere and writes only into the new, empty bucket with its own `R2_RESTORE_*` pair (R-BAK-06). The only deletes through the S3 client are housekeeping's, on the live bucket: media past `deletedMediaGraceDays` and stale `staging/` objects (R-MEM-12, R-MEM-20).
 - **R-BAK-11** **Retention:** keep the last 12 weekly and 12 monthly snapshots (each a full, self-contained copy, so deleting a snapshot is the only way a deleted member's photos age out); `npm run backup -- --prune-old`
   deletes older local snapshots only after the newest one verified: a snapshot stays when it is the newest in one of
   the 12 most recent ISO weeks (UTC) holding a snapshot, or in one of the 12 most recent months that do, so a gap in
@@ -106,7 +106,7 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
   directory is ever deleted, and never the archive this run wrote. The output directory holds one site's snapshots
   (several sites need their own). A file that cannot be deleted is reported; the rest still go and the run still
   succeeds. Completed deletion requests age out of backups
-  with this schedule (R-PROF-12); `export-chat` archives have no retention period (the admins delete them). After any restore the admins re-apply deletions completed since that backup (`docs/BACKUP_RESTORE.md`): complete the request again if the restored data still holds it, else suspend the account and ask the person to request deletion again (no admin-initiated deletion exists).
+  with this schedule (R-PROF-12); `export-chat` archives have no retention period (the admins delete them). After any restore the admins re-apply deletions completed since that backup (`docs/BACKUP_RESTORE.md`): complete the request again if the restored data still holds it, else suspend the account and complete the deletion on the person's behalf (R-PROF-11a: admin-initiated, audited, only for a request completed on the old site), with the keep or delete content choice they made there.
 - **R-BAK-12** D1 Time Travel (point-in-time recovery) is a convenience, not a backup.
 
 ## 13.4 Disaster recovery
@@ -115,7 +115,7 @@ encrypted `classhub-backup-<ts>.tar.age` (R-BAK-05).
 2. `verify-backup` the archive.
 3. `restore --target new`, which imports (same schema version only, no migration, R-BAK-06), copies and re-verifies.
 4. Run the smoke and permission tests against the restored instance.
-5. Run `preflight` and `unlock` on the restored instance (it restores locked, R-BAK-06); configure Access for the new hostname and confirm the admin.
+5. Run `preflight` and `unlock` on the restored instance (it restores locked, R-BAK-06); configure Access for the new hostname so it admits only the admins (an Emails rule with only their addresses, no External Evaluation rule), and confirm the admin. Re-apply the deletions completed since the backup (R-PROF-11a) before any non-admin signs in, then open Access to the members (the External Evaluation rule, or their emails added to the policy).
 6. Cut over the domain only after the restore is tested; revoke old tokens.
 
 ## 13.5 Leaving Cloudflare

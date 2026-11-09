@@ -126,9 +126,11 @@ sequenceDiagram
   interrupted run resumes from the remaining rows and `purged_at` is set only when the range holds nothing but those
   tombstones (R-CHAT-14). It holds the backup lock of R-BAK-03 for the whole run.
 - **R-CHAT-15** Archives are not shown in the UI; an admin restores one with `npm run restore -- --chat <file>`. **`restore --chat` is insert-only**
-  (`INSERT … ON CONFLICT DO NOTHING`, never update or delete, so it cannot contradict R-BAK-08), skips messages of
-  completed deletion requests (R-PROF-11) and messages deleted after the export (their tombstone's id is still there,
-  R-CHAT-14), and refuses to run unless a verified backup of the current database
+  (`INSERT … ON CONFLICT DO NOTHING`, never update or delete, so it cannot contradict R-BAK-08), inserts only messages
+  whose sender is `active` (a completed deletion, R-PROF-11 or 11a, a suspension, or an `invited` row not yet signed
+  in again after a restore skips them; run it again once the member is reinstated or has signed in), skips messages
+  deleted after the export (their tombstone's id is still there, R-CHAT-14), and refuses to run unless a verified
+  backup of the current database
   exists first (R-BAK-03).
   Members can't bulk-export the chat; admins export it through the CLI only. Pruning and archives honour completed
   deletion requests (R-PROF-11): a member's deleted messages are omitted from later archives.

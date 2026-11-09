@@ -58,6 +58,15 @@
   to admins, and **from that moment** `projectProfile` hides all of the member's contact fields (R-PROF-13). An admin completes it: the member is suspended, the profile and contacts are cleared, `display_name`
   becomes the localized *Former member*, `auth_email` is replaced by a tombstone (`deleted+<id>@invalid`, lower-case so it satisfies the `auth_email` `CHECK`, so the person can be invited again, R-AUTH-08); the matching `invites.email` is rewritten to the same tombstone and the invite set `revoked`, so the real email no longer remains in the live data (R-DB-13), and the member's posts, comments, photos and chat messages are either kept
   under that name or deleted, as the member chose in the request. Authorship rows keep their foreign keys (R-DB-04).
+- **R-PROF-11a** **Deletion on the person's behalf.** Only after a restore from a backup older than a deletion the old
+  site completed (R-BAK-11): an admin suspends the account, then completes the deletion from `/admin` without an
+  in-app request (a suspended account cannot reach `/profile`, INV-1), choosing keep or delete content as R-PROF-11
+  allows. The result is exactly that of a completed request, by the same batch: tombstone `auth_email` and
+  `invites.email`, the invite `revoked`, contacts and the avatar gone, *Former member*, the content kept or deleted,
+  push subscriptions, notification prefs and thread followers deleted (R-NTF-08). It is audited as
+  `deletion.completed_on_behalf`, without content or email. It applies only to a `suspended` account with no standing
+  request (a standing request is completed as the member chose it) and not yet completed; anything else, a repeat
+  included, is refused with `409 conflict`, and a non-admin gets `403`.
 - **R-PROF-12** `/profile` and `docs/PRIVACY.md` state plainly that admin backups (§13) contain contact data, are kept
   encrypted for the documented retention period (R-BAK-11), and that a deletion removes data from the live site at
   once and from backups as they age out.
@@ -78,3 +87,4 @@
 | AC-PROF-06 | A completed deletion leaves no contact data, renders *Former member*, and keeps or deletes content as requested | R-PROF-11 | integration |
 | AC-PROF-07 | Directory paging and search work over 50 synthetic members with accents | R-PROF-08 | integration + e2e |
 | AC-PROF-08 | A suspended owner's `/members/[id]` and author links show only the display name; a pending deletion request hides contacts at once; after completion `auth_email` and the matching `invites.email` are the tombstone (invite `revoked`) and the same email can be invited again | R-PROF-13, 11 | integration |
+| AC-PROF-09 | An admin's on-behalf deletion of a suspended account with no request leaves exactly what a completed request leaves (tombstones, revoked invite, no contacts or notification rows, *Former member*, content kept or deleted as chosen) and audits `deletion.completed_on_behalf`; a non-admin, an active member, a standing request and a completed deletion are refused and change nothing | R-PROF-11a, 11 | integration |

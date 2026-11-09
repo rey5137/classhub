@@ -22,7 +22,7 @@
 | `/profile` | My profile | names, avatar, contact fields, per-field visibility, my data export, deletion request |
 | `/install` | Install the app | the install guide for the viewer's device (R-NAV-10); linked from Home's install card and from `/profile` |
 | `/notifications` | Notifications | this device's push on/off, kinds, mute, own devices (R-NTF-10, 11); linked from `/profile` and the member menu |
-| `/admin` | Administration | invites, suspension, info pages, pinned posts, site settings and theme, usage, backup status |
+| `/admin` | Administration | invites, suspension, deletion (R-PROF-11, 11a), info pages, pinned posts, site settings and theme, usage, backup status |
 | `/locked` | Setup locked | shown to everyone while `site_settings.setup_state` is not `unlocked` (R-AUTH-12); no data |
 | `/privacy` | Privacy | public Vietnamese summary of docs/PRIVACY.md, outside Access (R-AUTH-32); no member data |
 | `/denied` | No access | uniform screen for a valid Google account with no active membership (R-AUTH-11) |

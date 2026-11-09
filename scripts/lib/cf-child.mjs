@@ -92,3 +92,25 @@ export function apiGet(run, path) {
   const lookup = apiLookup(run, path);
   return lookup.found ? lookup.result : null;
 }
+
+/**
+ * AC-MEM-08, INV-3: why a bucket is not reachable only through the Worker; empty when it is.
+ * Fails closed: an answer without the expected fields counts as unreadable.
+ * @param {CfRunner} run @param {string} bucket @returns {string[]}
+ */
+export function bucketExposures(run, bucket) {
+  const managed = /** @type {{ enabled?: boolean } | null} */ (
+    bucket ? apiGet(run, `/r2/buckets/${bucket}/domains/managed`) : null
+  );
+  const custom = /** @type {{ domains?: unknown[] } | null} */ (
+    bucket ? apiGet(run, `/r2/buckets/${bucket}/domains/custom`) : null
+  );
+  return /** @type {string[]} */ (
+    [
+      typeof managed?.enabled !== 'boolean' && 'r2.dev status unreadable',
+      managed?.enabled === true && 'public r2.dev URL enabled',
+      !Array.isArray(custom?.domains) && 'custom domains unreadable',
+      Array.isArray(custom?.domains) && custom.domains.length > 0 && 'a custom domain is connected',
+    ].filter(Boolean)
+  );
+}

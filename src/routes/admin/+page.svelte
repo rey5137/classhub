@@ -4,6 +4,7 @@
   import Banner from '$lib/components/Banner.svelte';
   import Button from '$lib/components/Button.svelte';
   import Card from '$lib/components/Card.svelte';
+  import Dialog from '$lib/components/Dialog.svelte';
   import FormField from '$lib/components/FormField.svelte';
   import LoadMore, { createPagedList } from '$lib/components/LoadMore.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
@@ -64,6 +65,14 @@
       sending = null;
     };
   };
+  // R-PROF-11a: the suspended member an admin is about to delete on their behalf.
+  let onBehalf = $state<(typeof data.invites)[number] | null>(null);
+  const closeOnBehalf =
+    () =>
+    async ({ update }: { update: () => Promise<void> }) => {
+      onBehalf = null;
+      await update();
+    };
   // The answer is shown on the row it came from: the banner sits far above a long list.
   const rowResult = (id: string) =>
     form && 'action' in form && form.action === 'inviteEmail' && 'id' in form && form.id === id
@@ -265,6 +274,12 @@
                       >{i18n.t('admin.completeDeletion')}</Button
                     >
                   </form>
+                {:else if invite.userStatus === 'suspended'}
+                  <Button
+                    variant="ghost"
+                    aria-label={labelFor('admin.onBehalf.open', invite)}
+                    onclick={() => (onBehalf = invite)}>{i18n.t('admin.onBehalf.open')}</Button
+                  >
                 {/if}
                 {#if invite.userStatus === 'active'}
                   <form method="POST" action="?/member" use:enhance>
@@ -396,6 +411,27 @@
 
   <InfoPagesCard pages={data.infoPages} nextCursor={data.infoPagesNextCursor} form={form ?? null} />
 </div>
+
+<Dialog
+  open={onBehalf !== null}
+  title={i18n.t('admin.onBehalf.title', {
+    name: onBehalf?.displayName ?? onBehalf?.email ?? '',
+  })}
+  onclose={() => (onBehalf = null)}
+>
+  <p class="hint">{i18n.t('admin.onBehalf.hint')}</p>
+  {#if onBehalf?.userId}
+    <form method="POST" action="?/member" class="dialog-actions" use:enhance={closeOnBehalf}>
+      <input type="hidden" name="userId" value={onBehalf.userId} />
+      <input type="hidden" name="deletion" value="on_behalf" />
+      <Button onclick={() => (onBehalf = null)}>{i18n.t('admin.onBehalf.cancel')}</Button>
+      <Button type="submit" name="keepContent" value="true">{i18n.t('admin.onBehalf.keep')}</Button>
+      <Button type="submit" variant="primary" name="keepContent" value="false"
+        >{i18n.t('admin.onBehalf.remove')}</Button
+      >
+    </form>
+  {/if}
+</Dialog>
 
 <style>
   .stack {
@@ -546,6 +582,14 @@
     display: flex;
     flex-wrap: wrap;
     gap: calc(var(--space-unit) * 1);
+  }
+
+  .dialog-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: calc(var(--space-unit) * 2);
+    margin-top: calc(var(--space-unit) * 4);
   }
 
   .usage {

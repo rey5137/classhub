@@ -83,9 +83,9 @@ export function isRestoreTargetRead(sql) {
 
 /**
  * R-CHAT-15: `restore --chat` inserts one archived message, only when it is missing and its
- * sender exists without a completed deletion (R-PROF-11: the tombstone email), never an update
- * or delete. The one statement `cf.mjs d1-query` takes that names `users`. Params: id, room_id,
+ * sender is active without a completed deletion (R-PROF-11: the tombstone email; a suspension,
+ * R-PROF-11a's re-applied one included, skips it too), never an update or delete. The one statement `cf.mjs d1-query` takes that names `users`. Params: id, room_id,
  * sender_id, client_nonce, body, created_at, edited_at, sender_id, tombstone email.
  */
 export const RESTORE_CHAT_INSERT =
-  'INSERT INTO chat_messages (id, room_id, sender_id, client_nonce, body, created_at, edited_at) SELECT ?, ?, ?, ?, ?, ?, ? FROM users WHERE id = ? AND auth_email <> ? ON CONFLICT DO NOTHING RETURNING id';
+  "INSERT INTO chat_messages (id, room_id, sender_id, client_nonce, body, created_at, edited_at) SELECT ?, ?, ?, ?, ?, ?, ? FROM users WHERE id = ? AND status = 'active' AND auth_email <> ? ON CONFLICT DO NOTHING RETURNING id";

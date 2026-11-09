@@ -141,7 +141,7 @@ export async function runRestoreChat(deps) {
       else skipped += 1;
     }
     out(
-      `restore --chat: ${fileName}: ${inserted} messages added, ${present} already there, ${skipped} skipped (a deleted or unknown member, R-PROF-11).`,
+      `restore --chat: ${fileName}: ${inserted} messages added, ${present} already there, ${skipped} skipped (a deleted, suspended or unknown member, R-PROF-11).`,
     );
     return 0;
   } catch (error) {

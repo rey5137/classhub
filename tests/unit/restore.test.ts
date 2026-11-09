@@ -183,6 +183,7 @@ function newTarget(
     uuid?: string;
     racing?: boolean;
     afterImport?: string;
+    exposure?: { managed?: unknown; custom?: unknown; apiFails?: boolean };
     put?: (key: string, body: Buffer) => Buffer | null;
   } = {},
 ) {
@@ -197,6 +198,15 @@ function newTarget(
   const run = vi.fn((args: string[]): CfResult => {
     calls.push(args);
     const ok = (stdout: string) => ({ status: 0, stdout, stderr: '' });
+    if (args[0] === 'api') {
+      // The reads preflight makes of a bucket's public access (cf.mjs allows only these).
+      const exposure = options.exposure;
+      if (exposure?.apiFails) return { status: 1, stdout: '', stderr: 'HTTP 500' };
+      if (args[1] === '/r2/buckets/restored-media/domains/managed')
+        return ok(JSON.stringify(exposure?.managed ?? { enabled: false }));
+      if (args[1] === '/r2/buckets/restored-media/domains/custom')
+        return ok(JSON.stringify(exposure?.custom ?? { domains: [] }));
+    }
     if (args.join(' ') === 'd1 info restored --json')
       return ok(JSON.stringify({ uuid: options.uuid ?? newDatabaseId, name: 'restored' }));
     if (args.slice(0, 4).join(' ') === 'd1 execute restored --remote' && args[4] === '--file') {
@@ -537,6 +547,21 @@ describe('npm run restore --target new', () => {
     ['a database whose id is the live binding', { uuid: liveDatabaseId }, 'is the live database'],
     ['a non-empty database', { tables: true }, 'is not empty (1 tables)'],
     ['a non-empty bucket', { object: true }, 'bucket restored-media is not empty'],
+    [
+      'a bucket with a public r2.dev URL',
+      { exposure: { managed: { enabled: true } } },
+      'public r2.dev URL enabled',
+    ],
+    [
+      'a bucket with a custom domain',
+      { exposure: { custom: { domains: [{ domain: 'media.example.test' }] } } },
+      'a custom domain is connected',
+    ],
+    [
+      'a bucket whose public access cannot be read',
+      { exposure: { apiFails: true } },
+      'r2.dev status unreadable',
+    ],
   ])('AC-BAK-04 refuses %s and writes nothing', async (_case, setup, message) => {
     const fake = newTarget(setup);
     const { promise, errors } = restoreNew(fake);

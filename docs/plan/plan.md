@@ -374,7 +374,7 @@ successful independent restore. Deploying is not enough.
   then run `preflight` and `unlock` there.
 
 #### Slice 5c — release-readiness of data paths
-- **Covers:** AC-BUD-02, 04, remaining AC-PROF-05/06 production checks.
+- **Covers:** AC-BUD-02, 04, remaining AC-PROF-05/06 production checks; AC-PROF-09 (admin completes a deletion for a suspended account after a restore, added at the Phase 5 gate).
 - Row-read budget test per route, D1-failure degradation, deletion-request handling across backups and archives
   documented in `docs/PRIVACY.md`.
 

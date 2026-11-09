@@ -10,8 +10,11 @@ import {
   comments,
   invites,
   media,
+  notificationPrefs,
   posts,
   profileContacts,
+  pushSubscriptions,
+  threadFollowers,
   users,
 } from '../../src/lib/server/db/schema';
 import type { Database } from '../../src/lib/server/ports/database';
@@ -609,6 +612,194 @@ describe('deletion (R-PROF-11, R-PROF-13)', () => {
       });
     }
     expect((await send(PEOPLE.active.email, 'GET', '/api/v1/members/no-such-id')).status).toBe(404);
+  });
+});
+
+describe('deletion on behalf after a restore (R-PROF-11a)', () => {
+  const patch = (as: string, id: string, body: unknown) =>
+    send(as, 'PATCH', `/api/v1/admin/members/${id}`, body);
+  const onBehalf = (keepContent: boolean) => ({ deletion: 'on_behalf', keepContent });
+
+  /** A suspended member with content, contacts and notification rows, and no request. */
+  async function suspendedWithEverything(name: string, tag: string) {
+    const owner = await addMember(database, name, {
+      status: 'suspended',
+      contacts: contactsOf(tag),
+    });
+    const now = Date.now();
+    const postId = `${owner.id.slice(0, -4)}0b01`;
+    await database.db.insert(posts).values({
+      id: postId,
+      authorId: owner.id,
+      title: 'Reunion',
+      bodyMd: 'see you',
+      createdAt: now,
+    });
+    await database.db.insert(chatMessages).values({
+      id: `${owner.id.slice(0, -4)}0b03`,
+      roomId: 'main',
+      senderId: owner.id,
+      clientNonce: `nb-${owner.id}`,
+      body: 'hello all',
+      createdAt: now,
+    });
+    await addMedia(database, owner.id);
+    await database.db.insert(pushSubscriptions).values({
+      id: `${owner.id.slice(0, -4)}0b04`,
+      userId: owner.id,
+      endpoint: `https://fcm.googleapis.com/fcm/send/${tag}`,
+      p256dh: 'synthetic-p256dh',
+      auth: 'synthetic-auth',
+      deviceLabel: `${tag} phone`,
+    });
+    await database.db.insert(notificationPrefs).values({ userId: owner.id });
+    await database.db.insert(threadFollowers).values({ postId, userId: owner.id });
+    return { ...owner, postId };
+  }
+
+  async function auditsOf(id: string) {
+    const rows = await database.db.select().from(auditEvents).where(eq(auditEvents.entityId, id));
+    return rows.map((row) => row.action).sort();
+  }
+
+  it.each([
+    [false, { title: '', bodyMd: '', deletedAt: expect.any(Number) }, true],
+    [true, { title: 'Reunion', bodyMd: 'see you', deletedAt: null }, false],
+  ])(
+    'AC-PROF-09 completes a suspended account’s deletion with keepContent=%s, as a completed request does',
+    async (keepContent, postAfter, photoDeleted) => {
+      const owner = await suspendedWithEverything(
+        `Restored Leaver ${keepContent}`,
+        `rl${keepContent}`,
+      );
+      const done = await patch(PEOPLE.admin.email, owner.id, onBehalf(keepContent));
+      expect([done.status, await json(done)]).toEqual([200, { ok: true, changed: true }]);
+      expect(hub.disconnected).toContain(owner.id);
+
+      const tombstone = `deleted+${owner.id}@invalid`;
+      const [user] = await database.db.select().from(users).where(eq(users.id, owner.id));
+      expect(user).toMatchObject({
+        status: 'suspended',
+        authEmail: tombstone,
+        displayName: 'Cựu thành viên',
+        preferredName: null,
+        avatarMediaId: null,
+        accessSub: null,
+        deletionRequestedAt: null,
+      });
+      expect(
+        await database.db.select().from(invites).where(eq(invites.email, owner.email)),
+      ).toEqual([]);
+      const [invite] = await database.db.select().from(invites).where(eq(invites.email, tombstone));
+      expect(invite?.status).toBe('revoked');
+      for (const table of [profileContacts, pushSubscriptions, notificationPrefs, threadFollowers])
+        expect(await database.db.select().from(table).where(eq(table.userId, owner.id))).toEqual(
+          [],
+        );
+      const [post] = await database.db.select().from(posts).where(eq(posts.id, owner.postId));
+      expect(post).toMatchObject(postAfter);
+      const [message] = await database.db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.senderId, owner.id));
+      expect(message).toMatchObject(
+        keepContent
+          ? { body: 'hello all', deletedAt: null }
+          : { body: '', deletedAt: expect.any(Number) },
+      );
+      expect(await mediaDeleted(database, owner.id)).toEqual({
+        photo: photoDeleted,
+        avatar: true,
+        site: false,
+      });
+      // Audited as its own action, with no content or email (R-DB-13).
+      const [audit] = await database.db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, owner.id));
+      expect(audit).toMatchObject({
+        actorId: PEOPLE.admin.id,
+        action: 'deletion.completed_on_behalf',
+        entityType: 'user',
+      });
+      expect(JSON.stringify(audit)).not.toContain(owner.email);
+      const seen = await json(
+        await send(PEOPLE.active.email, 'GET', `/api/v1/members/${owner.id}`),
+      );
+      expect(seen).toEqual({ id: owner.id, displayName: 'Cựu thành viên' });
+    },
+  );
+
+  it('AC-PROF-09 the /admin form deletes on behalf and names the email to remove from Access', async () => {
+    const owner = await addMember(database, 'Form Leaver', { status: 'suspended' });
+    const submit = async (keepContent: string) => {
+      const response = await harness.send('/admin?/member', {
+        method: 'POST',
+        headers: {
+          ...(await harness.as(PEOPLE.admin.email)),
+          origin: ORIGIN,
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          userId: owner.id,
+          deletion: 'on_behalf',
+          keepContent,
+        }).toString(),
+      });
+      return { status: response.status, body: await json(response) };
+    };
+    // A choice that is neither keep nor delete is refused before anything runs.
+    expect((await submit('maybe')).status).toBe(400);
+    expect(await auditsOf(owner.id)).toEqual([]);
+    expect(await submit('true')).toEqual({
+      status: 200,
+      body: { action: 'member', done: 'deleted', email: owner.email },
+    });
+    expect(await auditsOf(owner.id)).toEqual(['deletion.completed_on_behalf']);
+  });
+
+  it('AC-PROF-09 refuses a non-admin, an active member, a standing request and a completed deletion, changing nothing', async () => {
+    const suspended = await addMember(database, 'Still Suspended', {
+      status: 'suspended',
+      contacts: contactsOf('stillsus'),
+    });
+    const byMember = await patch(PEOPLE.active.email, suspended.id, onBehalf(false));
+    expect([byMember.status, await errorCode(byMember)]).toEqual([403, 'forbidden']);
+    const [untouched] = await database.db.select().from(users).where(eq(users.id, suspended.id));
+    expect(untouched).toMatchObject({ authEmail: suspended.email, displayName: 'Still Suspended' });
+    expect(await auditsOf(suspended.id)).toEqual([]);
+    const contactsLeft = async (id: string) =>
+      (await database.db.select().from(profileContacts).where(eq(profileContacts.userId, id)))
+        .length;
+    expect(await contactsLeft(suspended.id)).toBe(1);
+
+    const active = await addMember(database, 'Still Active', { contacts: contactsOf('stillact') });
+    const activeTry = await patch(PEOPLE.admin.email, active.id, onBehalf(false));
+    expect([activeTry.status, await errorCode(activeTry)]).toEqual([409, 'conflict']);
+    expect(
+      await database.db.select().from(profileContacts).where(eq(profileContacts.userId, active.id)),
+    ).toHaveLength(1);
+    expect(await auditsOf(active.id)).toEqual([]);
+
+    // A suspended member's own request is completed as they chose it, never overridden.
+    const asked = await addMember(database, 'Asked First', { contacts: contactsOf('askedfirst') });
+    await send(asked.email, 'POST', '/api/v1/me/deletion-request', { keepContent: true });
+    await patch(PEOPLE.admin.email, asked.id, { status: 'suspended' });
+    const standing = await patch(PEOPLE.admin.email, asked.id, onBehalf(false));
+    expect([standing.status, await errorCode(standing)]).toEqual([409, 'conflict']);
+    const [stillAsked] = await database.db.select().from(users).where(eq(users.id, asked.id));
+    expect(stillAsked).toMatchObject({ status: 'suspended', authEmail: asked.email });
+    expect(await contactsLeft(asked.id)).toBe(1);
+    expect(await auditsOf(asked.id)).not.toContain('deletion.completed_on_behalf');
+
+    // Not idempotent by design: a repeat is refused and audits nothing more.
+    expect((await patch(PEOPLE.admin.email, suspended.id, onBehalf(true))).status).toBe(200);
+    const repeat = await patch(PEOPLE.admin.email, suspended.id, onBehalf(true));
+    expect([repeat.status, await errorCode(repeat)]).toEqual([409, 'conflict']);
+    expect(await auditsOf(suspended.id)).toEqual(['deletion.completed_on_behalf']);
+    // Nor does the in-app completion path apply to it afterwards.
+    const viaRequest = await patch(PEOPLE.admin.email, suspended.id, { deletion: 'complete' });
+    expect(await json(viaRequest)).toEqual({ ok: true, changed: false });
   });
 });
 

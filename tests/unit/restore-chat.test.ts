@@ -181,7 +181,7 @@ describe('npm run restore -- --chat', () => {
   });
 
   it.each([
-    ['AC-PROF-05', false],
+    ['AC-PROF-06', false],
     ['AC-PROF-06', true],
   ])(
     '%s restore --chat from an archive made before a completed deletion (keepContent=%s) skips that member',
@@ -218,6 +218,27 @@ describe('npm run restore -- --chat', () => {
       expect(await result).toBe(0);
       expect(lines.join('\n')).toContain('3 messages added, 0 already there, 3 skipped');
       expect((await messages()).every((row) => row.senderId === 'u1')).toBe(true);
+    },
+  );
+
+  it.each(['suspended', 'invited'] as const)(
+    'AC-CHAT-16 skips a sender who is %s with the real email, and adds them once active again',
+    async (status) => {
+      // R-CHAT-15: no tombstone, so only the status keeps the messages out (R-PROF-11a's
+      // suspension before an on-behalf deletion, or someone not yet signed in after a restore).
+      await database.db.update(users).set({ status }).where(eq(users.id, 'u2'));
+      await database.db.delete(chatMessages).where(eq(chatMessages.roomId, 'main'));
+      const first = restore();
+      expect(await first.result).toBe(0);
+      expect(first.lines.join('\n')).toContain('3 messages added, 0 already there, 3 skipped');
+      expect(first.lines.join('\n')).toContain('a deleted, suspended or unknown member');
+      expect((await messages()).every((row) => row.senderId === 'u1')).toBe(true);
+
+      await database.db.update(users).set({ status: 'active' }).where(eq(users.id, 'u2'));
+      const again = restore();
+      expect(await again.result).toBe(0);
+      expect(again.lines.join('\n')).toContain('3 messages added, 3 already there, 0 skipped');
+      expect(await messages()).toEqual(original);
     },
   );
 

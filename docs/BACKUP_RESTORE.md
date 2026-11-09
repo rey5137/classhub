@@ -81,7 +81,9 @@ What it does, in order:
    every table, index and trigger definition against this checkout, that every foreign key in the dump resolves,
    and works out the row counts the new database must hold. Nothing is written unless all of that passes.
 2. Refuses the live database (by binding, name or id in `wrangler.jsonc`) and the live bucket, a database that holds
-   any table, and a bucket that holds any object.
+   any table, a bucket that holds any object, and a bucket with the r2.dev URL on or a custom domain attached (or
+   whose public access cannot be read): no photo goes into a publicly addressable bucket (INV-3). Create the
+   bucket private, as `npm run setup` does.
 3. Imports `database.sql`, opened by a guard table that a second import into the same database would fail on, with
    three statements added at its end (then the guard is dropped): empty `push_subscriptions` (they belong to the
    old site's push key and devices), clear `users.access_sub` (the new Access application issues new subjects),
@@ -98,18 +100,26 @@ Delete both (or make new ones) and run the restore again.
 ### After the restore
 
 1. Bind the new database and bucket in `wrangler.jsonc` (`DB` and `MEDIA`) and `npm run deploy`.
-2. Configure Access for the new hostname (`docs/GOOGLE_ACCESS.md`).
+2. Configure Access for the new hostname (`docs/GOOGLE_ACCESS.md`) so it admits only the admins for now: its Allow
+   policy has one **Include → Emails** rule listing the admins' addresses, and no External Evaluation rule yet.
 3. `npm run preflight`, then `npm run unlock`. The restored site serves nobody until then.
-4. Sign in as an admin and as a member and check the board, the gallery's photos, the theme and the chat history
-   against the old site.
-5. Members sign in as before: each account re-links to the new Access subject by its verified email on the first
+4. Re-apply deletions completed since the backup was taken, before any non-admin signs in: the restored data still
+   holds those members' contact details and content, and a member re-links by email on their first login, which
+   would show their contacts to whoever signs in next. Sign in as an admin. If the restored data still holds the
+   deletion request, complete it again in `/admin`. If the backup was made before the request, no request exists
+   to complete (only the member can file one, and a suspended account cannot sign in): suspend the account at
+   once, then choose *Delete on their behalf* on that row in `/admin`, with the keep or delete content choice the
+   person made on the old site (R-PROF-11a). The result is the same as completing their request, and
+   `audit_events` records it as `deletion.completed_on_behalf`. Use it only for a deletion the old site completed.
+5. Check as the admin the board, the gallery's photos, the theme and the chat history against the old site. Then
+   let the members in through Access: add the External Evaluation rule for the new site (`docs/DEPLOY_CLOUDFLARE.md`,
+   `npm run access-eval -- key`, deploy, the Bypass paths, then `npm run access-eval -- rule https://<new-site>`), or
+   add the members' emails to the policy's Emails rule in the dashboard (`npm run invite -- add` refuses an email that
+   is already a member). Then sign in as a member to check the same.
+6. Members sign in as before: each account re-links to the new Access subject by its verified email on the first
    login (R-AUTH-25), with no audit event, since the subject was cleared, not changed.
-6. Push notifications start off: the restored site holds no subscription. Members who used them turn them on again
+7. Push notifications start off: the restored site holds no subscription. Members who used them turn them on again
    on the notifications screen (R-NTF-11).
-7. Re-apply deletions completed since the backup was taken: the restored data still holds those members' contact
-   details and content. If the restored data still holds the deletion request, complete it again in `/admin`. If the
-   backup was made before the request, no request exists to complete (only the member can file one): suspend the
-   account at once and ask the person to request deletion again. Do this before cutting over.
 8. Cut over the domain only after the restored site is tested, then revoke the old site's tokens.
 
 ## Disaster recovery rehearsal into a second account
@@ -157,11 +167,15 @@ npm run restore -- --chat <dir>/chat/<from>_<to>.ndjson.age --identity classhub-
 It refuses unless a verified backup newer than the last deploy exists (the same check as `db:migrate:remote`) and
 while another backup, `export-chat`, `prune-chat` or `restore --chat` holds the backup lock. The file must be one
 `export-chat` recorded, under its own name, and must match its recorded hash and count. It only inserts messages
-that are missing (`ON CONFLICT DO NOTHING`): it never updates or deletes one, and it skips the messages of members
-whose deletion request completed (R-PROF-11). A message deleted after its archive was exported is never brought
+that are missing (`ON CONFLICT DO NOTHING`): it never updates or deletes one, and it inserts only messages whose
+sender is active. It skips the messages of members whose deletion completed (R-PROF-11, R-PROF-11a), of suspended
+members, and of anyone who has not signed in again since a restore (their account is still `invited`); it counts
+them as "deleted, suspended or unknown member". Run it again once such a member is reinstated or has signed in: it
+adds their messages then. A message deleted after its archive was exported is never brought
 back: `prune-chat` leaves it in place as an empty tombstone, so its id is already there (R-CHAT-14). It prints counts
 only. Running it twice adds nothing the second time.
 
 An archive made before a member's deletion was completed still holds that member's messages until the file is deleted
-(no retention period is set for chat archives). Restoring it skips those messages only while the target database still records the completed deletion; after a
-restore from an older backup, re-apply the deletions first (step 7 of "After the restore").
+(no retention period is set for chat archives). Restoring it skips those messages while the target database records
+the completed deletion or the member is suspended; after a restore from an older backup, re-apply the deletions
+first (step 4 of "After the restore"): suspend, then delete on the person's behalf.

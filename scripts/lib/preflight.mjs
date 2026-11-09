@@ -5,7 +5,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { backupGate, DESTRUCTIVE_MIGRATION } from './backup-gate.mjs';
-import { apiGet, apiLookup, d1Remote, reason } from './cf-child.mjs';
+import { apiGet, apiLookup, bucketExposures, d1Remote, reason } from './cf-child.mjs';
 import { SEAT_LIMIT, seatsUsedSql } from './invite.mjs';
 import { compareMigrations, localMigrations } from './migrations.mjs';
 import {
@@ -302,19 +302,7 @@ export async function runPreflight(deps) {
 
   // AC-MEM-08: the bucket is reachable only through the Worker.
   const bucket = String(media?.bucket_name ?? '');
-  const managed = /** @type {{ enabled?: boolean } | null} */ (
-    bucket ? apiGet(run, `/r2/buckets/${bucket}/domains/managed`) : null
-  );
-  const custom = /** @type {{ domains?: unknown[] } | null} */ (
-    bucket ? apiGet(run, `/r2/buckets/${bucket}/domains/custom`) : null
-  );
-  // Fail closed: an answer without the expected fields counts as unreadable.
-  const exposures = [
-    typeof managed?.enabled !== 'boolean' && 'r2.dev status unreadable',
-    managed?.enabled === true && 'public r2.dev URL enabled',
-    !Array.isArray(custom?.domains) && 'custom domains unreadable',
-    Array.isArray(custom?.domains) && custom.domains.length > 0 && 'a custom domain is connected',
-  ].filter(Boolean);
+  const exposures = bucketExposures(run, bucket);
   checks.push(
     exposures.length === 0
       ? pass('bucket', `${bucket} has no r2.dev URL and no custom domain.`)

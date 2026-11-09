@@ -351,6 +351,13 @@ export const vi = {
     'Đã hoàn tất xoá. Hãy gỡ cả {email} khỏi chính sách Access: npm run invite -- remove {email}',
   'admin.deletionRequested': 'Đã yêu cầu xoá',
   'admin.completeDeletion': 'Hoàn tất xoá',
+  'admin.onBehalf.open': 'Xoá thay cho họ',
+  'admin.onBehalf.title': 'Xoá {name} thay cho họ?',
+  'admin.onBehalf.hint':
+    'Chỉ dùng cho yêu cầu xoá mà người này đã gửi và quản trị đã hoàn tất trên trang cũ, trước khi khôi phục. Liên hệ và hồ sơ bị xoá ngay, tên đổi thành Cựu thành viên, và không thể hoàn tác.',
+  'admin.onBehalf.cancel': 'Huỷ',
+  'admin.onBehalf.keep': 'Xoá, giữ nội dung của họ',
+  'admin.onBehalf.remove': 'Xoá cả nội dung của họ',
   'admin.refusal.seats_full':
     'Đã hết chỗ. Hãy thu hồi một lời mời hoặc tạm khóa một thành viên trước.',
   'admin.refusal.already_member': 'Email này đã là của một thành viên.',

@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, ne, sql, type SQL } from 'drizzle-orm';
-import type { InfoCreate, InfoPatch } from '../../contracts/info';
+import { INFO_PAGES_LIMIT, type InfoCreate, type InfoPatch } from '../../contracts/info';
 import { infoPages } from '../db/schema';
 import { uuidv7 } from '../ids';
 import type { Database } from '../ports/database';
@@ -22,9 +22,6 @@ const order = [
   asc(infoPages.title),
   asc(infoPages.id),
 ];
-
-/** R-DB-07, R-BRD-02: `GET /api/v1/info`, Home's pinned list and the `/admin` editor page 50 at a time. */
-export const INFO_PAGES_LIMIT = 50;
 
 export interface InfoCursor {
   isPinned: boolean;

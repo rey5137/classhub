@@ -143,7 +143,7 @@ export async function adminRevokeInvite(context: MemberServices, member: Member,
   return done(await revokeInvite(context, member, parsed.data.id));
 }
 
-/** R-AUTH-09, R-NAV-06, R-PROF-11: role, suspend, reactivate or complete a deletion. */
+/** R-AUTH-09, R-NAV-06, R-PROF-11, 11a: role, suspend, reactivate or complete a deletion. */
 export async function adminPatchMember(
   context: MemberServices,
   member: Member,
@@ -155,7 +155,11 @@ export async function adminPatchMember(
   if (!parsed.ok) return parsed;
   const change = parsed.data;
   if ('role' in change) return done(await changeRole(context, member, userId, change.role));
-  if ('deletion' in change) return done(await completeDeletion(context, member, userId));
+  if ('deletion' in change) {
+    const onBehalf =
+      change.deletion === 'on_behalf' ? { keepContent: change.keepContent } : undefined;
+    return done(await completeDeletion(context, member, userId, Date.now(), onBehalf));
+  }
   return done(
     change.status === 'suspended'
       ? await suspendMember(context, member, userId)

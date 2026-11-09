@@ -350,6 +350,13 @@ export const en: Record<keyof typeof vi, string> = {
     'Deletion complete. Also remove {email} from the Access policy: npm run invite -- remove {email}',
   'admin.deletionRequested': 'Asked to be deleted',
   'admin.completeDeletion': 'Complete deletion',
+  'admin.onBehalf.open': 'Delete on their behalf',
+  'admin.onBehalf.title': 'Delete {name} on their behalf?',
+  'admin.onBehalf.hint':
+    'Only for a deletion this person asked for and an admin completed on the old site, before a restore. Their contacts and profile go now, they become Former member, and this cannot be undone.',
+  'admin.onBehalf.cancel': 'Cancel',
+  'admin.onBehalf.keep': 'Delete, keep their content',
+  'admin.onBehalf.remove': 'Delete with their content',
   'admin.refusal.seats_full': 'All seats are taken. Revoke an invite or suspend a member first.',
   'admin.refusal.already_member': 'This email already belongs to a member.',
   'admin.refusal.invite_accepted': 'This classmate has joined; suspend them instead.',
